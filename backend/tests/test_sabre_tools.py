@@ -97,15 +97,16 @@ def test_repair_trip_runs_one_repair_per_item_all_ok(bq):
     # Every tool's payload is readable by the agent (confirmation ref present).
     assert all(e["result"]["confirmation_ref"] for e in events)
 
-    # Each item passed through `repairing` and ended `fixed` in the DML log.
+    # Single writer (Phase 9): each item's status DML is exactly the cascade
+    # unit's `repairing` -> `fixed` walk — no extra stamp from the tools.
     status_writes = {}
     for call in bq.dml.call_args_list:
         params = {p.name: p.value for p in call.args[1]}
         if "status" in params:
             status_writes.setdefault(params["item_id"], []).append(params["status"])
+    assert len(status_writes) == 5
     for item_id, statuses in status_writes.items():
-        assert statuses[0] == "repairing", item_id
-        assert statuses[-1] == "fixed", item_id
+        assert statuses == ["repairing", "fixed"], item_id
 
 
 def test_repair_trip_404_when_trip_has_no_items(bq):

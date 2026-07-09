@@ -6,9 +6,13 @@ through the Sabre client layer (mock by default, SABRE_MODE=real on event
 day); ground/dining/experience are simple canned mocks — no real provider
 exists for them this phase.
 
-Every tool writes through the existing repositories: a `bookings` row
-carrying the provider payload as raw_response, and the `itinerary_items`
-status transition (`booked` for the booking tool, `fixed` for repair tools).
+Every tool writes a `bookings` row carrying the provider payload as
+raw_response through the existing repositories. Itinerary status transitions
+are owned by a single writer (Phase 9 cleanup): the cascade unit
+(`concurrency_core._repair_one`) walks `repairing` -> `fixed` around each
+repair tool — the tools themselves no longer stamp `fixed`. The one
+exception is `_search_and_book_flight`, an initial booking (not a repair)
+with no cascade unit around it, which still flips its item to `booked`.
 Blocking BigQuery calls run via asyncio.to_thread — these tools execute on
 the event loop that is also holding the live conversation. A failed or 0-row
 write raises, so the completion event reports an error instead of a false ok.
@@ -35,16 +39,16 @@ def _canned_ref(kind: str, item_id: str) -> str:
     return f"{kind[:3].upper()}-{digest[:8]}"
 
 
-async def _write_booking_and_status(
+async def _write_booking(
     trip_id: str,
     item_id: str,
     sabre_ref: str,
     raw_response: dict,
-    status: str,
 ) -> str:
     """The write path every tool shares: a bookings row with the provider
-    payload, then the item's status flip. Raises on any failed or 0-row
-    write so the repair never reports ok when nothing landed."""
+    payload. Raises on a failed write so the repair never reports ok when
+    nothing landed. Status transitions are NOT written here — the cascade
+    unit owns them (single-writer rule)."""
     booking = Booking(
         item_id=item_id,
         trip_id=trip_id,
@@ -55,7 +59,13 @@ async def _write_booking_and_status(
     success, _, error = await asyncio.to_thread(bookings.create_booking, booking)
     if not success:
         raise RuntimeError(f"booking insert failed for item {item_id}: {error}")
+    return booking.booking_id
 
+
+async def _flip_status(item_id: str, status: str) -> None:
+    """Status write for the initial booking tool only — repairs never call
+    this; their transitions belong to the cascade unit. Raises on a failed
+    or 0-row write."""
     write_ok, affected_rows, write_error = await asyncio.to_thread(
         itinerary_items.update_status, item_id, status
     )
@@ -67,7 +77,6 @@ async def _write_booking_and_status(
         raise RuntimeError(
             f"status write for item {item_id} -> {status} matched no rows"
         )
-    return booking.booking_id
 
 
 async def _latest_sabre_ref(trip_id: str, item_id: str) -> str:
@@ -148,9 +157,8 @@ async def _search_and_book_flight(
         )
     )
 
-    await _write_booking_and_status(
-        trip_id, item_id, booked.confirmationId, booked.model_dump(), "booked"
-    )
+    await _write_booking(trip_id, item_id, booked.confirmationId, booked.model_dump())
+    await _flip_status(item_id, "booked")
     flight = booked.booking.flights[0]
     return {
         "confirmation_ref": booked.confirmationId,
@@ -173,7 +181,7 @@ async def _rebook_flight(
 ) -> dict:
     """Rebook a broken flight: cancel the old Sabre booking and book a
     replacement (cancel + create — Sabre has no single rebook call). Writes
-    the new booking and flips the itinerary item to `fixed`."""
+    the new booking; the cascade unit owns the item's status flip."""
     old_ref = await _latest_sabre_ref(trip_id, item_id)
 
     search = await sabre_client.flight_search(
@@ -234,9 +242,8 @@ async def _rebook_flight(
         )
     )
 
-    await _write_booking_and_status(
-        trip_id, item_id, rebooked.created.confirmationId,
-        rebooked.model_dump(), "fixed",
+    await _write_booking(
+        trip_id, item_id, rebooked.created.confirmationId, rebooked.model_dump()
     )
     flight = rebooked.created.booking.flights[0]
     return {
@@ -248,7 +255,6 @@ async def _rebook_flight(
         "departure_time": flight.departureTime,
         "price": fare.totalFare.totalPrice,
         "currency": fare.totalFare.currency,
-        "item_status": "fixed",
     }
 
 
@@ -259,8 +265,8 @@ async def _shift_hotel_dates(
     new_check_out: str,
 ) -> dict:
     """Move a hotel stay to new check-in/check-out dates via Sabre Modify
-    Booking. Writes the updated booking and flips the itinerary item to
-    `fixed`. Dates are YYYY-MM-DD."""
+    Booking. Writes the updated booking; the cascade unit owns the item's
+    status flip. Dates are YYYY-MM-DD."""
     old_ref = await _latest_sabre_ref(trip_id, item_id)
 
     modified = await sabre_client.modify_booking(
@@ -284,9 +290,7 @@ async def _shift_hotel_dates(
         )
     )
 
-    await _write_booking_and_status(
-        trip_id, item_id, modified.confirmationId, modified.model_dump(), "fixed"
-    )
+    await _write_booking(trip_id, item_id, modified.confirmationId, modified.model_dump())
     hotel = modified.booking.hotels[0]
     return {
         "confirmation_ref": modified.confirmationId,
@@ -295,7 +299,6 @@ async def _shift_hotel_dates(
         "check_out": hotel.checkOutDate,
         "total": hotel.payment.total,
         "currency": hotel.payment.currencyCode,
-        "item_status": "fixed",
     }
 
 
@@ -303,7 +306,7 @@ async def _shift_hotel_dates(
 
 async def _reschedule_ground(trip_id: str, item_id: str, new_pickup_time: str) -> dict:
     """Reschedule a ground transfer to a new pickup time. Canned mock — books
-    the new pickup, flips the itinerary item to `fixed`."""
+    the new pickup; the cascade unit owns the item's status flip."""
     ref = _canned_ref("ground", item_id)
     payload = {
         "provider": "mock-ground",
@@ -311,17 +314,16 @@ async def _reschedule_ground(trip_id: str, item_id: str, new_pickup_time: str) -
         "pickup_time": new_pickup_time,
         "vehicle": "standard sedan",
     }
-    await _write_booking_and_status(trip_id, item_id, ref, payload, "fixed")
+    await _write_booking(trip_id, item_id, ref, payload)
     return {
         "confirmation_ref": ref,
         "pickup_time": new_pickup_time,
-        "item_status": "fixed",
     }
 
 
 async def _move_dining(trip_id: str, item_id: str, new_time: str) -> dict:
     """Move a dining reservation to a new time. Canned mock — rebooks the
-    table, flips the itinerary item to `fixed`."""
+    table; the cascade unit owns the item's status flip."""
     ref = _canned_ref("dining", item_id)
     payload = {
         "provider": "mock-dining",
@@ -329,17 +331,16 @@ async def _move_dining(trip_id: str, item_id: str, new_time: str) -> dict:
         "reservation_time": new_time,
         "party_size": 2,
     }
-    await _write_booking_and_status(trip_id, item_id, ref, payload, "fixed")
+    await _write_booking(trip_id, item_id, ref, payload)
     return {
         "confirmation_ref": ref,
         "reservation_time": new_time,
-        "item_status": "fixed",
     }
 
 
 async def _rebook_experience(trip_id: str, item_id: str, new_date: str) -> dict:
     """Rebook an experience/tour for a new date. Canned mock — issues new
-    tickets, flips the itinerary item to `fixed`."""
+    tickets; the cascade unit owns the item's status flip."""
     ref = _canned_ref("experience", item_id)
     payload = {
         "provider": "mock-experience",
@@ -347,11 +348,10 @@ async def _rebook_experience(trip_id: str, item_id: str, new_date: str) -> dict:
         "date": new_date,
         "tickets": 2,
     }
-    await _write_booking_and_status(trip_id, item_id, ref, payload, "fixed")
+    await _write_booking(trip_id, item_id, ref, payload)
     return {
         "confirmation_ref": ref,
         "date": new_date,
-        "item_status": "fixed",
     }
 
 

@@ -12,6 +12,7 @@ import time
 from fastapi.testclient import TestClient
 
 import main
+from api import concierge as concierge_module
 from api import web_call as web_call_module
 
 client = TestClient(main.app)
@@ -27,7 +28,10 @@ class _FakeResult:
 
 
 def _mock_agent(monkeypatch, reply="I'm the backend agent on Cloud Run."):
-    """Fresh Runner fake + clean per-session state; returns the input log."""
+    """Fresh Runner fake + clean per-session state; returns the input log.
+
+    Since Phase 9 the seam delegates to the Concierge, so the Runner and
+    history live in the concierge module."""
     calls = []
 
     class _FakeRunner:
@@ -37,8 +41,8 @@ def _mock_agent(monkeypatch, reply="I'm the backend agent on Cloud Run."):
             return _FakeResult(input, reply)
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(web_call_module, "Runner", _FakeRunner)
-    monkeypatch.setattr(web_call_module, "_HISTORY", {})
+    monkeypatch.setattr(concierge_module, "Runner", _FakeRunner)
+    monkeypatch.setattr(concierge_module, "_HISTORY", {})
     monkeypatch.setattr(web_call_module, "_LOGGED_SESSIONS", set())
     return calls
 
@@ -179,14 +183,14 @@ def test_query_returns_agent_reply(monkeypatch):
 
 def test_query_agent_failure_is_502(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(web_call_module, "_HISTORY", {})
+    monkeypatch.setattr(concierge_module, "_HISTORY", {})
 
     class _BoomRunner:
         @classmethod
         async def run(cls, agent, input, max_turns=None):
             raise RuntimeError("agent down")
 
-    monkeypatch.setattr(web_call_module, "Runner", _BoomRunner)
+    monkeypatch.setattr(concierge_module, "Runner", _BoomRunner)
     _mock_persistence(monkeypatch)
     resp = client.post(
         "/v1/web_call/query", json={"query": "hello", "session_name": "room-1"}
