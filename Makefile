@@ -42,7 +42,7 @@ restart-backend: ## Restart the backend
 	$(COMPOSE) restart backend
 
 eval: ## Run the eval harness (Phase 11); pass flags via ARGS="--dry-run …"
-	$(COMPOSE) exec backend python -m api.eval_harness $(ARGS)
+	$(COMPOSE) exec -e GIT_SHA=$$(git rev-parse --short HEAD) backend python -m api.eval_harness $(ARGS)
 
 # --- Jupyter ---------------------------------------------------------------
 jupyter: ## Build + start only jupyter

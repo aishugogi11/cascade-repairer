@@ -222,12 +222,32 @@ def test_run_concierge_times_text_turns(monkeypatch):
 # ── runner: MOS leg & git sha ──────────────────────────────────────────
 
 
-def test_eval_vb_session_success(monkeypatch):
+def test_eval_vb_session_flat_notebook_shape(monkeypatch):
     payload = {"score": 8, "suggestions": ["tighten the greeting"]}
     monkeypatch.setattr(runner, "run_vb", lambda *a, **k: (True, payload, None))
     mos, summary = runner.eval_vb_session("sess-1", "objective")
     assert mos == pytest.approx(4.2)
     assert "tighten the greeting" in summary
+
+
+def test_eval_vb_session_nested_result_shape(monkeypatch):
+    # The live CLI shape (observed 2026-07-09): scoring nested under `result`.
+    payload = {
+        "session_id": "sess-1",
+        "objective": "objective",
+        "result": {
+            "score": 2,
+            "verdict": "fail",
+            "summary": "ignored the objective",
+            "suggested_prompt_improvements": "prioritize the purpose block",
+        },
+    }
+    monkeypatch.setattr(runner, "run_vb", lambda *a, **k: (True, payload, None))
+    mos, summary = runner.eval_vb_session("sess-1", "objective")
+    assert mos == pytest.approx(1.8)
+    parsed = json.loads(summary)
+    assert parsed["verdict"] == "fail"
+    assert parsed["suggestions"] == "prioritize the purpose block"
 
 
 def test_eval_vb_session_cli_missing(monkeypatch):

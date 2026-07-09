@@ -197,13 +197,19 @@ def eval_vb_session(session_id: str, objective: str) -> Tuple[Optional[float], s
         return None, f"vb eval failed: {error}"
     if not isinstance(payload, dict):
         return None, "vb eval returned no report object"
-    score = payload.get("score")
-    if not isinstance(score, (int, float)):
+    # Live CLI (observed 2026-07-09) nests the scoring under `result`; the L5
+    # notebook shape is flat — accept both, the _sessions_from_payload pattern.
+    report = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+    score = report.get("score")
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
         return None, f"vb eval report has no numeric score: {json.dumps(payload)[:200]}"
     summary = {
         "vb_session": session_id,
         "score": score,
-        "suggestions": payload.get("suggestions"),
+        "verdict": report.get("verdict"),
+        "summary": report.get("summary"),
+        "suggestions": report.get("suggestions")
+        or report.get("suggested_prompt_improvements"),
     }
     return mos_from_vb_score(score), json.dumps(summary)
 
