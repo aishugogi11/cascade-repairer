@@ -15,6 +15,7 @@ from api.sabre_tools import sabre_tools
 from api.outbound_call import outbound_call
 from api.cascade_demo import cascade_demo
 from api.web_call import web_call
+from api.itinerary_ui import itinerary_ui
 
 
 app = FastAPI(
@@ -69,6 +70,12 @@ app.include_router(
     web_call,
     prefix="/v1/web_call",
     tags=["web_call"],
+)
+
+app.include_router(
+    itinerary_ui,
+    prefix="/v1/itinerary",
+    tags=["itinerary"],
 )
 
 if __name__ == "__main__":

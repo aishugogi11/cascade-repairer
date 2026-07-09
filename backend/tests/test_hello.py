@@ -23,3 +23,5 @@ def test_hello_world_body():
 def test_expected_routes_registered():
     paths = main.app.openapi()["paths"]
     assert "/v1/hello/hello_world" in paths
+    assert "/v1/itinerary/status/{trip_id}" in paths
+    assert "/v1/itinerary/trips" in paths

@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
+<title>Live Itinerary — Cascade Repairer</title>
+<style>
+  /* The palette is calibrated for a bright projector — opt out of forced
+     dark-mode inversion. */
+  :root { color-scheme: only light; }
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --ink-faint: #94a3b8;
+    --paper: #f6f8fb;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --brand: #2563eb;
+
+    --booked: #2563eb;   --booked-bg: #eff6ff;
+    --planned: #2563eb;  --planned-bg: #eff6ff;
+    --broken: #dc2626;   --broken-bg: #fef2f2;
+    --repairing: #d97706;--repairing-bg: #fffbeb;
+    --fixed: #16a34a;    --fixed-bg: #f0fdf4;
+    --cancelled: #64748b;--cancelled-bg: #f1f5f9;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+
+  /* ---- header ---- */
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 28px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center;
+    font-size: 20px;
+  }
+  .masthead .name { font-size: 17px; font-weight: 700; }
+  .masthead .sub { font-size: 13px; color: var(--ink-soft); }
+  .head-spacer { flex: 1; }
+  .trip-picker { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .trip-picker label { color: var(--ink-soft); }
+  .trip-picker select {
+    font: inherit; padding: 8px 12px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card); color: var(--ink);
+    max-width: 320px;
+  }
+  .overall-pill {
+    font-size: 14px; font-weight: 600;
+    padding: 8px 16px; border-radius: 999px;
+    background: var(--booked-bg); color: var(--booked);
+    white-space: nowrap;
+  }
+  .overall-pill.is-broken    { background: var(--broken-bg);    color: var(--broken); }
+  .overall-pill.is-repairing { background: var(--repairing-bg); color: var(--repairing); }
+  .overall-pill.is-fixed     { background: var(--fixed-bg);     color: var(--fixed); }
+
+  /* ---- banner ---- */
+  .banner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 28px;
+    font-size: 15px;
+    background: var(--booked-bg); color: #1e40af;
+  }
+  .banner .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: currentColor; flex: none;
+  }
+  .banner.is-broken    { background: var(--broken-bg);    color: #991b1b; }
+  .banner.is-repairing { background: var(--repairing-bg); color: #92400e; }
+  .banner.is-repairing .dot { animation: pulse 1.2s ease-in-out infinite; }
+  .banner.is-fixed     { background: var(--fixed-bg);     color: #166534; }
+  .banner.is-stale     { background: var(--cancelled-bg); color: var(--ink-soft); }
+
+  /* ---- layout ---- */
+  main {
+    display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: 24px;
+    max-width: 1200px; margin: 0 auto; padding: 24px 28px 48px;
+  }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+
+  h2 {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 12px;
+  }
+  .trip-title { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+  .trip-dates { font-size: 14px; color: var(--ink-soft); margin-bottom: 20px; }
+
+  /* ---- itinerary cards ---- */
+  .itinerary { list-style: none; padding: 0; display: grid; gap: 12px; }
+  .item-card {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 6px solid var(--booked);
+    border-radius: 14px;
+    padding: 16px 20px;
+    transition: border-color 0.4s, background 0.4s;
+  }
+  .item-card .icon {
+    width: 46px; height: 46px; border-radius: 12px; flex: none;
+    display: grid; place-items: center; font-size: 22px;
+    background: var(--paper);
+  }
+  .item-card .what { flex: 1; min-width: 0; }
+  .item-card .kind { font-size: 16px; font-weight: 700; }
+  .item-card .where { font-size: 14px; color: var(--ink-soft); margin-top: 2px; }
+  .item-card .when { font-size: 13px; color: var(--ink-faint); margin-top: 2px; }
+  .chip {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
+    padding: 6px 14px; border-radius: 999px; flex: none;
+    text-transform: capitalize;
+  }
+  .item-card[data-status="booked"],
+  .item-card[data-status="planned"] { border-left-color: var(--booked); }
+  .item-card[data-status="booked"] .chip,
+  .item-card[data-status="planned"] .chip { background: var(--booked-bg); color: var(--booked); }
+
+  .item-card[data-status="broken"] { border-left-color: var(--broken); background: var(--broken-bg); }
+  .item-card[data-status="broken"] .chip { background: var(--broken); color: #fff; }
+
+  .item-card[data-status="repairing"] { border-left-color: var(--repairing); background: var(--repairing-bg); }
+  .item-card[data-status="repairing"] .chip {
+    background: var(--repairing); color: #fff;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .item-card[data-status="fixed"] { border-left-color: var(--fixed); }
+  .item-card[data-status="fixed"] .chip { background: var(--fixed); color: #fff; }
+
+  .item-card[data-status="cancelled"] { border-left-color: var(--cancelled); opacity: 0.7; }
+  .item-card[data-status="cancelled"] .chip { background: var(--cancelled-bg); color: var(--cancelled); }
+
+  @keyframes pulse { 50% { opacity: 0.45; } }
+
+  /* ---- right rail ---- */
+  .rail { display: grid; gap: 24px; align-content: start; }
+  .timer-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 20px; text-align: center;
+  }
+  .timer-value {
+    font-variant-numeric: tabular-nums;
+    font-size: 44px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .timer-card.is-running .timer-value { color: var(--repairing); }
+  .timer-card.is-done    .timer-value { color: var(--fixed); }
+  .timer-card.is-over    .timer-value { color: var(--broken); }
+  .timer-note { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+
+  .feed-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 20px;
+  }
+  .feed { list-style: none; padding: 0; display: grid; gap: 10px; }
+  .feed li {
+    display: flex; gap: 10px; align-items: baseline;
+    font-size: 14px; line-height: 1.4;
+    padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+  .feed li:last-child { border-bottom: none; padding-bottom: 0; }
+  .feed .t {
+    font-variant-numeric: tabular-nums;
+    font-size: 12px; color: var(--ink-faint); flex: none; width: 60px;
+  }
+  .feed .mark { flex: none; font-size: 13px; }
+  .feed-empty { font-size: 14px; color: var(--ink-faint); }
+
+  .empty-state {
+    background: var(--card); border: 1px dashed var(--line);
+    border-radius: 14px; padding: 40px 20px;
+    text-align: center; color: var(--ink-soft); font-size: 15px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🧭</div>
+  <div class="masthead">
+    <div class="name">Cascade Repairer</div>
+    <div class="sub">Live itinerary</div>
+  </div>
+  <div class="head-spacer"></div>
+  <div class="trip-picker">
+    <label for="trip-select">Trip</label>
+    <select id="trip-select" aria-label="Choose a trip"></select>
+  </div>
+  <div class="overall-pill" id="overall-pill">Loading…</div>
+</header>
+
+<div class="banner" id="banner">
+  <span class="dot"></span>
+  <span id="banner-text">Connecting to your trip…</span>
+</div>
+
+<main>
+  <section>
+    <div class="trip-title" id="trip-title">&nbsp;</div>
+    <div class="trip-dates" id="trip-dates">&nbsp;</div>
+    <h2>Itinerary</h2>
+    <ul class="itinerary" id="itinerary"></ul>
+    <div class="empty-state" id="empty-state" hidden>
+      We couldn't find that trip. Choose another from the list above.
+    </div>
+  </section>
+
+  <aside class="rail">
+    <div class="timer-card" id="timer-card">
+      <h2>Recovery time</h2>
+      <div class="timer-value" id="timer-value">—</div>
+      <div class="timer-note">Target: everything fixed within 60 seconds</div>
+    </div>
+    <div class="feed-card">
+      <h2>Repair activity</h2>
+      <ul class="feed" id="feed"></ul>
+      <div class="feed-empty" id="feed-empty">All quiet — your trip is on track.</div>
+    </div>
+  </aside>
+</main>
+
+<template id="item-template">
+  <li class="item-card">
+    <div class="icon"></div>
+    <div class="what">
+      <div class="kind"></div>
+      <div class="where"></div>
+      <div class="when"></div>
+    </div>
+    <span class="chip"></span>
+  </li>
+</template>
+
+<script>
+(() => {
+  const POLL_MS = 1500;
+  const TARGET_S = 60;
+  const API = "/v1/itinerary";
+
+  const KIND = {
+    flight:     { icon: "✈️", label: "Flight" },
+    hotel:      { icon: "🏨", label: "Hotel" },
+    ground:     { icon: "🚗", label: "Ride" },
+    dining:     { icon: "🍽️", label: "Dinner" },
+    experience: { icon: "🎟️", label: "Experience" },
+  };
+
+  const FEED_COPY = {
+    broken: {
+      flight: "Flight disrupted — we're already on it",
+      hotel: "Hotel affected — we're already on it",
+      ground: "Ride affected — we're already on it",
+      dining: "Dinner at risk — we're already on it",
+      experience: "Tour at risk — we're already on it",
+    },
+    repairing: {
+      flight: "Rebooking your flight…",
+      hotel: "Adjusting your hotel stay…",
+      ground: "Arranging a new ride…",
+      dining: "Moving your dinner reservation…",
+      experience: "Rescheduling your tour…",
+    },
+    fixed: {
+      flight: "Flight confirmed — back on track",
+      hotel: "Hotel confirmed — no change needed to your plans",
+      ground: "Ride confirmed — back on track",
+      dining: "Dinner confirmed — back on track",
+      experience: "Tour confirmed — back on track",
+    },
+    cancelled: { "*": "This part of the trip was cancelled" },
+    booked: { "*": "Booked and confirmed" },
+    planned: { "*": "Added to your plan" },
+  };
+  const FEED_MARK = {
+    broken: "⚠️", repairing: "🔧", fixed: "✅", cancelled: "✖️",
+    booked: "🧳", planned: "🗓️",
+  };
+
+  const el = (id) => document.getElementById(id);
+  const banner = el("banner"), bannerText = el("banner-text");
+  const pill = el("overall-pill");
+  const list = el("itinerary"), emptyState = el("empty-state");
+  const feed = el("feed"), feedEmpty = el("feed-empty");
+  const timerCard = el("timer-card"), timerValue = el("timer-value");
+  const select = el("trip-select");
+  const template = el("item-template");
+
+  const state = {
+    tripId: null,
+    lastStatuses: null,   // item_id -> status from the previous poll
+    cards: new Map(),     // item_id -> <li>
+    timerStart: null,
+    timerFrozen: null,
+  };
+
+  // ---- rendering ----
+
+  function fmtWhen(item) {
+    if (!item.start_ts) return "";
+    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+    let text = new Date(item.start_ts).toLocaleString([], opts);
+    if (item.end_ts) {
+      text += " – " + new Date(item.end_ts).toLocaleString([], opts);
+    }
+    return text;
+  }
+
+  function renderItems(items) {
+    const seen = new Set();
+    for (const item of items) {
+      seen.add(item.item_id);
+      let card = state.cards.get(item.item_id);
+      if (!card) {
+        card = template.content.firstElementChild.cloneNode(true);
+        state.cards.set(item.item_id, card);
+        list.appendChild(card);
+      }
+      const kind = KIND[item.type] || { icon: "📍", label: item.type };
+      card.dataset.status = item.status;
+      card.querySelector(".icon").textContent = kind.icon;
+      card.querySelector(".kind").textContent =
+        (item.details && item.details.description) || kind.label;
+      card.querySelector(".where").textContent = item.location || "";
+      card.querySelector(".when").textContent = fmtWhen(item);
+      card.querySelector(".chip").textContent = item.status;
+    }
+    for (const [id, card] of state.cards) {
+      if (!seen.has(id)) { card.remove(); state.cards.delete(id); }
+    }
+  }
+
+  function renderHeadline(trip, summary) {
+    el("trip-title").textContent = trip.title || "Your trip";
+    el("trip-dates").textContent =
+      [trip.origin, ...(trip.destinations || [])].filter(Boolean).join(" → ") +
+      (trip.start_date ? ` · ${trip.start_date} to ${trip.end_date || "?"}` : "");
+
+    const c = summary.counts;
+    let mode, pillText, message;
+    if (c.broken > 0) {
+      mode = "broken";
+      pillText = "Disruption detected";
+      message = "We found a problem with your trip — repairs are starting now.";
+    } else if (c.repairing > 0) {
+      mode = "repairing";
+      pillText = "Repairing trip";
+      message = "Cascade is actively repairing your itinerary — sit tight.";
+    } else if (c.fixed > 0) {
+      mode = "fixed";
+      pillText = "Trip repaired";
+      message = "All done — your trip is repaired and back on track.";
+    } else {
+      mode = "booked";
+      pillText = "Trip on track";
+      message = "Your trip is booked and everything looks good.";
+    }
+    pill.className = `overall-pill is-${mode}`;
+    pill.textContent = pillText;
+    banner.className = `banner is-${mode}`;
+    bannerText.textContent = message;
+  }
+
+  // ---- repair activity feed ----
+
+  function pushFeed(item, status) {
+    const copyByType = FEED_COPY[status] || {};
+    const kind = KIND[item.type] || { label: item.type };
+    // Type-specific copy already names the item; only generic copy needs it.
+    const copy = copyByType[item.type] ||
+      `${kind.label}: ${copyByType["*"] || status}`;
+    const when = item.updated_at ? new Date(item.updated_at) : new Date();
+
+    const li = document.createElement("li");
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = when.toLocaleTimeString([], { hour12: false });
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.textContent = FEED_MARK[status] || "•";
+    const msg = document.createElement("span");
+    msg.textContent = copy;
+    li.append(t, mark, msg);
+    feed.prepend(li);
+    feedEmpty.hidden = true;
+  }
+
+  function diffIntoFeed(items) {
+    if (state.lastStatuses === null) {
+      // First poll is the baseline — no history to announce.
+      state.lastStatuses = new Map(items.map((i) => [i.item_id, i.status]));
+      return;
+    }
+    for (const item of items) {
+      const prev = state.lastStatuses.get(item.item_id);
+      if (prev !== undefined && prev !== item.status) pushFeed(item, item.status);
+      state.lastStatuses.set(item.item_id, item.status);
+    }
+  }
+
+  // ---- recovery timer ----
+
+  function updateTimer(summary) {
+    const active = summary.counts.broken > 0 || summary.counts.repairing > 0;
+    if (active && (state.timerStart === null || state.timerFrozen !== null)) {
+      state.timerStart = performance.now();  // new incident (or a fresh one)
+      state.timerFrozen = null;
+    } else if (!active && state.timerStart !== null && state.timerFrozen === null) {
+      state.timerFrozen = performance.now();
+    }
+  }
+
+  function paintTimer() {
+    if (state.timerStart === null) {
+      timerCard.className = "timer-card";
+      timerValue.textContent = "—";
+      return;
+    }
+    const end = state.timerFrozen ?? performance.now();
+    const s = (end - state.timerStart) / 1000;
+    timerValue.textContent = s.toFixed(1) + "s";
+    const over = s > TARGET_S ? " is-over" : "";
+    timerCard.className =
+      "timer-card " + (state.timerFrozen ? "is-done" : "is-running") + over;
+  }
+  setInterval(paintTimer, 100);
+
+  // ---- polling ----
+
+  async function poll() {
+    if (!state.tripId) return;
+    let resp;
+    try {
+      resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`);
+    } catch {
+      banner.className = "banner is-stale";
+      bannerText.textContent = "Connection hiccup — catching back up…";
+      return;
+    }
+    if (resp.status === 404) {
+      emptyState.hidden = false;
+      list.hidden = true;
+      banner.className = "banner is-stale";
+      bannerText.textContent = "That trip isn't available.";
+      return;
+    }
+    if (!resp.ok) {
+      banner.className = "banner is-stale";
+      bannerText.textContent = "Having trouble reaching your trip — retrying…";
+      return;
+    }
+    const body = await resp.json();
+    emptyState.hidden = true;
+    list.hidden = false;
+    renderItems(body.items);
+    renderHeadline(body.trip, body.summary);
+    diffIntoFeed(body.items);
+    updateTimer(body.summary);
+  }
+
+  // ---- trip selector ----
+
+  function resetForTrip(tripId) {
+    state.tripId = tripId;
+    state.lastStatuses = null;
+    state.cards.clear();
+    state.timerStart = null;
+    state.timerFrozen = null;
+    list.replaceChildren();
+    feed.replaceChildren();
+    feedEmpty.hidden = false;
+    const url = new URL(window.location);
+    url.searchParams.set("trip_id", tripId);
+    history.replaceState(null, "", url);
+    poll();
+  }
+
+  select.addEventListener("change", () => resetForTrip(select.value));
+
+  async function init() {
+    let tripsBody = { trips: [] };
+    try {
+      const resp = await fetch(`${API}/trips`);
+      if (resp.ok) tripsBody = await resp.json();
+    } catch { /* handled below as the no-trips state */ }
+
+    const trips = tripsBody.trips;
+    for (const trip of trips) {
+      const opt = document.createElement("option");
+      opt.value = trip.trip_id;
+      opt.textContent = trip.title || trip.trip_id;
+      select.appendChild(opt);
+    }
+
+    const requested = new URL(window.location).searchParams.get("trip_id");
+    if (requested && !trips.some((t) => t.trip_id === requested)) {
+      // Watching a trip that isn't in the recent list is fine — keep it.
+      const opt = document.createElement("option");
+      opt.value = requested;
+      opt.textContent = requested;
+      select.appendChild(opt);
+    }
+
+    const initial = requested || (trips[0] && trips[0].trip_id);
+    if (!initial) {
+      banner.className = "banner is-stale";
+      bannerText.textContent = "No trips yet — book one and it will appear here.";
+      pill.textContent = "No trips";
+      return;
+    }
+    select.value = initial;
+    resetForTrip(initial);
+    setInterval(poll, POLL_MS);
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>

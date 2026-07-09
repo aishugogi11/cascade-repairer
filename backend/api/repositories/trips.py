@@ -1,5 +1,5 @@
 """Repository for the trips table."""
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from google.cloud import bigquery
 
@@ -50,6 +50,20 @@ def get_trip(trip_id: str) -> Tuple[bool, Optional[Trip], Optional[str]]:
         return False, None, error
     models = rows_to_models(Trip, rows)
     return True, models[0] if models else None, None
+
+
+def list_recent_trips(limit: int = 10) -> Tuple[bool, List[Trip], Optional[str]]:
+    """Most recent trips, newest first — backs the itinerary UI trip selector."""
+    query = f"""
+        SELECT * FROM `{_table()}`
+        ORDER BY created_at DESC
+        LIMIT @limit
+    """
+    params = [bigquery.ScalarQueryParameter("limit", "INT64", limit)]
+    success, rows, error = bq_helper.run_select(query, params)
+    if not success:
+        return False, [], error
+    return True, rows_to_models(Trip, rows), None
 
 
 def update_trip_status(trip_id: str, status: str) -> Tuple[bool, int, Optional[str]]:

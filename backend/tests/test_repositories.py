@@ -106,6 +106,37 @@ def test_update_trip_status_rejects_invalid_status(bq):
     bq.dml.assert_not_called()
 
 
+def test_list_recent_trips_orders_newest_first_with_limit_param(bq):
+    bq.select.return_value = (
+        True,
+        [
+            {"trip_id": "t-2", "user_id": "josh", "title": "Newer", "status": "booked"},
+            {"trip_id": "t-1", "user_id": "josh", "title": "Older", "status": "booked"},
+        ],
+        None,
+    )
+    success, result, error = trips.list_recent_trips(limit=2)
+
+    assert success is True and error is None
+    assert [t.trip_id for t in result] == ["t-2", "t-1"]
+    query = bq.select.call_args.args[0]
+    assert "ORDER BY created_at DESC" in query and "LIMIT @limit" in query
+    assert params_by_name(bq.select)["limit"].value == 2
+
+
+def test_list_recent_trips_empty_table_returns_empty_list(bq):
+    success, result, error = trips.list_recent_trips()
+    assert (success, result, error) == (True, [], None)
+
+
+def test_list_recent_trips_propagates_helper_failure(bq):
+    bq.select.return_value = (False, [], "quota exceeded")
+    success, result, error = trips.list_recent_trips()
+    assert success is False
+    assert result == []
+    assert error == "quota exceeded"
+
+
 def test_get_trip_with_items_returns_unified_view(bq):
     trip_row = {"trip_id": "t-1", "user_id": "josh", "title": "Trip", "status": "booked"}
     item_row = {"item_id": "i-1", "trip_id": "t-1", "type": "flight", "status": "broken"}
