@@ -186,37 +186,13 @@ _REPAIR_NAMES = {
 }
 
 
-class RepairTripRequest(BaseModel):
-    trip_id: str
-    session_id: Optional[str] = None
-    wait: bool = True  # false: return immediately, poll the session later
-
-
-@sabre_tools.post("/repair_trip")
-async def repair_trip(req: RepairTripRequest):
-    """Run the repair tools against every item of a trip, all concurrent,
-    through concurrency_core.run_repairs — the walkthrough surface for the
-    cascade, and the seam the voice phases lift.
-
-    Each tool writes its bookings row and flips its item to `fixed`; the
-    cascade unit additionally walks the item through `repairing` -> `fixed`
-    (the second `fixed` write is an idempotent re-stamp). A failed write
-    surfaces as a status="error" completion event, never a false ok.
+def launch_trip_repairs(session_id, items):
+    """Launch one background repair per itinerary item through
+    concurrency_core — the shared seam between the /repair_trip walkthrough
+    endpoint and the Phase 9 concierge's fix_trip tool. Returns
+    (launched_names, tasks); the caller decides whether to await the tasks.
     """
-    success, items, error = await asyncio.to_thread(
-        itinerary_items.list_items_for_trip, req.trip_id
-    )
-    if not success:
-        raise HTTPException(status_code=500, detail=f"could not list items: {error}")
-    if not items:
-        raise HTTPException(
-            status_code=404, detail=f"trip {req.trip_id} has no itinerary items"
-        )
-
-    session_id = req.session_id or f"repair-{uuid.uuid4().hex[:12]}"
-    calls = {
-        item.item_id: _repair_call(item) for item in items
-    }
+    calls = {item.item_id: _repair_call(item) for item in items}
     specs = [
         RepairSpec(
             item_id=item.item_id,
@@ -230,6 +206,38 @@ async def repair_trip(req: RepairTripRequest):
         return await calls[spec.item_id]
 
     tasks = core.run_repairs(session_id, specs, do_repair)
+    return [s.name for s in specs], tasks
+
+
+class RepairTripRequest(BaseModel):
+    trip_id: str
+    session_id: Optional[str] = None
+    wait: bool = True  # false: return immediately, poll the session later
+
+
+@sabre_tools.post("/repair_trip")
+async def repair_trip(req: RepairTripRequest):
+    """Run the repair tools against every item of a trip, all concurrent,
+    through launch_trip_repairs — the walkthrough surface for the cascade
+    and the same seam the Phase 9 concierge fires.
+
+    Each tool writes its bookings row; the cascade unit (`_repair_one`) is
+    the single writer of the item's `repairing` -> `fixed` transitions. A
+    failed write surfaces as a status="error" completion event, never a
+    false ok.
+    """
+    success, items, error = await asyncio.to_thread(
+        itinerary_items.list_items_for_trip, req.trip_id
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=f"could not list items: {error}")
+    if not items:
+        raise HTTPException(
+            status_code=404, detail=f"trip {req.trip_id} has no itinerary items"
+        )
+
+    session_id = req.session_id or f"repair-{uuid.uuid4().hex[:12]}"
+    launched, tasks = launch_trip_repairs(session_id, items)
     if req.wait:
         await asyncio.gather(*tasks)
 
@@ -237,8 +245,8 @@ async def repair_trip(req: RepairTripRequest):
     return {
         "trip_id": req.trip_id,
         "session_id": session_id,
-        "launched": [s.name for s in specs],
-        "item_ids": [s.item_id for s in specs],
+        "launched": launched,
+        "item_ids": [item.item_id for item in items],
         "waited_for_completion": req.wait,
         "pending_tasks": session.pending(),
         "completed_events": [e.model_dump() for e in session.events],

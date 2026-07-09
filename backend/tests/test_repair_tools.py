@@ -2,8 +2,10 @@
 
 BigQuery is mocked at the bq_helper boundary; Sabre goes through the
 dispatcher in its default mock mode (no network). Assertions cover the DML
-the tools emit (bookings insert + itinerary_items status transition) and the
-payload the agent reads back.
+the tools emit and the payload the agent reads back. Single-writer rule
+(Phase 9): repair tools write their bookings row ONLY — itinerary status
+transitions belong to the cascade unit; only the initial booking tool still
+flips its item (to `booked`).
 """
 import asyncio
 import json
@@ -49,15 +51,26 @@ def dml_writes(dml):
     ]
 
 
-def assert_booking_insert_then_status(dml, item_id, status):
-    writes = dml_writes(dml)
-    assert len(writes) == 2
+def assert_booking_insert(writes, item_id):
     insert_query, insert_params = writes[0]
     assert "INSERT INTO" in insert_query and "bookings" in insert_query
     assert insert_params["item_id"] == item_id
     assert insert_params["state"] == "confirmed"
     assert insert_params["raw_response"] is not None  # Sabre payload captured
 
+
+def assert_booking_insert_only(dml, item_id):
+    """The repair-tool contract: one bookings insert, zero status writes."""
+    writes = dml_writes(dml)
+    assert len(writes) == 1
+    assert_booking_insert(writes, item_id)
+
+
+def assert_booking_insert_then_status(dml, item_id, status):
+    """The initial-booking contract: bookings insert, then the status flip."""
+    writes = dml_writes(dml)
+    assert len(writes) == 2
+    assert_booking_insert(writes, item_id)
     update_query, update_params = writes[1]
     assert "UPDATE" in update_query and "updated_at" in update_query
     assert update_params == {"status": status, "item_id": item_id}
@@ -83,17 +96,17 @@ def test_search_and_book_flight_books_and_flips_to_booked(bq):
     assert raw["booking"]["flights"][0]["flightStatusName"] == "Confirmed"
 
 
-def test_rebook_flight_cancels_old_ref_and_flips_to_fixed(bq):
+def test_rebook_flight_cancels_old_ref_and_writes_booking_only(bq):
     bq.select.return_value = (True, [booking_row()], None)
 
     payload = asyncio.run(repair_tools._rebook_flight(
         "t-1", "i-flight", "MSP", "SFO", "2026-07-18"
     ))
 
-    assert_booking_insert_then_status(bq.dml, "i-flight", "fixed")
+    assert_booking_insert_only(bq.dml, "i-flight")  # single writer: no status DML
     assert payload["cancelled_ref"] == "GLEBNY"  # from the existing booking row
     assert payload["confirmation_ref"] != "GLEBNY"  # a new PNR
-    assert payload["item_status"] == "fixed"
+    assert "item_status" not in payload
     assert payload["departure_date"] == "2026-07-18"
 
     raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
@@ -106,17 +119,17 @@ def test_rebook_flight_without_existing_booking_uses_placeholder_ref(bq):
         "t-1", "i-flight", "MSP", "SFO", "2026-07-18"
     ))
     assert payload["cancelled_ref"] == "UNKNWN"
-    assert payload["item_status"] == "fixed"
+    assert payload["confirmation_ref"]
 
 
-def test_shift_hotel_dates_moves_stay_and_flips_to_fixed(bq):
+def test_shift_hotel_dates_moves_stay_and_writes_booking_only(bq):
     bq.select.return_value = (True, [booking_row(item_id="i-hotel", ref="UEEBMH")], None)
 
     payload = asyncio.run(repair_tools._shift_hotel_dates(
         "t-1", "i-hotel", "2026-07-18", "2026-07-20"
     ))
 
-    assert_booking_insert_then_status(bq.dml, "i-hotel", "fixed")
+    assert_booking_insert_only(bq.dml, "i-hotel")
     assert payload["confirmation_ref"] == "UEEBMH"  # modify keeps the PNR
     assert (payload["check_in"], payload["check_out"]) == ("2026-07-18", "2026-07-20")
     assert payload["total"] == "426.02" and payload["currency"] == "USD"
@@ -129,12 +142,12 @@ def test_shift_hotel_dates_moves_stay_and_flips_to_fixed(bq):
     (repair_tools._move_dining, "i-dining", "2026-07-17T20:30", "reservation_time"),
     (repair_tools._rebook_experience, "i-exp", "2026-07-19", "date"),
 ])
-def test_category_mocks_write_booking_and_flip_to_fixed(bq, tool, item_id, arg, payload_key):
+def test_category_mocks_write_booking_only(bq, tool, item_id, arg, payload_key):
     payload = asyncio.run(tool("t-1", item_id, arg))
 
-    assert_booking_insert_then_status(bq.dml, item_id, "fixed")
+    assert_booking_insert_only(bq.dml, item_id)
     assert payload[payload_key] == arg
-    assert payload["item_status"] == "fixed"
+    assert "item_status" not in payload
     assert payload["confirmation_ref"]
 
     # Deterministic ref: same item, same ref.
@@ -150,11 +163,15 @@ def test_failed_booking_insert_raises(bq):
         asyncio.run(repair_tools._move_dining("t-1", "i-dining", "2026-07-17T20:30"))
 
 
-def test_zero_row_status_write_raises(bq):
-    # Booking insert lands; the status flip matches no rows.
+def test_zero_row_status_write_raises_for_initial_booking(bq):
+    # The one tool that still flips status: booking insert lands, the
+    # `booked` flip matches no rows. (Repair tools have no status write to
+    # fail — the cascade unit's flips are covered in test_concurrency_spike.)
     bq.dml.side_effect = [(True, 1, None), (True, 0, None)]
     with pytest.raises(RuntimeError, match="matched no rows"):
-        asyncio.run(repair_tools._reschedule_ground("t-1", "i-ghost", "2026-07-17T14:00"))
+        asyncio.run(repair_tools._search_and_book_flight(
+            "t-1", "i-ghost", "MSP", "SFO", "2026-07-17"
+        ))
 
 
 # --- agent wiring ---------------------------------------------------------------

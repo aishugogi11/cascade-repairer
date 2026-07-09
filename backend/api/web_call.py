@@ -4,9 +4,10 @@ The browser surface for the backend agent: the L3 "Voice for your Agent"
 pattern (jupyter_notebook/training_course/L3/L3.ipynb) as production routes.
 A VB agent in AI Agent mode owns STT, TTS, and turn-taking, and delegates
 every spoken query to the page's `useAIAgent` hook, which POSTs it
-same-origin to /query; whatever text comes back, VB speaks. /query runs a
-plain OpenAI Agents SDK agent with per-session history — deliberately a thin
-seam (`answer_query`) that Phase 9 replaces with the Concierge.
+same-origin to /query; whatever text comes back, VB speaks. /query is a thin
+seam (`answer_query`) — since Phase 9 it runs the Concierge hybrid
+(concierge.py): a fast foreground agent that launches background repairs and
+keeps talking while they run.
 
 Token minting follows vb_test.py verbatim (server-side, the API key never
 reaches the browser) but against a separate AI-Agent-mode VB agent
@@ -23,14 +24,14 @@ import logging
 import os
 import time
 from string import Template
-from typing import Dict, List, Set
+from typing import Set
 
 import requests
-from agents import Agent, Runner
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from api import concierge
 from api.repositories import sessions as sessions_repo
 from api.repositories import turns as turns_repo
 from api.repositories.models import Session, Turn
@@ -47,30 +48,11 @@ VB_REACT_VER = "0.1.1"
 VB_SDK_VER = "0.1.1"
 REACT_VER = "18"
 
-DEFAULT_LLM_MODEL = "gpt-4.1-mini"
-
-# The distinctive self-identification is the manual-validation proof that
-# spoken answers come from this code, not a VB dashboard prompt.
-AGENT_INSTRUCTIONS = (
-    "You are the Cascade Repairer's backend travel agent, running inside the "
-    "vocal-bridge-be-dev service on Google Cloud Run. If asked who you are "
-    "or where you run, say exactly that. You handle travel questions and "
-    "general conversation for a live voice demo. Your replies are spoken "
-    "aloud: keep them to one or two short, conversational sentences. No "
-    "markdown, no lists, no stage directions."
-)
-
-# session_name → Agents SDK input list (multi-turn memory).
-_HISTORY: Dict[str, List] = {}
 # Sessions whose row insert has been attempted (attempted, not confirmed —
 # a failed insert warns rather than retrying every turn).
 _LOGGED_SESSIONS: Set[str] = set()
 # Strong refs so fire-and-forget logging tasks aren't garbage-collected.
 _LOG_TASKS: Set[asyncio.Task] = set()
-
-
-def _llm_model() -> str:
-    return os.environ.get("WEB_CALL_LLM_MODEL", DEFAULT_LLM_MODEL)
 
 
 @web_call.post("/token")
@@ -126,25 +108,10 @@ def mint_token():
 
 
 async def answer_query(session_name: str, query: str) -> str:
-    """One delegated spoken turn — the seam Phase 9 swaps for the Concierge.
-
-    Plain function (callable by tests, the hello.py pattern): replay the
-    session's history, run the agent, store the updated history, return
-    speakable text.
-    """
-    agent = Agent(
-        name="Web Call Agent",
-        model=_llm_model(),
-        instructions=AGENT_INSTRUCTIONS,
-    )
-    history = _HISTORY.get(session_name, [])
-    result = await Runner.run(
-        agent,
-        history + [{"role": "user", "content": query}],
-        max_turns=4,
-    )
-    _HISTORY[session_name] = result.to_input_list()
-    return str(result.final_output)
+    """One delegated spoken turn. Kept as the stable seam (tests patch here,
+    rollback is this one line); since Phase 9 the implementation is the
+    Concierge hybrid."""
+    return await concierge.answer_query(session_name, query)
 
 
 async def _log_query_turns(
