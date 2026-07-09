@@ -1,0 +1,15 @@
+# Schema for the sessions table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+# architecture: cascaded/realtime/concierge; client: vb_web.
+- field_name: session_id
+  field_type: STRING
+- field_name: trip_id
+  field_type: STRING
+- field_name: architecture
+  field_type: STRING
+- field_name: client
+  field_type: STRING
+- field_name: started_at
+  field_type: TIMESTAMP
+- field_name: ended_at
+  field_type: TIMESTAMP

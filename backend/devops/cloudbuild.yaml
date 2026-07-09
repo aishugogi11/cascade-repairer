@@ -1,0 +1,94 @@
+serviceAccount: projects/vocal-bridge-hackathon/serviceAccounts/gemini-service-account@vocal-bridge-hackathon.iam.gserviceaccount.com
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _LOCATION: us-west1
+  _PROJECT_ID: vocal-bridge-hackathon
+steps:
+  - name: 'python'
+    dir: 'backend'
+    id: 'validate-and-extract-env'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install pyyaml
+        python devops/scripts/validate_and_extract_env_vars.py
+
+  - name: python
+    dir: 'backend'
+    id: setup-artifacts
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        pip install google-cloud-bigquery click pyyaml
+        ./devops/scripts/run_artifact_setup.sh $PROJECT_ID
+
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
+    id: 'build-tag-and-push-image'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "=== Configuring Docker Auth ==="
+        gcloud auth configure-docker ${_LOCATION}-docker.pkg.dev --quiet
+        echo "=== Starting Docker Operations ==="
+        bash ./devops/scripts/ai_service_builder.sh ${_LOCATION} ${_PROJECT_ID} $SHORT_SHA
+
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
+    id: 'run-pytest'
+    # script (not args) so Cloud Build's substitution parser leaves the $VARs
+    # alone — they resolve in bash from image.env, same pattern as the deploy step.
+    script: |
+      #!/bin/bash
+      set -e
+      set -a; source image.env; set +a
+      IMAGE_URL="$GCP_LOCATION-docker.pkg.dev/$PROJECT_ID/$TARGET_AR/$IMAGE_NAME:$SHORT_SHA"
+      echo "=== Running pytest inside $IMAGE_URL ==="
+      docker run --rm "$IMAGE_URL" python -m pytest tests/ -v
+
+  - name: 'google/cloud-sdk'
+    dir: 'backend'
+    id: 'deploy-to-cloud-run'
+    script: |
+      #!/bin/bash
+      set -e
+
+      # Check if image.env exists and source it
+      if [ -f "image.env" ]; then
+        echo "Found image.env, sourcing environment variables..."
+        set -a
+        source image.env
+        set +a
+      else
+        echo "image.env not found, exiting..."
+        exit 1
+      fi
+
+      # Verify required variables are set
+      echo "PROJECT_ID: $PROJECT_ID"
+      echo "GCP_LOCATION: $GCP_LOCATION"
+      echo "TARGET_AR: $TARGET_AR"
+      echo "IMAGE_NAME: $IMAGE_NAME"
+      echo "APP_ENV: $APP_ENV"
+      echo "SHORT_SHA: $SHORT_SHA"
+
+      IMAGE_URL="$GCP_LOCATION-docker.pkg.dev/$PROJECT_ID/$TARGET_AR/$IMAGE_NAME:$SHORT_SHA"
+      echo "Deploying image: $IMAGE_URL"
+
+      # --update-env-vars MERGES (does not replace) so env vars set once on the
+      # service — OPENAI_API_KEY for the /agents routes — survive every redeploy.
+      # Runtime identity: gemini-service-account holds bigquery.admin and
+      # storage.admin, so the deployed service can reach BigQuery and GCS
+      # (verified by /v1/hello/gcp_check). The build runs as the same SA and has
+      # iam.serviceAccountUser, so it can actAs it at deploy time.
+      gcloud run deploy vocal-bridge-be-$APP_ENV \
+        --image=$IMAGE_URL \
+        --region=$GCP_LOCATION \
+        --project=$PROJECT_ID \
+        --allow-unauthenticated \
+        --service-account=gemini-service-account@vocal-bridge-hackathon.iam.gserviceaccount.com \
+        --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,APP_ENV=$APP_ENV

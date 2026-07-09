@@ -1,0 +1,19 @@
+# Schema for the turns table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+# role: user/agent. audio_gcs_uri convention: audio/<session_id>/<turn_id>.wav.
+- field_name: turn_id
+  field_type: STRING
+- field_name: session_id
+  field_type: STRING
+- field_name: role
+  field_type: STRING
+- field_name: transcript
+  field_type: STRING
+- field_name: audio_gcs_uri
+  field_type: STRING
+- field_name: started_at
+  field_type: TIMESTAMP
+- field_name: ttfb_ms
+  field_type: INT64
+- field_name: duration_ms
+  field_type: INT64

@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+*.pyc
+*.env
+
+mcp_training/*
+temp_file_storage/
+
+.agents/*
+.claude/*
+
+*.ipynb_checkpoints*
+*.mp3
+
+about/*
+another_project/*
+
+NOTES.md
+TODO.md

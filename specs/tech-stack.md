@@ -1,0 +1,69 @@
+# Tech Stack
+
+## Hard requirements (hackathon qualification)
+
+These are non-negotiable — the submission does not qualify for prizes without them:
+
+- **Sabre travel APIs** for all travel data and booking operations (flights, stays, ground transport, dining, experiences).
+- **Vocal Bridge** as the voice layer.
+- The demo shape is fixed by the challenge: **one voice agent, one conversation** — flights, stays, ground transport, dining, experiences and more pulled into a **single itinerary**, booked and managed by voice.
+
+The team's locked demo concept (Cascade Repairer — see `mission.md`) maps the five required categories as: flights → Sabre rebooking, stays → Sabre hotel change, ground/dining/experiences → simple mock tools.
+
+## Voice layer
+
+- **Vocal Bridge web client** (managed WebRTC client/widget) pointed at the backend agent — the primary demo surface, matching the training course.
+- **"Testing Vocal Bridge" smoke-test page** (roadmap Phase 4): a minimal FastAPI-served page that makes a real Vocal Bridge call (per the training-course lessons) using the API key already set on Cloud Run — de-risks auth, call shape, and latency before any voice architecture is built.
+- **Live itinerary UI** — the demo's second surface: a single FastAPI-served page (static HTML/JS from the existing backend, no separate frontend deploy) showing the unified itinerary and updating as item statuses change (polling or SSE against a trip-status endpoint). The screen flipping **broken → repairing → fixed** while the agent talks is the demo moment.
+- All three course architectures live in the codebase as working reference implementations, ported from the L2–L5 notebooks in `jupyter_notebook/training_course/`:
+  - **Cascaded stack** (STT → LLM → TTS) — easiest to debug.
+  - **Real-time voice-to-voice** — lowest latency (200–500 ms).
+  - **Hybrid "Concierge"** — fast foreground agent for turn-taking/fillers, background agent for deep reasoning and tools. Target architecture for the demo.
+
+## Backend
+
+- **Python / FastAPI** (`backend/`), containerized with Docker; local orchestration via `docker-compose.yml` and the `Makefile`.
+- **OpenAI Agents SDK** for the agentic LLM layer — agents, tools, handoffs, and MCP servers, following the pattern in `backend/api/hello.py`. OpenAI models serve as the reasoning engine (not Anthropic, deliberately diverging from the course's LLM choice).
+- **MCP servers** (`backend/mcp_servers/`) expose tools to agents — e.g., the filesystem server, plus Sabre-backed tools as they're built.
+- **Sabre APIs — shipped 2026-07-08 (Phase 6)** as a client layer in `backend/api/sabre/`: pydantic shapes (`shapes.py`) tracing 1:1 to a live docs pull (`specs/2026-07-08-sabre-tools/sabre-api-notes.md` — Bargain Finder Max v5 for search; Booking Management `createBooking`/`cancelBooking`/`modifyBooking` for book, cancel, and hotel date change; **rebook has no single REST endpoint** — it composes cancel + create, the documented unticketed-PNR path), a deterministic mock client returning those shapes, and a real-client stub (needs `SABRE_BASE_URL` + `SABRE_CLIENT_SECRET`; docs-accurate, not yet certified against the sandbox — event-day prep). The runtime flag is the **`SABRE_MODE` env var** (`mock` | `real`, default `mock`), read **per call** by the dispatcher (`client.py`): in `real` mode any failure auto-falls back to the mock **for that call** and logs a warning naming the operation. Flipping it on Cloud Run is an `--update-env-vars` merge — no rebuild. Judges see the same cascade either way. The **six repair tools** (`backend/api/repair_tools.py`, OpenAI Agents SDK `function_tool`s — three Sabre-backed, three category mocks) each write a `bookings` row (Sabre payload as `raw_response`) plus the `itinerary_items` status flip through the repositories, and raise on failed/0-row writes. The **disruption injector** is live: `POST /v1/disruption/break_flight` flips a trip's flight to `broken` (idempotent, 404 without a flight item); `POST /v1/sabre_tools/seed_trip` and `POST /v1/sabre_tools/repair_trip` are the walkthrough/demo surface.
+- **Concurrency pattern (Cascade Repairer) — proven 2026-07-07 by the Phase 5 spike; no rewire needed.** The reusable pattern lives in `backend/api/concurrency_core.py` and is what every voice phase builds on: background work fired with `asyncio.create_task` alongside the active session (never sequential `await` per tool), completions reported into a per-session event log, and agent turns staying a plain `await Runner.run(...)` on the same loop. A **session snapshot** of pending/landed background work is injected into the agent's instructions each turn so it can answer "how are the repairs coming?" by name — the wording must be marked authoritative or the model asks clarifying questions instead (measured; see `specs/2026-07-07-concurrency-spike/findings.md`). Two standing rules for later phases: **blocking GCP calls (BigQuery DML) inside async paths go through `asyncio.to_thread`** — a blocking write on the event loop would stall the very conversation this exists to keep alive; and the **session/event registry is deliberately in-process memory** — the demo runs a single Cloud Run instance, and external session state is out of scope for the hackathon. Both spike limitations closed in Phase 6 (2026-07-08): `_repair_one` now raises on a failed or 0-row `update_status`, so completion events report `error` instead of a false ok; and the deployed walkthrough proved five real `itinerary_items` rows flipping broken → repairing → fixed with fresh `updated_at` in ~35 seconds. Acceptance test passed verbatim, live on Cloud Run: *the agent responds while a fake 10-second API call is still in flight.*
+
+## Data
+
+- **BigQuery** for structured data (via `backend/api/helpers/bigquery_helper.py`): dataset `vocal_bridge` in `us-west1`. The helper is a config-driven client with parameterized `run_select` and `run_dml` primitives; the typed repository layer (Phase 3) lives in `backend/api/repositories/` — pydantic models + one module per table, statuses validated as Python enums at the repository boundary (BigQuery has no enum type).
+- **Table ids are config-driven**: `config.yaml` `metadata:` carries a `<name>_table_id` per table (donor-project pattern). The same entries feed CI table creation (via `image.env` → `run_artifact_setup.sh`) and runtime table references (`bq_helper.get_table_reference`), so setup and runtime can never disagree; a missing entry fails the test suite.
+- **Writes are query-job DML, never streaming inserts** — rows in the streaming buffer can't be UPDATEd for up to 90 minutes, which would break the demo's booked → broken → repairing → fixed status flips seconds apart. Demo-scale volume makes DML cost irrelevant.
+- **GCS** for audio recordings and artifacts (via `backend/api/helpers/gcs_helper.py`): bucket `vocal-bridge-hackathon-audio` (us-west1, uniform access).
+- Both helpers read project/dataset/bucket names from `backend/config.yaml` (overridable by env vars) and create their GCP clients lazily — importing them, and therefore running the test suite, requires no credentials.
+
+### Schema (BigQuery)
+
+**Core trip tables**
+- `trips` — trip_id, user_id, title, status (draft/booked/active/complete), origin, destination(s), start_date, end_date, created_at.
+- `itinerary_items` — item_id, trip_id, type (flight/hotel/ground/dining/experience), status (**planned/booked/broken/repairing/fixed/cancelled** — the repair lifecycle drives both the agent's cascade logic and the live UI), provider (sabre/other), provider_ref, start_ts, end_ts, location, details (JSON), price, currency, updated_at.
+- `bookings` — booking_id, item_id, trip_id, sabre_confirmation_ref, state (pending/confirmed/cancelled), booked_at, raw_response (JSON).
+
+**Conversation logging**
+- `sessions` — session_id, trip_id, architecture (cascaded/realtime/concierge), client (vb_web), started_at, ended_at.
+- `turns` — turn_id, session_id, role (user/agent), transcript, audio_gcs_uri, started_at, ttfb_ms, duration_ms.
+
+**Evaluation metrics**
+- `eval_runs` — run_id, architecture, git_sha, scenario, ttfb_ms, e2e_latency_ms, wer, mos_estimate, notes, run_at.
+
+## Testing
+
+- **pytest** for API and agent unit/integration tests (`backend/tests/`, config in `backend/pytest.ini`), run in CI on every Cloud Build **inside the built container** — the exact artifact that ships. Tests must stay hermetic: no GCP credentials, no `OPENAI_API_KEY`; GCP interactions are mocked at the helper boundary.
+- **Voice evaluation harness** (course L5 patterns) run on demand: TTFB/latency, WER against ground-truth transcripts, MOS-style quality checks per architecture, results persisted to `eval_runs`.
+
+## Deployment & CI/CD
+
+- **Google Cloud Platform**, project **`vocal-bridge-hackathon`**, everything in **`us-west1`** (nearest full-featured region to the Mountain View event — West Coast serving minimizes live-demo latency).
+- **Cloud Run** hosts the backend as `vocal-bridge-be-dev`, running as `gemini-service-account@vocal-bridge-hackathon.iam.gserviceaccount.com` (holds BigQuery/GCS/deploy roles).
+- **Cloud Build** CI/CD driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml` (all steps run with `dir: backend`): validate config → ensure BigQuery dataset → build/push image to Artifact Registry (`vocal-bridge-be-artifacts-dev`) → **pytest inside the built image** (a failure blocks the deploy) → deploy. The deploy uses `--update-env-vars` (merge), so env vars set once on the service — e.g. `OPENAI_API_KEY` — survive redeploys.
+- **Trigger flow**: work happens on `vb/feature/<feature-name>` branches and lands on `vb/dev` by GitHub PR. The `vocal-bridge-be-pr-to-dev` trigger is a **push-to-branch trigger on `^vb/dev$`** (observed 2026-07-08): it fires on any push to `vb/dev`, including direct pushes and PR merges. Webhook deliveries can occasionally be missed — if a merge doesn't build, re-run manually: `gcloud builds triggers run vocal-bridge-be-pr-to-dev --branch=vb/dev`.
+- **Provisioning**: one-time project setup (APIs, service account + IAM, Artifact Registry repo, GCS bucket, BigQuery dataset) is scripted in `backend/devops/scripts/gcp_project_setup.sh` (idempotent); console-only steps (GitHub connection, trigger creation) are documented in `backend/devops/README.md`. BigQuery **tables** are created by CI on every build: the `setup-artifacts` step (`run_artifact_setup.sh`) ensures the dataset, then runs `backend/promotion_scripts/create_vocal_bridge_tables.sh` with the table ids from `config.yaml` metadata. Creation is idempotent and existing tables are **never dropped** — trip data survives deploys; a schema change requires a manual `bqtk.py drop-table --force` first.
+- **Deployment health**: `GET /v1/hello/gcp_check` on the deployed service verifies BigQuery and GCS reachability, reporting each half independently.
+
+## Notebooks
+
+- `jupyter_notebook/` — Dockerized JupyterLab with the reworked DeepLearning.AI course notebooks (L2–L5), glossary, and transcript. This is the reference source: backend implementations must align with these modules "to a tee."

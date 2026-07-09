@@ -1,0 +1,36 @@
+services:
+  backend:
+    container_name: vocal_bridge_fastapi_be_dev
+    restart: always
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./config/.env
+    environment:
+      - PORT=8080
+    ports:
+      - "1019:8080"
+    volumes:
+      # Live-reload the source; keep the image's compiled cache out of the way.
+      - ./backend:/app
+      - /app/__pycache__
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+
+  jupyter:
+    build: ./jupyter_notebook
+    container_name: vocal_bridge_jupyter
+    restart: always
+    ports:
+      - "8020:8888"
+    volumes:
+      - ./jupyter_notebook:/notebooks
+    env_file:
+      - ./config/.env
+    # The API is reachable from notebooks at http://backend:8080 (same compose network).
+    environment:
+      - BACKEND_URL=http://backend:8080
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536

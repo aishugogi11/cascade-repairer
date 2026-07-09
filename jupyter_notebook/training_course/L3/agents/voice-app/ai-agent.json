@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "description": "Claude with web search. Knows general knowledge, current events, prices, news, sports, code questions, explanations. Forward any substantive question — only handle small-talk yourself.",
+  "verbatim": false
+}

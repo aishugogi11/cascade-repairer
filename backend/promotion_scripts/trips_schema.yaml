@@ -1,0 +1,23 @@
+# Schema for the trips table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+# status: draft/booked/active/complete (validated in the repository layer).
+# `destinations` is REPEATED STRING, i.e. ARRAY<STRING> in BigQuery SQL.
+- field_name: trip_id
+  field_type: STRING
+- field_name: user_id
+  field_type: STRING
+- field_name: title
+  field_type: STRING
+- field_name: status
+  field_type: STRING
+- field_name: origin
+  field_type: STRING
+- field_name: destinations
+  field_type: STRING
+  field_mode: REPEATED
+- field_name: start_date
+  field_type: DATE
+- field_name: end_date
+  field_type: DATE
+- field_name: created_at
+  field_type: TIMESTAMP

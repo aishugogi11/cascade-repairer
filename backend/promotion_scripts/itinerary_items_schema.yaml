@@ -1,0 +1,32 @@
+# Schema for the itinerary_items table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+# type: flight/hotel/ground/dining/experience.
+# status carries the repair lifecycle: planned/booked/broken/repairing/fixed/cancelled
+# (validated in the repository layer); updated_at is stamped on every transition —
+# together they drive the cascade logic and the live itinerary UI.
+- field_name: item_id
+  field_type: STRING
+- field_name: trip_id
+  field_type: STRING
+- field_name: type
+  field_type: STRING
+- field_name: status
+  field_type: STRING
+- field_name: provider
+  field_type: STRING
+- field_name: provider_ref
+  field_type: STRING
+- field_name: start_ts
+  field_type: TIMESTAMP
+- field_name: end_ts
+  field_type: TIMESTAMP
+- field_name: location
+  field_type: STRING
+- field_name: details
+  field_type: JSON
+- field_name: price
+  field_type: FLOAT64
+- field_name: currency
+  field_type: STRING
+- field_name: updated_at
+  field_type: TIMESTAMP

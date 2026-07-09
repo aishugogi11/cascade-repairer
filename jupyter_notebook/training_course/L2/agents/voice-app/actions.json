@@ -1,0 +1,34 @@
+[
+  {
+    "name": "show_tic_tac_toe",
+    "description": "Render the board. Fire to start a new game. Payload: {userSymbol: 'X'|'O', firstTurn: 'user'|'agent'}.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "place_mark",
+    "description": "Place YOUR (agent's) mark at row/col. Fire on every agent turn. Payload: {row: 0-2, col: 0-2, speech?: string}.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "user_move",
+    "description": "Place the LEARNER's mark when they SPOKE the move. Fire in same response as place_mark. Payload: {row, col, heard}.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "clear_ui",
+    "description": "Reset the board to idle.",
+    "direction": "agent_to_app"
+  },
+  {
+    "name": "user_placed_mark",
+    "description": "Learner CLICKED a cell. Payload has the new full board, status, turn, plus the move. Respond with your place_mark and one short reaction.",
+    "direction": "app_to_agent",
+    "behavior": "respond"
+  },
+  {
+    "name": "board_sync",
+    "description": "Silent authoritative board state after every placement. Payload: {board, status, turn, moveCount, userSymbol, agentSymbol}. Use as ground truth.",
+    "direction": "app_to_agent",
+    "behavior": "notify"
+  }
+]

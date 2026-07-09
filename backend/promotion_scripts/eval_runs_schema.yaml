@@ -1,0 +1,22 @@
+# Schema for the eval_runs table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+- field_name: run_id
+  field_type: STRING
+- field_name: architecture
+  field_type: STRING
+- field_name: git_sha
+  field_type: STRING
+- field_name: scenario
+  field_type: STRING
+- field_name: ttfb_ms
+  field_type: FLOAT64
+- field_name: e2e_latency_ms
+  field_type: FLOAT64
+- field_name: wer
+  field_type: FLOAT64
+- field_name: mos_estimate
+  field_type: FLOAT64
+- field_name: notes
+  field_type: STRING
+- field_name: run_at
+  field_type: TIMESTAMP

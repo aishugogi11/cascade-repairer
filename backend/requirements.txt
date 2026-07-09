@@ -1,0 +1,14 @@
+fastapi==0.139.0
+uvicorn==0.50.0
+google-cloud-bigquery==3.42.1
+pydantic==2.13.4
+python-dotenv==1.2.2
+pyyaml==6.0.3
+requests==2.34.2
+vocal-bridge==0.21.0
+websockets==16.0
+openai-agents==0.17.7
+mcp-server-fetch==2026.6.4
+google-cloud-storage==2.19.0
+pytest==8.4.1
+httpx==0.28.1

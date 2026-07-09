@@ -1,0 +1,21 @@
+metadata:
+  ai_service_name: vocal-bridge-be
+  bigquery_dataset_id: vocal_bridge
+  gcs_bucket_name: vocal-bridge-hackathon-audio
+  # Phase 3 data layer — one table id per trip/session/eval table. Extracted
+  # into image.env as METADATA_*_TABLE_ID and consumed by run_artifact_setup.sh
+  # (CI table creation) and bigquery_helper.py (runtime table references).
+  trips_table_id: trips
+  itinerary_items_table_id: itinerary_items
+  bookings_table_id: bookings
+  sessions_table_id: sessions
+  turns_table_id: turns
+  eval_runs_table_id: eval_runs
+build_env_vars:
+  PROJECT_ID: vocal-bridge-hackathon
+  TARGET_AR: vocal-bridge-be-artifacts-dev
+  VERSION: 0.0.1dev
+  IMAGE_NAME: vocal-bridge-be
+  GCP_LOCATION: us-west1
+  APP_ENV: dev
+  DEBUG: "false"

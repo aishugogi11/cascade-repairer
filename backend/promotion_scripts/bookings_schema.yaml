@@ -1,0 +1,17 @@
+# Schema for the bookings table (Phase 3 data layer).
+# Source of truth: specs/tech-stack.md § Schema (BigQuery).
+# state: pending/confirmed/cancelled (validated in the repository layer).
+- field_name: booking_id
+  field_type: STRING
+- field_name: item_id
+  field_type: STRING
+- field_name: trip_id
+  field_type: STRING
+- field_name: sabre_confirmation_ref
+  field_type: STRING
+- field_name: state
+  field_type: STRING
+- field_name: booked_at
+  field_type: TIMESTAMP
+- field_name: raw_response
+  field_type: JSON
