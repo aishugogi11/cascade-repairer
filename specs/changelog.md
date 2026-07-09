@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 8 — Vocal Bridge web client integration
+**Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-web-client-integration/](2026-07-09-web-client-integration/)
+
+The browser is now a live surface for the backend agent — `/v1/web_call/` serves the L3 "Voice for your Agent" pattern (a VB AI-Agent-mode voice layer delegating every spoken query via `useAIAgent` to a same-origin `/query` seam running an OpenAI Agents SDK agent with per-session memory and `sessions`/`turns` logging) — QA-verified live on Cloud Run 2026-07-09 with a 58-second conversation whose delegated answers, bridge lines, and session close-out all landed; this page is the test surface for Phases 9–12, and the `/query` seam is exactly what Phase 9's Concierge replaces.
+
 ## Phase 7 — Course lesson demo routers: cascaded voice + outbound phone tool (L2/L3/L4 ports)
 **Completed:** 2026-07-08 · **Spec:** [specs/2026-07-08-course-lesson-demo-routers/](2026-07-08-course-lesson-demo-routers/)
 
