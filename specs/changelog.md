@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 9 — Concierge hybrid architecture (demo architecture)
+**Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-concierge-hybrid/](2026-07-09-concierge-hybrid/)
+
+The demo architecture is live and QA-verified on Cloud Run 2026-07-09 (transcript in the spec's `validation.md`): behind the Phase 8 `/query` seam, a fast foreground agent (`concierge.py`) launches all five real repair tools in parallel via the shared `launch_trip_repairs` seam and keeps talking — the live call repaired a broken trip in ~30 seconds while answering "how are the repairs coming?" by name — with `_repair_one` now the single writer of status transitions, and a post-QA addendum (`addendum-trip-context.md`) adding session-pinned trip context (zero per-turn BigQuery reads, explicit `trip_id` as the Phase 12 seam) plus a no-false-promises prompt rule; known residual, by design: the agent only learns a pre-existing `broken` status when told or when repairs launch — Phase 12's agent-calls-first opening covers it.
+
 ## Phase 8 — Vocal Bridge web client integration
 **Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-web-client-integration/](2026-07-09-web-client-integration/)
 
