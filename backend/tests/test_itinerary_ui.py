@@ -54,6 +54,14 @@ def test_page_serves_html(bq):
     bq.select.assert_not_called()  # the page itself costs no BigQuery read
 
 
+def test_page_contains_all_status_visual_hooks(bq):
+    """Every status in the repair lifecycle has a visual on the page."""
+    with TestClient(app) as client:
+        text = client.get("/v1/itinerary/").text
+    for status in ("planned", "booked", "broken", "repairing", "fixed", "cancelled"):
+        assert f'[data-status="{status}"]' in text
+
+
 def test_page_is_self_contained(bq):
     """No external requests — inline CSS/JS only, per the no-dependency rule."""
     with TestClient(app) as client:
@@ -122,6 +130,17 @@ def test_status_all_clear_only_when_nothing_broken_or_repairing(bq):
 
     assert mid_repair["summary"]["all_clear"] is False
     assert repaired["summary"]["all_clear"] is True
+
+
+def test_status_all_clear_false_for_broken_items(bq):
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("flight", "broken"), ("hotel", "booked")), None),
+    ]
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    assert body["summary"]["all_clear"] is False
 
 
 def test_status_unknown_trip_is_404(bq):
