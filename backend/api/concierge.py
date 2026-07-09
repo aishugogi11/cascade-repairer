@@ -15,6 +15,15 @@ clarifying questions instead of answering "how are the repairs coming?").
 The VB session name is the concurrency session id, so the snapshot, the
 event log, and the voice session are one thing.
 
+Trip context (QA addendum, 2026-07-09 — see the phase spec's
+addendum-trip-context.md): the traveler's trip is pinned to the session at
+first need — resolved once (latest trip, or an explicit trip_id via
+ensure_trip_context's parameter, the Phase 12 seam), its static facts cached
+in process and injected into every turn's instructions. Static facts come
+from that one read; live repair progress comes only from the in-memory
+snapshot — so no BigQuery read ever lands on the per-turn hot path after the
+pin, and a mid-call seed of a new trip cannot switch the agent's trip.
+
 Session history is an in-process dict (single Cloud Run instance — the
 standing scope decision); blocking BigQuery reads go through
 asyncio.to_thread.
@@ -24,11 +33,12 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 from agents import Agent, Runner, function_tool
+from pydantic import BaseModel
 
 from api import concurrency_core as core
 from api.concurrency_agent import session_snapshot
 from api.repositories import itinerary_items, trips
-from api.repositories.models import ItineraryItem
+from api.repositories.models import ItineraryItem, Trip, rows_to_models
 from api.sabre_tools import launch_trip_repairs
 
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
@@ -43,9 +53,16 @@ BASE_INSTRUCTIONS = (
     "trip, 'fix my trip'), call the fix_trip tool immediately — it launches "
     "every repair in the background and returns at once. Never wait silently "
     "for repairs to finish and never refuse other questions while they run; "
-    "keep helping. Your replies are spoken aloud: one or two short, "
-    "conversational sentences. No markdown, no lists, no stage directions, "
-    "and never speak ids or tool names. "
+    "keep helping. You cannot send notifications or follow up on your own — "
+    "never promise to 'let them know' when something finishes; instead "
+    "invite the traveler to ask again in a moment. Your replies are spoken "
+    "aloud: one or two short, conversational sentences. No markdown, no "
+    "lists, no stage directions, and never speak ids or tool names. "
+)
+
+_NO_TRIP_LINE = (
+    "There is no booked trip on file for this traveler yet — say so plainly "
+    "if asked about trip details. "
 )
 
 # session_name -> Agents SDK input list (multi-turn memory).
@@ -56,28 +73,80 @@ def _llm_model() -> str:
     return os.environ.get("CONCIERGE_LLM_MODEL", DEFAULT_LLM_MODEL)
 
 
-async def _latest_trip_items() -> Tuple[Optional[List[ItineraryItem]], Optional[str]]:
-    """The demo trip's items: most recently created trip, then its items.
-    Returns (items, speakable_error) — exactly one is set. A voice flow can
-    never ask the traveler for a trip id, so resolution is server-side."""
-    query = f"""
-        SELECT trip_id
-        FROM `{trips._table()}`
-        ORDER BY created_at DESC
-        LIMIT 1
-    """
-    success, rows, error = await asyncio.to_thread(trips.bq_helper.run_select, query)
+class TripContext(BaseModel):
+    """A session's pinned trip: the one BigQuery read, kept in process."""
+
+    trip: Trip
+    items: List[ItineraryItem]
+    summary: str
+
+
+# session_name -> pinned trip. Pinned once per session so a mid-call seed of
+# a new trip can't switch the agent's trip, and no turn after the first pays
+# a BigQuery read for context.
+_SESSION_TRIPS: Dict[str, TripContext] = {}
+
+
+def _trip_summary(trip: Trip, items: List[ItineraryItem]) -> str:
+    """Static trip facts for the instructions — authoritative, like the
+    repair snapshot (the measured Phase 5 wording rule). Statuses are
+    deliberately absent: live progress belongs to the snapshot."""
+    destinations = ", ".join(trip.destinations) if trip.destinations else "unknown"
+    dates = (
+        f"{trip.start_date} to {trip.end_date}"
+        if trip.start_date and trip.end_date
+        else "dates unknown"
+    )
+    parts = "; ".join(
+        f"{item.type}" + (f" ({item.location})" if item.location else "")
+        for item in items
+    )
+    return (
+        "TRIP CONTEXT (authoritative — this IS the traveler's booked trip; "
+        "answer where/when/what questions about it directly, never say you "
+        f"lack their itinerary): '{trip.title}' from {trip.origin or 'unknown'} "
+        f"to {destinations}, {dates}. Parts: {parts}. Live repair progress "
+        "comes only from the LIVE STATUS section, not from here. "
+    )
+
+
+async def ensure_trip_context(
+    session_id: str, trip_id: Optional[str] = None
+) -> Tuple[Optional[TripContext], Optional[str]]:
+    """Resolve and pin the session's trip on first call; cached afterwards.
+    Returns (context, speakable_error) — at most one is set, and a failed
+    resolution is never cached, so the next turn retries.
+
+    trip_id is the Phase 12 seam: the disruption/outbound-call flow knows
+    exactly which trip broke and pins it explicitly. Without it, the most
+    recently created trip wins — a voice flow can never ask for a UUID."""
+    context = _SESSION_TRIPS.get(session_id)
+    if context is not None:
+        return context, None
+
+    if trip_id:
+        success, trip, _error = await asyncio.to_thread(trips.get_trip, trip_id)
+    else:
+        query = f"""
+            SELECT *
+            FROM `{trips._table()}`
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        success, rows, _error = await asyncio.to_thread(
+            trips.bq_helper.run_select, query
+        )
+        trip = rows_to_models(Trip, rows)[0] if success and rows else None
     if not success:
         return None, (
             "I'm having trouble reaching the booking system right now — "
             "give me a second and ask me again."
         )
-    if not rows:
+    if trip is None:
         return None, "I don't see a booked trip for you yet."
 
-    trip_id = rows[0]["trip_id"]
-    success, items, error = await asyncio.to_thread(
-        itinerary_items.list_items_for_trip, trip_id
+    success, items, _error = await asyncio.to_thread(
+        itinerary_items.list_items_for_trip, trip.trip_id
     )
     if not success:
         return None, (
@@ -86,7 +155,10 @@ async def _latest_trip_items() -> Tuple[Optional[List[ItineraryItem]], Optional[
         )
     if not items:
         return None, "Your trip doesn't have any bookings on it yet."
-    return items, None
+
+    context = TripContext(trip=trip, items=items, summary=_trip_summary(trip, items))
+    _SESSION_TRIPS[session_id] = context
+    return context, None
 
 
 async def fix_trip_impl(session_id: str) -> str:
@@ -95,13 +167,14 @@ async def fix_trip_impl(session_id: str) -> str:
 
     Fires one background repair per itinerary item through the same seam as
     /repair_trip and returns immediately with a speakable summary; the tasks
-    report into this session's event log as they land. Failures return
-    speakable strings — a tool that raises would kill the spoken turn."""
+    report into this session's event log as they land. Items come from the
+    session's pinned trip. Failures return speakable strings — a tool that
+    raises would kill the spoken turn."""
     try:
-        items, speakable_error = await _latest_trip_items()
+        context, speakable_error = await ensure_trip_context(session_id)
         if speakable_error:
             return speakable_error
-        launched, _tasks = launch_trip_repairs(session_id, items)
+        launched, _tasks = launch_trip_repairs(session_id, context.items)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         return (
             "Something went wrong starting the repairs — give me a second "
@@ -116,11 +189,11 @@ async def fix_trip_impl(session_id: str) -> str:
     )
 
 
-def build_agent(session_id: str) -> Agent:
+def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> Agent:
     """The foreground agent for one turn. Tools close over session_id so
     background completions report into this voice session's log; the fresh
-    snapshot goes into instructions at build time — build per turn, never
-    once."""
+    snapshot (and the pinned trip's summary) go into instructions at build
+    time — build per turn, never once."""
 
     async def _fix_trip() -> str:
         """Start repairs for the traveler's booked trip after a disruption.
@@ -128,10 +201,11 @@ def build_agent(session_id: str) -> Agent:
         the conversation going while they work."""
         return await fix_trip_impl(session_id)
 
+    trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
         model=_llm_model(),
-        instructions=BASE_INSTRUCTIONS + session_snapshot(session_id),
+        instructions=BASE_INSTRUCTIONS + trip_line + session_snapshot(session_id),
         tools=[function_tool(_fix_trip, name_override="fix_trip")],
     )
 
@@ -141,8 +215,11 @@ async def answer_query(session_name: str, query: str) -> str:
 
     A plain `await Runner.run(...)` on the same loop as the background
     repairs (the concurrency_core pattern); history replay makes the
-    session multi-turn."""
-    agent = build_agent(session_name)
+    session multi-turn. The trip pin resolves on the session's first turn
+    (cached after), and a failed resolution never blocks the turn — the
+    agent just lacks trip details until a later turn's retry lands."""
+    trip_context, _ = await ensure_trip_context(session_name)
+    agent = build_agent(session_name, trip_context)
     history = _HISTORY.get(session_name, [])
     result = await Runner.run(
         agent,

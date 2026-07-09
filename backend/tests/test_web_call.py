@@ -43,6 +43,13 @@ def _mock_agent(monkeypatch, reply="I'm the backend agent on Cloud Run."):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(concierge_module, "Runner", _FakeRunner)
     monkeypatch.setattr(concierge_module, "_HISTORY", {})
+    monkeypatch.setattr(concierge_module, "_SESSION_TRIPS", {})
+    # The trip pin's read must never reach a real client; empty tables mean
+    # the turn proceeds with the no-trip instructions.
+    monkeypatch.setattr(
+        concierge_module.trips.bq_helper, "run_select",
+        lambda query, params=None: (True, [], None),
+    )
     monkeypatch.setattr(web_call_module, "_LOGGED_SESSIONS", set())
     return calls
 
@@ -184,6 +191,11 @@ def test_query_returns_agent_reply(monkeypatch):
 def test_query_agent_failure_is_502(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(concierge_module, "_HISTORY", {})
+    monkeypatch.setattr(concierge_module, "_SESSION_TRIPS", {})
+    monkeypatch.setattr(
+        concierge_module.trips.bq_helper, "run_select",
+        lambda query, params=None: (True, [], None),
+    )
 
     class _BoomRunner:
         @classmethod
