@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 10 — Live itinerary UI
+**Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-live-itinerary-ui/](2026-07-09-live-itinerary-ui/)
+
+The demo's second surface is live and QA-verified on Cloud Run 2026-07-09 (Josh's deployed break/repair run plus an independent validator walkthrough, report in the spec dir): `/v1/itinerary/` serves a self-contained mockup-styled page — five status cards, a traveler-voiced repair activity feed, a recovery timer against the 60-second target, and a trip selector — polling a reusable `GET /v1/itinerary/status/{trip_id}` endpoint every 1.5s so the screen flips broken → repairing → fixed while the agent talks; validator-triaged follow-ups were resolved as two added tests (all decisions answered B: no browser-automation dependency), with residual visual edge cases (backend-restart recovery, cancelled-item rendering, projector readability) parked to the Phase 12 rehearsal.
+
 ## Phase 9 — Concierge hybrid architecture (demo architecture)
 **Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-concierge-hybrid/](2026-07-09-concierge-hybrid/)
 
