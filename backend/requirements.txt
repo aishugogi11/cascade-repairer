@@ -8,6 +8,10 @@ requests==2.34.2
 vocal-bridge==0.21.0
 websockets==16.0
 openai-agents==0.17.7
+# openai 2.45.0 added a required InputTokensDetails.cache_write_tokens field
+# that openai-agents (through 0.18.0) doesn't populate — every Runner.run()
+# dies with a pydantic ValidationError. Pin until an agents release handles it.
+openai==2.44.0
 mcp-server-fetch==2026.6.4
 google-cloud-storage==2.19.0
 pytest==8.4.1
