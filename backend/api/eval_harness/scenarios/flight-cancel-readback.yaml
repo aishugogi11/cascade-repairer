@@ -1,0 +1,17 @@
+# Cascade Repairer core beat: the traveler hears the cancellation and asks
+# for the repaired plan read back. Ground truth doubles as the WER round-trip
+# text, so it is phrased the way a traveler would actually speak.
+name: flight-cancel-readback
+description: >
+  Flight cancelled mid-trip; the traveler asks what happened and wants the
+  repaired itinerary read back.
+turns:
+  - "My flight to San Francisco just got cancelled. What happens to the rest of my trip?"
+  - "Okay. Can you read me back the full updated itinerary?"
+ground_truth: >
+  My flight to San Francisco just got cancelled. What happens to the rest of
+  my trip?
+objective: >
+  Acknowledge the flight cancellation, reassure the traveler that repairs are
+  already underway, and read back the repaired itinerary covering the flight,
+  hotel, ride, dinner, and tour.

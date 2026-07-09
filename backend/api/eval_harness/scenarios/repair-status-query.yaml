@@ -1,0 +1,14 @@
+# The concurrency proof made conversational: repairs are in flight and the
+# traveler asks for progress by name — the Phase 5 session-snapshot pattern.
+name: repair-status-query
+description: >
+  Background repairs are running; the traveler asks how they are coming along
+  and about one specific leg.
+turns:
+  - "How are the repairs coming along?"
+  - "Is the hotel sorted out yet?"
+ground_truth: >
+  How are the repairs coming along? Is the hotel sorted out yet?
+objective: >
+  Report the live status of the in-flight repairs by name without stalling
+  the conversation, and answer the hotel question specifically.

@@ -1,6 +1,6 @@
 .PHONY: help run build up down restart logs clean \
         backend jupyter logs-backend logs-jupyter \
-        restart-backend restart-jupyter rebuild-jupyter
+        restart-backend restart-jupyter rebuild-jupyter eval
 
 COMPOSE ?= docker compose
 
@@ -40,6 +40,9 @@ logs-backend: ## Tail backend logs
 
 restart-backend: ## Restart the backend
 	$(COMPOSE) restart backend
+
+eval: ## Run the eval harness (Phase 11); pass flags via ARGS="--dry-run …"
+	$(COMPOSE) exec backend python -m api.eval_harness $(ARGS)
 
 # --- Jupyter ---------------------------------------------------------------
 jupyter: ## Build + start only jupyter
