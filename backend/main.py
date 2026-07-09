@@ -14,6 +14,7 @@ from api.disruption import disruption
 from api.sabre_tools import sabre_tools
 from api.outbound_call import outbound_call
 from api.cascade_demo import cascade_demo
+from api.web_call import web_call
 
 
 app = FastAPI(
@@ -62,6 +63,12 @@ app.include_router(
     cascade_demo,
     prefix="/v1/cascade_demo",
     tags=["cascade_demo"],
+)
+
+app.include_router(
+    web_call,
+    prefix="/v1/web_call",
+    tags=["web_call"],
 )
 
 if __name__ == "__main__":

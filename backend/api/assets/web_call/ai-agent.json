@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "description": "The Cascade Repairer travel assistant backend. Knows who it is and where it runs, and handles travel questions and general conversation. Forward any substantive question — including questions about its own identity — and only handle small-talk yourself.",
+  "verbatim": false
+}
