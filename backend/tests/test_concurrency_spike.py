@@ -223,7 +223,7 @@ def test_concurrent_sessions_do_not_cross_contaminate(bq):
 
 def test_build_agent_has_background_launching_tool():
     agent = concurrency_agent.build_agent("s-agent")
-    assert agent.model == "gpt-4.1-mini"
+    assert agent.model == "gpt-5.4-mini"
     assert len(agent.tools) == 1
 
 
