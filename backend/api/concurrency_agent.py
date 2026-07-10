@@ -95,7 +95,7 @@ def build_agent(session_id: str) -> Agent:
 
     return Agent(
         name="Concurrency Spike Agent",
-        model="gpt-4.1-mini",
+        model="gpt-5.4-mini",
         instructions=(
             "You are a travel assistant in a live conversation. Slow "
             "operations run in the background via your tools — never wait "

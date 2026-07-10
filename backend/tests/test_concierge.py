@@ -147,7 +147,7 @@ def test_agent_instructions_carry_authoritative_snapshot(monkeypatch, bq):
 def test_agent_uses_fast_model_and_fix_trip_tool(monkeypatch):
     monkeypatch.delenv("CONCIERGE_LLM_MODEL", raising=False)
     agent = concierge.build_agent("room-1")
-    assert agent.model == "gpt-4.1-mini"
+    assert agent.model == "gpt-5.4-mini"
     assert [t.name for t in agent.tools] == ["fix_trip"]
     # Without a pinned trip, the agent is told so instead of guessing.
     assert concierge._NO_TRIP_LINE in agent.instructions
