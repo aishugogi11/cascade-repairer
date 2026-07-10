@@ -186,13 +186,22 @@ RUNNERS = {
 }
 
 
-def eval_vb_session(session_id: str, objective: str) -> Tuple[Optional[float], str]:
+def eval_vb_session(
+    session_id: str, objective: str, agent_id: Optional[str] = None
+) -> Tuple[Optional[float], str]:
     """The actual L5 pattern: `vb eval <session_id> --objective … --json`
     scores a completed call 0–10; map onto 1–5 MOS. Returns (mos, summary) —
-    (None, reason) on any failure, never raises."""
-    ok, payload, error = run_vb(
-        "eval", session_id, "--objective", objective, json_output=True, timeout=120
-    )
+    (None, reason) on any failure, never raises.
+
+    `vb eval` refuses to run without an agent context on an account API key
+    (observed on Cloud Run 2026-07-09: "X-Agent-Id header required"), and a
+    fresh container has no `vb agent use` pin — so pass --agent explicitly.
+    Env fallback is the caller agent, which owns outbound-call sessions."""
+    args = ["eval", session_id, "--objective", objective]
+    agent_id = agent_id or os.environ.get("VOCAL_BRIDGE_CALLER_AGENT_ID", "").strip()
+    if agent_id:
+        args += ["--agent", agent_id]
+    ok, payload, error = run_vb(*args, json_output=True, timeout=120)
     if not ok:
         return None, f"vb eval failed: {error}"
     if not isinstance(payload, dict):
