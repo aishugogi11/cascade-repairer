@@ -1,107 +1,100 @@
-# Validation Report — Evaluation Harness Re-validation
-**Branch:** vb/dev    **Commit:** 86b4eebb4c09a9d54fd017f790f9e8eb5f289cc9    **Date:** 2026-07-09
+# Validation Report — Evaluation Harness (Phase 11, L5 port)
+**Branch:** vb/dev    **Commit:** c4bc3d6    **Date:** 2026-07-09
 
 ## Summary
-PARTIAL. The deployed 502 is fixed, the hermetic suite passes on the actual `backend` compose service, default deployed dry-run now measures all four architecture x scenario pairs, and a current-image Cloud Run job persisted four fresh `eval_runs` rows with `git_sha=86b4eeb`. The feature is still not fully validated because `validation.md` still names the nonexistent/non-running `api` service, no persisted MOS row exists, and the MOS walkthrough could not be independently verified without a real completed Vocal Bridge session id.
+PASS. All automated assertions pass hermetically inside the `backend` container — verified twice: once as prescribed (`docker compose exec backend pytest tests/ -q` → 243 passed, 4 skipped, all skips unrelated container-path tests) and once under a fully wiped environment (`env -i`, no `OPENAI_API_KEY`, no GCP credentials, no `vb` or `git` on PATH → identical 243 passed). The manual walkthrough is verified: dry-run against the deployed Cloud Run service prints all four architecture × scenario pairs and writes nothing; BigQuery `vocal_bridge.eval_runs` holds real rows for both architectures across both checked-in scenarios with `git_sha` populated; a persisted MOS row exists (mos_estimate 1.4, judge verdict/summary/suggestions in `notes`) produced by the `vocal-bridge-eval-harness` Cloud Run job (execution completed 2026-07-10T00:06Z). All four edge cases behave as specified. Two minor observations: cascaded latencies (~7.5 s TTFB deployed) exceed the "hundreds-to-low-thousands of ms" plausibility band validation.md predicted, and the roadmap Phase 11 heading carries a now-stale "(implementation; manual QA pending)" annotation.
 
 ## Criterion-by-criterion results
-- **Criterion:** Automated command from `validation.md` runs inside the api container: `docker compose exec api pytest tests/ -q`.
-- **Status:** FAIL
-- **Evidence:** Command output: `service "api" is not running`. `docker-compose.yml` defines service `backend`; `revalidation-notes.md` also marks this as open decision D1.
-- **Notes:** Equivalent actual command `docker compose exec backend pytest tests/ -q` passed: `242 passed, 4 skipped, 6 warnings in 6.26s`.
 
-- **Criterion:** WER assertions: identical strings 0.0; single substitution in five-word reference 0.2; empty hypothesis vs non-empty reference 1.0; case/punctuation-only differences 0.0.
+### Automated
+
+- **Criterion:** Full suite passes in the backend container with no GCP credentials, no `OPENAI_API_KEY`, no `vb` binary
 - **Status:** PASS
-- **Evidence:** `backend/tests/test_eval_harness.py` covers the required WER cases; included in passing backend-service pytest run.
-- **Notes:** None.
+- **Evidence:** `docker compose exec backend pytest tests/ -q` → `243 passed, 4 skipped` (skips are `test_validator_docs_contract.py`/`test_validator_skill_sync.py` repo-root-absent guards, unrelated). Because the dev container actually has `OPENAI_API_KEY` and `/usr/local/bin/vb`, hermeticity was proven separately: `env -i HOME=/tmp PATH=/tmp/hermbin python -m pytest tests/ -q` with a PATH containing only `python`/`pytest`/`sh` (no `vb`, no `git`) → `243 passed, 4 skipped`.
+- **Notes:** `tests/test_eval_harness.py` contributes 35 tests, all passing in 0.42 s.
 
-- **Criterion:** MOS mapping: `vb eval` score 0 maps to 1.0, 10 maps to 5.0, and out-of-range scores clamp.
+- **Criterion:** WER — identical → 0.0; one substitution in five words → 0.2; empty hypothesis → 1.0; case/punctuation-only differences → 0.0
 - **Status:** PASS
-- **Evidence:** `backend/tests/test_eval_harness.py` covers zero, ten, out-of-range, and midpoint mapping; included in passing backend-service pytest run.
-- **Notes:** None.
+- **Evidence:** `backend/tests/test_eval_harness.py::test_wer_identical_is_zero`, `test_wer_single_substitution_in_five_words`, `test_wer_empty_hypothesis_is_one`, `test_wer_case_and_punctuation_invariant` (plus both-empty and >1.0 cases). Implementation is a stdlib two-row word-level Levenshtein in `backend/api/eval_harness/metrics.py` with lowercase/punctuation-stripping normalization.
 
-- **Criterion:** Fixtures: checked-in scenario YAML files load through pydantic; fixtures missing `ground_truth` or `objective` fail with an error naming the file.
+- **Criterion:** MOS mapping — 0 → 1.0, 10 → 5.0, out-of-range clamps
 - **Status:** PASS
-- **Evidence:** `backend/tests/test_eval_harness.py` fixture-loader tests passed; checked-in scenarios `flight-cancel-readback` and `repair-status-query` loaded during dry-run/job execution.
-- **Notes:** None.
+- **Evidence:** `test_mos_score_zero_maps_to_one`, `test_mos_score_ten_maps_to_five`, `test_mos_out_of_range_clamps` (−3 → 1.0, 14 → 5.0), `test_mos_midpoint`. `metrics.mos_from_vb_score` clamps to [0, 10] before the linear 1–5 projection.
 
-- **Criterion:** Runner resilience: with mocked HTTP transport, one failing turn is recorded in notes and remaining turns still execute; process does not raise.
+- **Criterion:** Fixtures — every checked-in YAML loads through the pydantic model; missing `ground_truth`/`objective` fails naming the file
 - **Status:** PASS
-- **Evidence:** Mocked failing-turn test passes; `_build_row` serializes per-turn error fields into `notes.turns`.
-- **Notes:** The previously suggested direct assertion for row notes remains a useful missing test.
+- **Evidence:** `test_every_checked_in_fixture_loads` (loads `backend/api/eval_harness/scenarios/` — both `flight-cancel-readback.yaml` and `repair-status-query.yaml` present and valid), `test_missing_field_fails_naming_the_file` (`pytest.raises(ScenarioError, match="broken.yaml")`), plus non-mapping-YAML and blank-turn rejection tests. `scenario_loader.load_scenario` prefixes every error with `path.name`.
 
-- **Criterion:** Persistence discipline: `--dry-run` never calls `eval_runs.create_run`; non-dry run calls once per architecture x scenario with enum-valid architecture and fixture scenario name.
+- **Criterion:** Runner resilience — with a mocked HTTP transport, one failing turn is recorded in notes and remaining turns execute; no raise
 - **Status:** PASS
-- **Evidence:** Mocked repository tests passed. Live dry-run output ended with `dry run: 4 row(s) not written`. Cloud Run job execution `vocal-bridge-eval-harness-xz8qs` completed successfully and BigQuery shows 4 rows for `git_sha=86b4eeb`: 2 cascaded and 2 concierge.
-- **Notes:** Per `revalidation-notes.md`, local non-dry `make eval` is expected to fail without local GCP credentials; persistence is validated through the Cloud Run job.
+- **Evidence:** `test_run_cascaded_failed_turn_recorded_not_raised` — turn 1 returns HTTP 502 via `httpx.MockTransport`; exactly one `TurnTiming.error` containing "502", the other turn still measured (`ttfb_samples` length 1), `result.failed` is False. Turn errors flow into the persisted row's `notes.turns[].error` via `__main__._build_row`. `test_run_cascaded_unreachable_backend_fails_cleanly` covers the all-turns-fail case without raising.
 
-- **Criterion:** Import hermeticity: importing `api.eval_harness` and running `--help` requires no credentials and no network.
+- **Criterion:** Persistence discipline — `--dry-run` never calls `eval_runs.create_run`; non-dry calls it once per architecture × scenario with enum-valid `architecture` and the fixture's `scenario`
 - **Status:** PASS
-- **Evidence:** `docker compose exec backend python -m api.eval_harness --help` exited 0 and printed CLI help. `docker compose exec backend python -c 'import api.eval_harness; ...'` exited 0.
-- **Notes:** None.
+- **Evidence:** `test_cli_dry_run_never_writes` (`create_run.assert_not_called()`), `test_cli_writes_one_row_per_architecture_x_scenario` (len(written) == fixtures × RUNNERS; `row.architecture in ("cascaded", "concierge")`; `row.scenario in fixture_names`; notes valid JSON). `EvalRun.architecture` is `Literal["cascaded", "realtime", "concierge"]` (`backend/api/repositories/models.py:21`), so pydantic enforces enum validity at construction.
 
-- **Criterion:** Manual deployed dry-run: `make eval ARGS="--dry-run"` prints every architecture x scenario pair with plausible TTFB/e2e, WER, empty MOS, base URL note, and writes no BigQuery row.
+- **Criterion:** Import hermeticity — importing `api.eval_harness` and running `--help` needs no credentials/network
 - **Status:** PASS
-- **Evidence:** Command exited 0 against `https://vocal-bridge-be-dev-24105435206.us-west1.run.app` and printed all 4 rows: cascaded `flight-cancel-readback` 8298.8/8355.5 ms WER 0.0625; concierge `flight-cancel-readback` 3848.9/3850.8 ms; cascaded `repair-status-query` 7583.1/7673.0 ms WER 0.0; concierge `repair-status-query` 1865.6/1867.2 ms; `dry run: 4 row(s) not written`.
-- **Notes:** The prior deployed `/v1/web_call/query` 502 is resolved; direct probe returned HTTP 200. Cascaded latency is above the "hundreds-to-low-thousands" wording, but `revalidation-notes.md` records ~7-9 s as structural/open D3 rather than a current defect.
+- **Evidence:** `test_package_imports_credential_free`, plus a live check under `env -i` with no credentials: `python -c "import api.eval_harness; import api.eval_harness.__main__"` → ok; `python -m api.eval_harness --help` → exit 0. `__main__.main` reads env inside the function body, not at import.
 
-- **Criterion:** Manual deployed non-dry run writes one real `eval_runs` row per architecture x scenario with populated `git_sha`, matching scenario, and fresh `run_at`.
+### Manual
+
+- **Criterion:** Walkthrough 1 — `make eval ARGS="--dry-run"` prints a table for every architecture × scenario pair with plausible numbers, MOS empty, base URL named, no BigQuery row
+- **Status:** PASS (with one deviation noted)
+- **Evidence:** Ran it. Table printed all 4 pairs against `https://vocal-bridge-be-dev-24105435206.us-west1.run.app`: cascaded 7467/7597 ms TTFB with WER 0.0625/0.0, concierge 2695/1641 ms, MOS column `-` throughout, `dry run: 4 row(s) not written`, exit 0. BigQuery row count and `MAX(run_at)` unchanged after the run (11 rows, latest 2026-07-10 00:05:56).
+- **Notes:** Deviation: cascaded TTFB/e2e ≈ 7.5 s exceeds the criterion's "hundreds-to-low-thousands of ms" band (concierge is within it). WER is within 0.0–0.3. The numbers are real measurements of a live STT→agent→TTS chain, so this reads as an optimistic prediction in validation.md rather than a harness defect — see Gaps.
+
+- **Criterion:** Walkthrough 2 — non-dry run lands one row per pair in `eval_runs` with `git_sha` populated, `scenario` matching fixtures, fresh `run_at`
 - **Status:** PASS
-- **Evidence:** Revalidation procedure used Cloud Run job `vocal-bridge-eval-harness`: updated to image tag/GIT_SHA `86b4eeb`, executed `vocal-bridge-eval-harness-xz8qs`, status completed successfully in 1m13s. BigQuery returned 4 rows for `git_sha=86b4eeb`, scenarios `flight-cancel-readback` and `repair-status-query`, latest `run_at` 2026-07-09 23:44:48.
-- **Notes:** This validates the new GCP-side persistence path from `revalidation-notes.md`; it does not validate local credentialed writes.
+- **Evidence:** `bq query` against `vocal-bridge-hackathon.vocal_bridge.eval_runs`: rows for all four pairs (cascaded/concierge × flight-cancel-readback/repair-status-query) at `git_sha=86b4eeb`, `run_at` 2026-07-09 23:44 – 2026-07-10 00:05 UTC; earlier full set at `2d208af`. 11 rows total. The Cloud Run job `vocal-bridge-eval-harness` (us-west1) exists; latest execution `vocal-bridge-eval-harness-lwzzf` completed 2026-07-10T00:06:01Z, matching the newest rows.
+- **Notes:** I did not fire a fresh non-dry run to avoid polluting the baseline table; evidence is the persisted rows plus the job execution record. The persisted rows are stamped `86b4eeb`/`2d208af`, i.e. the SHAs that produced them — commits after that (55ccb1a "harness bug fix runner", PR #12 agent-context) have no persisted rows yet.
 
-- **Criterion:** MOS leg with a completed Vocal Bridge session writes `mos_estimate` 1.0-5.0 and judge summary/suggestions in notes.
-- **Status:** FAIL
-- **Evidence:** No completed Vocal Bridge session id was available to run the manual MOS command. BigQuery query `WHERE mos_estimate IS NOT NULL` returned `[]`; the fresh `86b4eeb` rows have `mos_estimate=NULL`.
-- **Notes:** Code-level fix is present and tested for both flat and nested `vb eval --json` shapes, including `test_eval_vb_session_nested_result_shape`, but the validation criterion requires live persisted MOS evidence.
-
-- **Criterion:** Local fallback: `make eval ARGS="--base-url http://localhost:8080 --dry-run"` against docker compose stack runs successfully with local latencies.
+- **Criterion:** Walkthrough 3 — MOS leg with a real Vocal Bridge session: `mos_estimate` in [1.0, 5.0], judge summary/suggestions in `notes`
 - **Status:** PASS
-- **Evidence:** Command exited 0 and printed all 4 rows: cascaded `flight-cancel-readback` 20356.2/20368.2 ms WER 0.0625; concierge `flight-cancel-readback` 4452.4/4468.4 ms; cascaded `repair-status-query` 18740.6/18742.8 ms WER 0.0; concierge `repair-status-query` 4628.8/4695.1 ms.
-- **Notes:** Local cascaded latency is high but the acceptance text only requires the local fallback to run successfully with local latencies.
+- **Evidence:** Row at 2026-07-10 00:05:56 (`concierge × flight-cancel-readback`, git_sha 86b4eeb): `mos_estimate=1.4` (judge score 1 → 1.4 on the 1–5 scale) with `notes.mos` containing `vb_session=358d54c3-…`, `verdict: "fail"`, a full judge summary, and `suggestions` (prompt-improvement text). Verified via `bq query` on the notes column.
+- **Notes:** The low score reflects the evaluated call's content (agent went off-objective), not a harness fault — the leg mechanically works end to end.
 
-- **Criterion:** Backend unreachable edge case reports per-run failure, exits non-zero, and writes no partial garbage row for a run with zero successful turns.
+- **Criterion:** Walkthrough 4 — local fallback `--base-url http://localhost:8080 --dry-run` succeeds with local latencies
 - **Status:** PASS
-- **Evidence:** `make eval ARGS="--base-url http://localhost:9 --dry-run"` printed four `FAILED: ... no successful measurements` lines, `every run failed; nothing to persist`, and `make` exited non-zero.
-- **Notes:** None.
+- **Evidence:** Ran `make eval ARGS="--base-url http://localhost:8080 --dry-run --scenario repair-status-query"`: both architectures measured (cascaded 21130 ms, concierge 4520 ms, WER 0.0), `dry run: 2 row(s) not written`, exit 0.
 
-- **Criterion:** `--vb-session` given but the `vb` CLI errors: run still completes; `mos_estimate` is NULL and notes say why.
+### Edge cases
+
+- **Criterion:** Unreachable `--base-url` → per-run failure in the table, non-zero exit, no partial garbage row
 - **Status:** PASS
-- **Evidence:** Unit test for missing `vb` CLI passed; runner returns `(None, reason)` without raising. CLI row construction attaches `mos` notes when `eval_vb_session` returns a note.
-- **Notes:** The CLI table still does not display the MOS failure reason; it is only in persisted/dry-run row notes.
+- **Evidence:** `--base-url http://localhost:9 --dry-run --scenario repair-status-query` → both pairs print `FAILED: … no successful measurements`, exit code 1. Code path: `result.failed` runs are never turned into rows (`__main__.main`), and `test_cli_all_runs_failed_exits_nonzero` asserts `create_run` not called.
 
-- **Criterion:** `--scenario` naming a nonexistent fixture gives a clear error listing available scenario names.
+- **Criterion:** `--vb-session` given but `vb` errors → run completes, `mos_estimate` NULL, `notes` says why
 - **Status:** PASS
-- **Evidence:** `docker compose exec backend python -m api.eval_harness --scenario does-not-exist --dry-run` exited 2 and printed `unknown scenario 'does-not-exist'; available: flight-cancel-readback, repair-status-query`.
-- **Notes:** None.
+- **Evidence:** Live in-container check: `eval_vb_session("bogus-session-id", "test objective")` → `(None, "vb eval failed: vb eval bogus-session-id … failed: usage: vb …")` — no raise, reason captured. Unit coverage: `test_eval_vb_session_cli_missing`, `test_eval_vb_session_non_numeric_score`. `_build_row` writes the reason into `notes.mos` while `mos_estimate` stays None.
+- **Notes:** No CLI-level test asserts the row is still written with `mos_estimate=None` on judge failure — see Missing tests.
 
-- **Criterion:** Detached-HEAD or non-git context writes row with `git_sha` NULL, not a crash.
+- **Criterion:** `--scenario` naming a nonexistent fixture → clear error listing available names
 - **Status:** PASS
-- **Evidence:** Unit test for missing git/GIT_SHA passed; current `make eval` also passes host `GIT_SHA` into the container for normal local runs.
-- **Notes:** None.
+- **Evidence:** Live run: `--scenario nope --dry-run` → `unknown scenario 'nope'; available: flight-cancel-readback, repair-status-query` on stderr, exit 2. Test: `test_cli_unknown_scenario_lists_available`.
 
-- **Criterion:** Tone check: CLI output is terse, factual team-facing text.
+- **Criterion:** Detached-HEAD / non-git context → row written with `git_sha` NULL, not a crash
 - **Status:** PASS
-- **Evidence:** CLI output is a compact table plus explicit `FAILED:` lines for bad-base runs.
-- **Notes:** None.
+- **Evidence:** `test_resolve_git_sha_no_git_no_crash` (subprocess raising OSError → None) and `test_resolve_git_sha_env_wins`; `EvalRun.git_sha` is `Optional[str]`; the full suite passed under `env -i` with no `git` on PATH. `test_cli_base_url_flag_reaches_runner` exercises the CLI with `resolve_git_sha() → None`.
 
-- **Criterion:** Definition of done: automated assertions pass hermetically, deployed manual steps 1-2 verified, MOS verified once, `eval_runs` contains real measured rows for cascaded and concierge across checked-in scenarios with git SHA, roadmap marks Phase 11 complete.
-- **Status:** FAIL
-- **Evidence:** Automated assertions pass through actual `backend` service, deployed dry-run passes, and `eval_runs` contains current `86b4eeb` rows for both architectures and both scenarios. MOS remains unverified/persisted: no row has `mos_estimate IS NOT NULL`. The exact validation command still fails on service `api`.
-- **Notes:** Roadmap is marked `[x] COMPLETE`; validation evidence is still incomplete because of MOS and the documented service-name mismatch.
+### Definition of done
+
+- **Automated assertions pass hermetically in the container:** PASS (above).
+- **Manual 1–2 verified against deployed Cloud Run; step 3 with a real VB session:** PASS (step 1 re-executed by this validator; steps 2–3 evidenced by persisted rows + job execution).
+- **`eval_runs` contains real measured rows for cascaded and concierge across all checked-in scenarios, stamped with the producing git SHA:** PASS — complete 2×2 sets at `2d208af` and `86b4eeb`.
+- **`specs/roadmap.md` Phase 11 heading marked `[x] COMPLETE`:** PASS with a caveat — the heading reads `[x] COMPLETE (implementation; manual QA pending)`. The checkbox is set, but the "manual QA pending" annotation is now stale given the persisted MOS row and this walkthrough; it should be cleaned up.
 
 ## Missing tests
-- Add `backend/tests/test_eval_harness.py::test_failed_turn_error_appears_in_row_notes`: build a row from a result with one failed turn and assert `notes.turns[*].error` contains the failure.
-- Add a test for operator-visible MOS failure feedback, e.g. `backend/tests/test_eval_harness.py::test_cli_prints_vb_eval_failure_reason`, so bad session ids are visible without inspecting JSON notes.
-- The previous proposed tests for documented compose service name and WER-only cascaded success remain blocked by open decisions D1/D2 in `revalidation-notes.md`.
+- CLI-level judge-failure persistence: no test asserts that when `eval_vb_session` returns `(None, reason)`, `main([])` still writes rows with `mos_estimate is None` and `reason` in `notes["mos"]`. Propose `backend/tests/test_eval_harness.py::test_cli_vb_session_failure_still_writes_row_with_reason` (monkeypatch `eval_vb_session` → `(None, "vb eval failed: …")`, mock `create_run`, assert row written with `mos_estimate None` and the reason inside `json.loads(row.notes)["mos"]`). Not written by the validator — the behavior is verified live and at unit level; this is hardening, not a coverage hole against a stated automated criterion.
+- All stated automated criteria have direct tests; no validator tests were needed.
 
 ## Gaps in validation.md
-- Should the automated command be corrected from `docker compose exec api ...` to `docker compose exec backend ...`?
-- Should the validation procedure explicitly name the Cloud Run job path for non-dry persistence, since local non-dry writes are intentionally unsupported without local GCP credentials?
-- Should the MOS step specify how validators obtain a valid completed Vocal Bridge session id and whether a persisted MOS row is required for definition of done?
-- Should the dry-run latency expectation be revised for cascaded `/converse`, since observed deployed TTFB is ~7-9 seconds and local TTFB is ~18-20 seconds?
+- The dry-run plausibility band ("TTFB and e2e in the hundreds-to-low-thousands of ms") does not hold for the cascaded architecture against the deployed service (~7.5 s TTFB; ~21 s locally). Should the criterion state per-architecture bands (concierge ≈ 1.5–3.5 s; cascaded ≈ 6–9 s deployed), or is sub-low-thousands cascaded latency itself a Phase 12 requirement someone should be working toward?
+- "a note naming the base URL" in walkthrough 1: the base URL appears in the per-run progress lines and in each row's `notes` JSON, but not in the printed dry-run table itself. Is the progress line sufficient, or should the table footer name the target?
+- The definition of done says rows are "stamped with the git SHA that produced them" — satisfied — but the newest persisted rows predate the final two commits on this branch (55ccb1a, PR #12). If the intent is "baseline rows at the SHA Phase 12 will demo from," a re-run at HEAD is needed; the spec is silent on this.
 
 ## Risks not covered by validation.md
-- The Cloud Run eval job had to be manually updated from `2d208af` to `86b4eeb`; if the job is not kept in sync with the deployed service, persisted eval evidence can lag the actual release.
-- No MOS rows exist in `eval_runs`, so Phase 12 still lacks persisted quality-judge evidence even though latency/WER rows are present.
-- Pytest still passes with runtime warnings in `tests/test_sabre_tools.py::test_repair_trip_failed_write_surfaces_as_error_event` about unawaited repair coroutines; unrelated to the eval harness, but still rehearsal risk.
+- `__main__.main` returns exit 0 when at least one row persists (`return 1 if written == 0 else 0`), so a run where some BigQuery inserts fail still exits 0 (failures are printed to stderr). No criterion addresses partial persistence failure.
+- The MOS verdict rides on every architecture row of the invocation for a given scenario (one `vb eval` per scenario, attached to both `cascaded` and `concierge` rows), so `mos_estimate` is not architecture-specific; consumers comparing architectures by MOS would double-count one judged call. `notes.mos.vb_session` disambiguates provenance.
+- `run_cascaded`'s WER leg synthesizes ground truth with the backend's own TTS, so WER is a TTS→STT consistency floor (the code says so in `notes.wer_leg`); anyone reading `eval_runs.wer` as human-speech WER will over-trust it.
+- The `env -i` hermetic run proves no ambient credentials are needed, but the suite still runs with network available; nothing technically blocks a future test from calling out. Low risk given all HTTP goes through `MockTransport` today.
