@@ -2,10 +2,11 @@
 
 ## Automated
 
-Run inside the api container (the repo's standing pattern):
+Run inside the backend container (the repo's standing pattern; D1 resolved
+2026-07-09 — the compose service is named `backend`):
 
 ```bash
-docker compose exec api pytest tests/ -q
+docker compose exec backend pytest tests/ -q
 ```
 
 All tests pass, including the new `tests/test_eval_harness.py`, with **no GCP
