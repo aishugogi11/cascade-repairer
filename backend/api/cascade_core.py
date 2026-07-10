@@ -25,7 +25,7 @@ from agents import Agent, Runner
 from openai import OpenAI
 
 DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
-DEFAULT_LLM_MODEL = "gpt-4.1-mini"
+DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
 DEFAULT_TTS_VOICE = "alloy"
 

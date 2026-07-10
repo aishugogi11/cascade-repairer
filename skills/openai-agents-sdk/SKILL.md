@@ -16,7 +16,7 @@ from agents import Agent, Runner
 
 agent = Agent(
     name="MyAgent",
-    model="gpt-4.1-mini",
+    model="gpt-5.4-mini",
     instructions="You are a helpful assistant.",
 )
 
@@ -46,7 +46,7 @@ get_weather = function_tool(_get_weather)
 
 agent = Agent(
     name="Weather Agent",
-    model="gpt-4.1-mini",
+    model="gpt-5.4-mini",
     instructions="Use the get_weather tool to answer weather questions.",
     tools=[get_weather],
 )
@@ -70,7 +70,7 @@ async with MCPServerStdio(name="Fetch Server", params=fetch_server_params,
                           client_session_timeout_seconds=60) as server:
     agent = Agent(
         name="MyAgent",
-        model="gpt-4.1-mini",
+        model="gpt-5.4-mini",
         instructions=PROMPT,
         mcp_servers=[server],
     )
