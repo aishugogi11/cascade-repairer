@@ -87,7 +87,7 @@ async def run_agents():
 
         agent = Agent(
             name="MyAgent",
-            model="gpt-4.1-mini",
+            model="gpt-5.4-mini",
             instructions=PROMPT,
             mcp_servers=[server],
         )
@@ -143,7 +143,7 @@ async def run_agents_with_mcp_filesystem():
 
         agent = Agent(
             name="Files Agent",
-            model="gpt-4.1-mini",
+            model="gpt-5.4-mini",
             instructions=FILES_AGENT_PROMPT,
             mcp_servers=[server],
         )
@@ -177,7 +177,7 @@ async def run_agents_with_function_tool():
     # and docstring.
     agent = Agent(
         name="Weather Agent",
-        model="gpt-4.1-mini",
+        model="gpt-5.4-mini",
         instructions="You are a helpful assistant. Use the get_weather tool "
                      "to answer weather questions.",
         tools=[get_weather],
@@ -205,7 +205,7 @@ async def run_agents_no_mcp():
 
     agent = Agent(
         name="MyAgent",
-        model="gpt-4.1-mini",
+        model="gpt-5.4-mini",
         instructions=PROMPT,
     )
 

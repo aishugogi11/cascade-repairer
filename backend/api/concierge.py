@@ -41,7 +41,7 @@ from api.repositories import itinerary_items, trips
 from api.repositories.models import ItineraryItem, Trip, rows_to_models
 from api.sabre_tools import launch_trip_repairs
 
-DEFAULT_LLM_MODEL = "gpt-4.1-mini"
+DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 
 # The self-identification is the live proof answers come from this backend
 # (the Phase 8 manual check); the disruption/launch rules are the Concierge.

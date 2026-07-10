@@ -78,6 +78,18 @@ Tests are hermetic: no GCP credentials or `OPENAI_API_KEY` required. The agent e
 
 Details and decisions: [`specs/tech-stack.md`](specs/tech-stack.md).
 
+## Course integration patterns
+
+The course teaches three patterns for where voice plugs into a product. These are distinct from the cascaded, real-time, and Concierge voice architectures above:
+
+1. **Voice embedded in applications (Voice for your application).** Voice and the GUI share bidirectional state: spoken commands can trigger UI changes, while clicks and other UI actions remain visible to the voice agent. The course calls this the **Client Actions** pattern and demonstrates it in Lesson 2 (`jupyter_notebook/training_course/L2/`).
+2. **Voice for existing agents.** Vocal Bridge acts as a thin voice layer in front of an existing GPT, Claude, LangChain, or other LLM agent. It handles conversational flow itself and delegates queries that need the existing agent's reasoning, tools, or domain logic. Lesson 3 demonstrates this with `useAIAgent`; the backend reference surface is `/v1/web_call/`.
+3. **Voice as a tool.** An LLM agent invokes voice when a phone call or live conversation is the right modality, just as it would call any other tool. Lesson 4 demonstrates outbound calling with `vb call`; the backend reference surface is `/v1/outbound_call`.
+
+> **Pattern used by the Cascade Repairer demo:** [`backend/api/demo.py`](backend/api/demo.py) uses the outbound-calling capability associated with **Voice as a tool**, but it is not a strict implementation of that pattern. Both demo beats invoke `vb_cli.place_call` to make a proactive outbound call: first to confirm the booking, then to report the cancellation while repairs run in the background. The calls are triggered deterministically by the operator-facing demo orchestrator rather than selected as a tool by an LLM. The demo is therefore closest to Pattern 3, but does not fully implement any of the three course integration patterns. Its live itinerary is a coordinated visual surface, not the Client Actions pattern, because the phone agent and UI do not share bidirectional WebRTC state.
+
+The canonical course wording and definitions live in [`COURSE_TRANSCRIPT.md`](jupyter_notebook/training_course/COURSE_TRANSCRIPT.md) and [`COURSE_GLOSSARY.md`](jupyter_notebook/training_course/COURSE_GLOSSARY.md).
+
 ## Database structure
 
 Six tables in the BigQuery dataset `vocal_bridge` (us-west1). Schema source of truth: [`specs/tech-stack.md`](specs/tech-stack.md) § Schema; typed pydantic models + one repository module per table live in `backend/api/repositories/`. Tables are created idempotently by CI on every build and never dropped.
@@ -167,5 +179,3 @@ The backend runs on **Cloud Run** (GCP project `vocal-bridge-hackathon`, `us-wes
 - Health check: `GET /v1/hello/gcp_check` — verifies BigQuery and GCS reachability independently.
 
 CI/CD is Cloud Build, driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml`: validate config → ensure BigQuery dataset → build image → **pytest inside the built image** (failure blocks the deploy) → deploy. The pipeline fires on a **GitHub PR from a `vb/feature/*` branch into `vb/dev`** — direct pushes do not build. Provisioning and console-only setup steps: [`backend/devops/README.md`](backend/devops/README.md).
-
-
