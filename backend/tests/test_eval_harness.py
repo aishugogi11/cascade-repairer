@@ -250,6 +250,29 @@ def test_eval_vb_session_nested_result_shape(monkeypatch):
     assert parsed["suggestions"] == "prioritize the purpose block"
 
 
+def test_eval_vb_session_passes_agent_context(monkeypatch):
+    # Stateless containers have no `vb agent use` pin; --agent must be
+    # injected from the explicit param or the caller-agent env fallback.
+    seen = {}
+
+    def capture(*args, **kwargs):
+        seen["args"] = args
+        return True, {"result": {"score": 5}}, None
+
+    monkeypatch.setattr(runner, "run_vb", capture)
+
+    monkeypatch.setenv("VOCAL_BRIDGE_CALLER_AGENT_ID", "env-agent")
+    runner.eval_vb_session("sess-1", "objective")
+    assert seen["args"][-2:] == ("--agent", "env-agent")
+
+    runner.eval_vb_session("sess-1", "objective", agent_id="explicit-agent")
+    assert seen["args"][-2:] == ("--agent", "explicit-agent")
+
+    monkeypatch.delenv("VOCAL_BRIDGE_CALLER_AGENT_ID", raising=False)
+    runner.eval_vb_session("sess-1", "objective")
+    assert "--agent" not in seen["args"]
+
+
 def test_eval_vb_session_cli_missing(monkeypatch):
     monkeypatch.setattr(runner, "run_vb", lambda *a, **k: (False, None, "vb CLI not found on PATH"))
     mos, reason = runner.eval_vb_session("sess-1", "objective")
@@ -345,7 +368,7 @@ def test_cli_all_runs_failed_exits_nonzero(monkeypatch, capsys):
 def test_cli_vb_session_attaches_mos(monkeypatch):
     _patch_runners(monkeypatch)
     monkeypatch.setattr(
-        harness_main, "eval_vb_session", lambda sid, obj: (4.2, '{"score": 8}')
+        harness_main, "eval_vb_session", lambda sid, obj, agent=None: (4.2, '{"score": 8}')
     )
     create_run = MagicMock(return_value=(True, None, None))
     monkeypatch.setattr(harness_main.eval_runs_repo, "create_run", create_run)

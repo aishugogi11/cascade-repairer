@@ -105,6 +105,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="completed Vocal Bridge session id — enables the vb eval MOS leg",
     )
     parser.add_argument(
+        "--vb-agent",
+        default=None,
+        help="VB agent id owning the session (default: $VOCAL_BRIDGE_CALLER_AGENT_ID)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print results without writing to BigQuery",
@@ -143,7 +148,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         mos: Optional[float] = None
         mos_note: Optional[str] = None
         if args.vb_session:
-            mos, mos_note = eval_vb_session(args.vb_session, scenario.objective)
+            mos, mos_note = eval_vb_session(
+                args.vb_session, scenario.objective, args.vb_agent
+            )
 
         for architecture in architectures:
             print(f"running {architecture} × {scenario.name} against {base_url} …")
