@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 12 — Dress rehearsal: the cascade, end to end
+**Completed:** 2026-07-10 · **Spec:** [specs/2026-07-10-dress-rehearsal/](2026-07-10-dress-rehearsal/)
+
+The demo is stage-ready and QA-complete 2026-07-10 (Josh's live projector run plus a curl-driven deployed rehearsal, timings in the spec's `runbook.md`): a two-button operator page (`/v1/demo/`) drives the whole Cascade Repairer story through a new orchestrator router — "Trigger call" places a real Vocal Bridge booking call while the trip seeds server-side, "Flight canceled" places the agent-reaches-out-first cancellation call, breaks the flight, and launches all five parallel repairs — proven on Cloud Run with real phone calls: all five legs fixed in **~21 seconds**, a third of the 60-second gate, with the runbook capturing recovery moves and the ops findings that cost a morning (outbound calling requires the Developer plan — 10 calls/day resetting 00:00 UTC; the DeepLearning.ai partner-grant pool is spent and never refills); known residuals carried to the roadmap: two itinerary-page visual edge cases, eval capture for rehearsal runs, and a stagecraft repair-delay knob so the fix stops beating the bad-news call.
+
 ## Phase 11 — Evaluation harness (L5 port)
 **Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-eval-harness/](2026-07-09-eval-harness/)
 

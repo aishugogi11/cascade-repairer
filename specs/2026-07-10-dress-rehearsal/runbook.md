@@ -25,6 +25,10 @@ demo page. Everything else is watched, not driven.
    projector **fresh** (no `?trip_id=` in the URL — a leftover param means
    it will resume an old trip; strip it and reload).
 7. Phone audio is on speaker or routed to the room's sound.
+8. **No page-restyling extensions** on the projector browser: Dark Reader
+   inverts the projector-calibrated light palette despite the page's
+   `color-scheme: only light` opt-out (observed 2026-07-10). Disable it for
+   the Cloud Run domain or use a clean profile.
 
 ## The script
 
@@ -54,8 +58,8 @@ traveler heard about it on a phone call."
 
 | Run (date/time) | Beat 1: dial → phone rings | Beat 1: book → 5 cards booked | Beat 2: dial → phone rings | Beat 2: broken → all fixed (page timer) | Clean? | Notes |
 |---|---|---|---|---|---|---|
-| | | | | | | |
-| | | | | | | |
+| 2026-07-10 ~11:39 UTC (data path only, Cloud Run) | n/a — calls blocked | seed → 5 booked, immediate | n/a — calls blocked | **24.0 s** (curl-measured, break → all_clear) | partial | Outbound calls 502: "credit exhausted for this destination" — voice beats unproven. Data path clean: 5× fixed, fresh updated_at, 7 confirmed bookings, no orphan trips from failed /book. Page verified rendering the trip on the deployed URL. |
+| 2026-07-10 ~12:0x UTC (full voice run, Cloud Run, post Developer-plan upgrade) | /book returned in **16 s** (CLI blocks until call queued); phone rang, call completed | 5 booked by the time /book returned | /disrupt returned in **6.6 s**; call completed ~30 s in, cancellation script + "already rebooking" delivered (transcript verified) | **20.8 s** (curl-measured from disrupt response → all_clear) | **yes** | Both calls real (curl-driven, not page buttons). Callee number scrubbed from /status; recording available; 7 confirmed bookings. Findings: (1) plan-side outbound requires Developer tier — Starter has none; (2) /book's 16 s is dead air after the button press — presenter should vamp or we pre-dial; (3) beat 2 agent restarted its opening several times when talked over — answer, then let it finish the first sentence; (4) /status transcript JSON carries a raw control char — strict JSON parsers need strict=False. |
 | | | | | | | |
 
 Reference points from earlier phases: five repairs completed in ~35 s on
@@ -91,5 +95,8 @@ Call ordering inside `/disrupt` is currently **call first, then break**
 red flip badly (or vice versa) and the beat feels off, note the observed gap
 here and whether the order should swap:
 
-- Observed gap, run 1: ______
-- Verdict: ______
+- Observed gap, run 1 (2026-07-10, curl-driven): call placed ~6 s before the
+  break wrote; the flight rendered broken within ~1 s of the /disrupt
+  response — ring and red-flip land close together. Stage feel with real
+  hands on the button still to be judged on the projector.
+- Verdict: keep call-first unless the projector run says otherwise.
