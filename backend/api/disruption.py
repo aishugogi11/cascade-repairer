@@ -17,18 +17,18 @@ class BreakFlightRequest(BaseModel):
     trip_id: str
 
 
-@disruption.post("/break_flight")
-def break_flight(req: BreakFlightRequest):
+def break_trip_flight(trip_id: str) -> dict:
     """Find the trip's flight item and flip it to `broken`.
 
-    Sync handler on purpose: FastAPI runs it in the threadpool, keeping the
-    blocking BigQuery calls off the event loop.
+    Blocking (BigQuery via the repository) — callers keep it off the event
+    loop: the endpoint below is a sync handler (FastAPI threadpool), the
+    Phase 12 demo orchestrator wraps it in asyncio.to_thread.
 
-    404 when the trip has no flight item (or the trip is unknown — same
-    thing from this endpoint's view). A failed or 0-row write is a 500,
-    never reported as success.
+    Raises HTTPException — 404 when the trip has no flight item (or the trip
+    is unknown — same thing from this view); a failed or 0-row write is a
+    500, never reported as success.
     """
-    success, items, error = itinerary_items.list_items_for_trip(req.trip_id)
+    success, items, error = itinerary_items.list_items_for_trip(trip_id)
     if not success:
         raise HTTPException(status_code=500, detail=f"could not list items: {error}")
 
@@ -36,7 +36,7 @@ def break_flight(req: BreakFlightRequest):
     if flight is None:
         raise HTTPException(
             status_code=404,
-            detail=f"trip {req.trip_id} has no flight item to break",
+            detail=f"trip {trip_id} has no flight item to break",
         )
 
     write_ok, affected_rows, write_error = itinerary_items.update_status(
@@ -54,9 +54,16 @@ def break_flight(req: BreakFlightRequest):
         )
 
     return {
-        "trip_id": req.trip_id,
+        "trip_id": trip_id,
         "item_id": flight.item_id,
         "previous_status": flight.status,
         "status": "broken",
         "affected_rows": affected_rows,
     }
+
+
+@disruption.post("/break_flight")
+def break_flight(req: BreakFlightRequest):
+    """The standalone injector endpoint — curl-able from a phone or a
+    teammate's laptop during the demo. Thin wrapper over break_trip_flight."""
+    return break_trip_flight(req.trip_id)

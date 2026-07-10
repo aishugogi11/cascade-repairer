@@ -66,17 +66,18 @@ _SEED_ITEMS = [
 ]
 
 
-@sabre_tools.post("/seed_trip")
-def seed_trip(req: SeedTripRequest):
+def create_seed_trip(user_id: str, title: str) -> dict:
     """Create a booked demo trip with all five item types.
 
-    Sync handler on purpose: FastAPI runs it in the threadpool, keeping the
-    blocking BigQuery calls off the event loop. Every write goes through the
-    repositories; the first failure aborts with its error.
+    Blocking (BigQuery via the repositories) — callers keep it off the event
+    loop: the endpoint below is a sync handler (FastAPI threadpool), the
+    Phase 12 demo orchestrator wraps it in asyncio.to_thread. Every write
+    goes through the repositories; the first failure aborts with its error
+    (HTTPException 500).
     """
     trip = Trip(
-        user_id=req.user_id,
-        title=req.title,
+        user_id=user_id,
+        title=title,
         status="booked",
         origin="MSP",
         destinations=["SFO", "Mountain View"],
@@ -137,6 +138,12 @@ def seed_trip(req: SeedTripRequest):
             {"booking_id": b.booking_id, "item_id": b.item_id} for b in booking_rows
         ],
     }
+
+
+@sabre_tools.post("/seed_trip")
+def seed_trip(req: SeedTripRequest):
+    """The walkthrough's starting state — thin wrapper over create_seed_trip."""
+    return create_seed_trip(req.user_id, req.title)
 
 
 # --- repair_trip ----------------------------------------------------------------

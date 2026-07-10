@@ -16,6 +16,7 @@ from api.outbound_call import outbound_call
 from api.cascade_demo import cascade_demo
 from api.web_call import web_call
 from api.itinerary_ui import itinerary_ui
+from api.demo import demo
 
 
 app = FastAPI(
@@ -76,6 +77,12 @@ app.include_router(
     itinerary_ui,
     prefix="/v1/itinerary",
     tags=["itinerary"],
+)
+
+app.include_router(
+    demo,
+    prefix="/v1/demo",
+    tags=["demo"],
 )
 
 if __name__ == "__main__":
