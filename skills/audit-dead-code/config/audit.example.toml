@@ -1,0 +1,34 @@
+# audit-dead-code configuration. Pass with: --config config/audit.example.toml
+# Every key is optional; unset keys fall back to FastAPI-tuned defaults.
+[audit_dead_code]
+
+# Decorators that mean "the framework invokes this, not your source code".
+# Glob patterns match the dotted decorator name (call args are stripped).
+# "*.get" matches @app.get, @router.get, @api_v1.get, etc.
+live_decorators = [
+  "*.get", "*.post", "*.put", "*.patch", "*.delete", "*.options", "*.head",
+  "*.websocket", "*.middleware", "*.exception_handler", "*.on_event", "*.route",
+  "*.task",          # Celery / task queues
+  # "myframework.command", "*.subscribe",   # add your own here
+]
+
+# Callables that mark a function parameter as framework-injected, so an
+# "unused argument" finding on that parameter is a false positive.
+di_markers = ["Depends", "Security", "Header", "Query", "Path", "Cookie",
+              "Body", "Form", "File", "Provide"]
+
+# Base classes whose class-level fields are schema/model attributes, not vars.
+schema_bases = ["BaseModel", "BaseSettings", "Base", "DeclarativeBase",
+                "TypedDict", "Enum", "IntEnum", "StrEnum", "Struct"]
+
+# Name glob patterns to ignore entirely (dunder, pytest discovery, hooks).
+ignore_names = ["__*__", "test_*", "Test*", "conftest",
+                "setUp", "tearDown", "setUpClass", "tearDownClass"]
+
+# Route path prefixes treated as infrastructure (never endpoint-removal candidates).
+infra_paths = ["/health", "/healthz", "/livez", "/readyz", "/ping", "/metrics",
+               "/docs", "/redoc", "/openapi.json", "/"]
+
+# Path globs excluded from all analysis.
+exclude = ["*/.venv/*", "*/venv/*", "*/__pycache__/*", "*/migrations/*",
+           "*/.git/*", "*/node_modules/*", "*/build/*", "*/dist/*"]
