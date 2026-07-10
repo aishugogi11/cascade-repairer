@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 11 — Evaluation harness (L5 port)
+**Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-eval-harness/](2026-07-09-eval-harness/)
+
+Voice quality is now measured, not guessed — independent validator PASS 2026-07-09 (report in the spec dir): a CLI harness (`python -m api.eval_harness` / `make eval`) drives the deployed stack per checked-in scenario fixture and persists TTFB/e2e latency, TTS→STT round-trip WER, and a `vb eval`-judged MOS estimate (score nested under `result`, mapped 0–10 → 1–5) to `eval_runs` stamped with git SHA; QA flushed out three real fixes along the way — the unpinned transitive `openai` 2.45.0 break that was killing every deployed agent turn (now pinned 2.44.0), the live `vb eval` report shape, and the stateless-container `--agent` context pin — and persisted runs go credential-free through the `vocal-bridge-eval-harness` Cloud Run job per Josh's no-local-creds decision; latency-plausibility bands (D3) and two harness-hardening decisions (D2/D5) stay open in TODO.md for the Phase 12 rehearsal to consume.
+
 ## Phase 10 — Live itinerary UI
 **Completed:** 2026-07-09 · **Spec:** [specs/2026-07-09-live-itinerary-ui/](2026-07-09-live-itinerary-ui/)
 
