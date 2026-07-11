@@ -238,3 +238,8 @@ TODO.md
 IOS_PLAN.md
 
 .DS_Store
+# Xcode / iOS (ios/TalkToMyTrip)
+xcuserdata/
+DerivedData/
+ios/**/build/
+*.xcuserstate

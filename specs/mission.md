@@ -34,10 +34,11 @@ The foundation still guarantees that every building block from the Vocal Bridge 
 1. **The live demo works end-to-end.** The Cascade Repairer moment lands live: a booked trip takes a flight cancellation, the agent talks the traveler through it while all five legs (flight, hotel, ground, dining, experience) repair in parallel, and the itinerary reads back fully fixed — without breaking. Live demos are "the Vocal Bridge way."
 2. **The deployment is production-grade, not a laptop demo.** The agent runs on Cloud Run, stood up through the Cloud Build CI/CD trigger (PR from `vb/feature/*` into `vb/dev`), with real latency and quality metrics observed.
 3. **Deep skill mastery.** Fluency in every course module — the three audio architectures through evaluation — and the OpenAI Agents SDK, regardless of hackathon outcome. The training investment pays off whether or not the team places.
+4. **The demo fits in a pocket** *(added 2026-07-11)*: **"Talk to My Trip"**, a native iOS companion app (`ios/TalkToMyTrip/`), is approved on the App Store before event day — voice-first trip booking and the break→heal cascade running on a real iPhone against the deployed backend. First submission is the deliberately minimal Phase 16 MVP; the full three-act experience ships as a Phase 17 update (updates re-review much faster).
 
 ## Non-goals
 
 - Building the *finished* hackathon demo in advance — the foundation proves the hard mechanics (concurrent repair during a live voice session, repair-capable Sabre tools, live itinerary view); the demo polish and final assembly stay event-day work with the team.
 - The stretch integrations from the team discussion (Google Maps distances, Uber, Costco Travel bundles) — mocked stretch goals only, and only after the core repair loop works end to end (tracked in `TODO.md`).
-- A general-purpose travel product beyond the hackathon's scope.
+- A general-purpose travel product beyond the hackathon's scope — the App Store app ("Talk to My Trip") is the hackathon demo in consumer clothing, submitted for review-latency reasons, not a product pivot.
 - Using Anthropic/Claude as the agent LLM — the agent layer is standardized on the OpenAI Agents SDK.
