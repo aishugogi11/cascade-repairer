@@ -118,11 +118,15 @@ def test_status_items_query_orders_by_start_ts(bq):
 
 
 def test_status_all_clear_only_when_nothing_broken_or_repairing(bq):
+    # Three selects per request since Phase 17: trip, items, bookings (the
+    # detail read). Assertions unchanged.
     bq.select.side_effect = [
         (True, [TRIP_ROW], None),
         (True, item_rows(("flight", "repairing"), ("hotel", "fixed")), None),
+        (True, [], None),
         (True, [TRIP_ROW], None),
         (True, item_rows(("flight", "fixed"), ("hotel", "cancelled")), None),
+        (True, [], None),
     ]
     with TestClient(app) as client:
         mid_repair = client.get("/v1/itinerary/status/t-1").json()
@@ -155,6 +159,87 @@ def test_status_repository_failure_is_500_not_empty_200(bq):
         resp = client.get("/v1/itinerary/status/t-1")
     assert resp.status_code == 500
     assert "quota exceeded" in resp.json()["detail"]
+
+
+# --- per-item detail (Phase 17, feeds the iOS recommendation sheet) -----------
+
+def booking_row(item_id, raw_response):
+    return {
+        "booking_id": f"b-{item_id}",
+        "item_id": item_id,
+        "trip_id": "t-1",
+        "sabre_confirmation_ref": "ABCDEF",
+        "state": "confirmed",
+        "raw_response": raw_response,
+    }
+
+
+VOICE_RAW = {
+    "source": "voice_guided_booking",
+    "option": {"option_number": 1, "price": 187.6, "stops": 0,
+               "arrive_time": "10:05"},
+    "options_offered": [
+        {"option_number": 1, "price": 187.6},
+        {"option_number": 2, "price": 242.0},
+        {"option_number": 3, "price": 155.0},
+    ],
+}
+
+
+def test_status_detail_for_voice_booked_flight(bq):
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("flight", "booked"), ("hotel", "booked")), None),
+        (True, [booking_row("i-0", VOICE_RAW)], None),
+    ]
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    flight, hotel = body["items"]
+    detail = flight["detail"]
+    assert "three options" in detail["why_chosen"]
+    assert "nonstop" in detail["why_chosen"]
+    assert detail["price_delta"] == "+$33"  # 187.6 vs the 155.0 alternative
+    assert detail["impact"]
+    # The hotel has no booking row — the key is omitted, not nulled.
+    assert "detail" not in hotel
+
+
+def test_status_detail_for_repaired_item_and_latest_booking_wins(bq):
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("ground", "fixed")), None),
+        (
+            True,
+            [
+                booking_row("i-0", {"seeded": True, "type": "ground"}),
+                booking_row("i-0", {"provider": "mock-ground",
+                                    "pickup_time": "13:00"}),
+            ],
+            None,
+        ),
+    ]
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    detail = body["items"][0]["detail"]
+    # The later (repair) booking speaks, not the seeded one.
+    assert "rescheduled" in detail["why_chosen"]
+    assert detail["price_delta"] == "$0"
+    assert "landing" in detail["impact"] or "ride" in detail["impact"]
+
+
+def test_status_detail_read_failure_never_breaks_the_poll(bq):
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("flight", "booked")), None),
+        (False, [], "bookings table on fire"),
+    ]
+    with TestClient(app) as client:
+        resp = client.get("/v1/itinerary/status/t-1")
+
+    assert resp.status_code == 200
+    assert "detail" not in resp.json()["items"][0]
 
 
 # --- GET /trips --------------------------------------------------------------

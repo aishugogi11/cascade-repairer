@@ -49,6 +49,7 @@ def fresh_state(monkeypatch):
     monkeypatch.setattr(sabre_client._mock, "latency_seconds", 0)
     monkeypatch.setattr(concierge, "_HISTORY", {})
     monkeypatch.setattr(concierge, "_SESSION_TRIPS", {})
+    monkeypatch.setattr(concierge, "_SESSION_FLIGHT_OPTIONS", {})
     core._SESSIONS.clear()
     yield
     core._SESSIONS.clear()
@@ -144,11 +145,14 @@ def test_agent_instructions_carry_authoritative_snapshot(monkeypatch, bq):
     assert instructions.startswith(concierge.BASE_INSTRUCTIONS)
 
 
-def test_agent_uses_fast_model_and_exposes_both_tools(monkeypatch):
+def test_agent_uses_fast_model_and_exposes_guided_toolset(monkeypatch):
     monkeypatch.delenv("CONCIERGE_LLM_MODEL", raising=False)
     agent = concierge.build_agent("room-1")
     assert agent.model == "gpt-5.4-mini"
-    assert {t.name for t in agent.tools} == {"fix_trip", "book_trip"}
+    # The Phase 17 guided flow replaces the Phase 16 magic utterance.
+    assert {t.name for t in agent.tools} == {
+        "fix_trip", "search_flights", "book_flight", "complete_trip",
+    }
     # Without a pinned trip, the agent is told so instead of guessing.
     assert concierge._NO_TRIP_LINE in agent.instructions
 
@@ -262,38 +266,121 @@ def test_fix_trip_launches_all_items_and_returns_before_completion(monkeypatch, 
     assert "rebook flight" in msg and "shift hotel dates" in msg
 
 
-# --- book_trip (Phase 16 magic utterance) -----------------------------------
+# --- guided booking (Phase 17): search → options → book → complete -----------
 
 
-def _mock_seed(monkeypatch, trip_id="t-new"):
-    """create_seed_trip mocked at the concierge import, recording the thread
-    it ran on so the off-the-event-loop rule is asserted, not assumed."""
+def _mock_repos(monkeypatch):
+    """The repository boundary for the booking writes: every call recorded,
+    all succeed. ensure_trip_context's reads come back canned so the pin
+    replacement lands on the freshly created trip."""
     import threading
 
-    seen = {"threads": [], "calls": []}
+    seen = {"writes": [], "threads": []}
 
-    def fake_seed(user_id, title):
+    def create_trip(trip):
+        seen["writes"].append(("trip", trip))
         seen["threads"].append(threading.current_thread())
-        seen["calls"].append((user_id, title))
-        return {"trip_id": trip_id, "items": [], "bookings": []}
+        return True, trip, None
 
-    monkeypatch.setattr(concierge, "create_seed_trip", fake_seed)
+    def create_item(item):
+        seen["writes"].append(("item", item))
+        return True, item, None
+
+    def create_booking(booking):
+        seen["writes"].append(("booking", booking))
+        return True, booking, None
+
+    def update_status(item_id, status):
+        seen["writes"].append(("status", item_id, status))
+        return True, 1, None
+
+    def get_trip(trip_id):
+        return True, concierge.Trip(**dict(trip_row(), trip_id=trip_id)), None
+
+    def list_items(trip_id):
+        items = [
+            concierge.ItineraryItem(**dict(row, trip_id=trip_id))
+            for row in five_item_rows()
+        ]
+        return True, items, None
+
+    monkeypatch.setattr(concierge.trips, "create_trip", create_trip)
+    monkeypatch.setattr(concierge.itinerary_items, "create_item", create_item)
+    monkeypatch.setattr(concierge.bookings, "create_booking", create_booking)
+    monkeypatch.setattr(concierge.itinerary_items, "update_status", update_status)
+    monkeypatch.setattr(concierge.trips, "get_trip", get_trip)
+    monkeypatch.setattr(
+        concierge.itinerary_items, "list_items_for_trip", list_items
+    )
     return seen
 
 
-def _route_new_trip(query, params=None):
-    if "itinerary_items" in query:
-        return True, five_item_rows(), None
-    if "WHERE trip_id" in query:
-        return True, [dict(trip_row(), trip_id="t-new", title="Trip to San Francisco")], None
-    return True, [trip_row()], None
+def _search(session="room-1"):
+    return asyncio.run(
+        concierge.search_flights_impl(session, "MSP", "SFO", "2026-07-17")
+    )
 
 
-def test_book_trip_calls_seed_off_loop_and_replaces_pin(monkeypatch, bq):
+def test_search_flights_stores_options_and_speaks_them(bq):
+    msg = _search()
+
+    options = concierge._SESSION_FLIGHT_OPTIONS["room-1"]
+    assert 2 <= len(options) <= 3
+    assert [o.option_number for o in options] == list(range(1, len(options) + 1))
+    # Listenable, not readable: numbered words, rounded dollars, and none of
+    # the airline/fare codes or markdown the spoken-copy rule bans.
+    assert "Option one" in msg and "Option two" in msg
+    assert "dollars" in msg
+    assert "AA" not in msg and "USD" not in msg and "*" not in msg
+
+
+def test_search_flights_failure_is_speakable_never_raises(monkeypatch, bq):
+    async def broken_search(request):
+        raise RuntimeError("sabre down")
+
+    monkeypatch.setattr(concierge.sabre_client, "flight_search", broken_search)
+
+    msg = _search()
+
+    assert "trouble searching flights" in msg
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_search_flights_blank_args_ask_instead_of_searching(bq):
+    msg = asyncio.run(concierge.search_flights_impl("room-1", "MSP", " ", ""))
+
+    assert "where" in msg.lower()
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_book_flight_without_search_is_speakable_and_writes_nothing(monkeypatch, bq):
+    seen = _mock_repos(monkeypatch)
+
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 1))
+
+    assert "search" in msg
+    assert seen["writes"] == []
+
+
+def test_book_flight_bad_option_number_is_speakable_and_writes_nothing(
+    monkeypatch, bq
+):
+    seen = _mock_repos(monkeypatch)
+    _search()
+
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 4))
+
+    assert "three options" in msg
+    assert seen["writes"] == []
+    # The options survive so the traveler can just say a valid number next.
+    assert "room-1" in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_book_flight_creates_rows_replaces_pin_and_clears_options(monkeypatch, bq):
     import threading
 
-    seen = _mock_seed(monkeypatch)
-    bq.select.side_effect = _route_new_trip
+    seen = _mock_repos(monkeypatch)
+    _search()
     # A stale pin from earlier in the session — booking must replace it.
     stale = concierge.TripContext(
         trip=concierge.Trip(**dict(trip_row(), trip_id="t-old")),
@@ -302,58 +389,95 @@ def test_book_trip_calls_seed_off_loop_and_replaces_pin(monkeypatch, bq):
     )
     concierge._SESSION_TRIPS["room-1"] = stale
 
-    msg = asyncio.run(concierge.book_trip_impl("room-1", "San Francisco"))
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 1))
 
-    assert seen["calls"] == [("demo-traveler", "Trip to San Francisco")]
-    # to_thread ran the blocking seed off the event loop's thread.
+    kinds = [w[0] for w in seen["writes"]]
+    assert kinds == ["trip", "item", "booking", "status"]
+    trip = seen["writes"][0][1]
+    item = seen["writes"][1][1]
+    booking = seen["writes"][2][1]
+    assert trip.destinations == ["SFO"] and trip.origin == "MSP"
+    assert item.type == "flight" and item.status == "planned"
+    assert seen["writes"][3][1:] == (item.item_id, "booked")
+    assert booking.raw_response["source"] == "voice_guided_booking"
+    assert booking.raw_response["option"]["option_number"] == 1
+    assert len(booking.raw_response["options_offered"]) >= 2
+    # Blocking writes ran off the event loop's thread (the to_thread rule).
     assert seen["threads"][0] is not threading.main_thread()
-    assert concierge._SESSION_TRIPS["room-1"].trip.trip_id == "t-new"
-    assert "booked" in msg
+    # Pin replaced with the new trip; the spent options are gone.
+    assert concierge._SESSION_TRIPS["room-1"].trip.trip_id == trip.trip_id
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+    # Spoken copy: confirmation with the spoken date, no ids or markdown.
+    assert "booked" in msg and "July 17th" in msg
+    assert trip.trip_id not in msg and "*" not in msg
 
 
-def test_book_trip_confirmation_narrates_parts_and_dates(monkeypatch, bq):
-    _mock_seed(monkeypatch)
-    bq.select.side_effect = _route_new_trip
-
-    msg = asyncio.run(concierge.book_trip_impl("room-1", "San Francisco"))
-
-    assert "San Francisco" in msg
-    for part in ("flight", "hotel", "ride", "dinner", "museum"):
-        assert part in msg
-    assert "July 17th through July 19th" in msg
-    # Spoken copy: no markdown, no ids.
-    assert "t-new" not in msg and "*" not in msg and "#" not in msg
-
-
-def test_book_trip_failure_is_speakable_and_caches_nothing(monkeypatch, bq):
-    def failing_seed(user_id, title):
-        raise RuntimeError("bq down")
-
-    monkeypatch.setattr(concierge, "create_seed_trip", failing_seed)
-
-    msg = asyncio.run(concierge.book_trip_impl("room-1", "San Francisco"))
-
-    assert "couldn't get that trip booked" in msg
-    assert "room-1" not in concierge._SESSION_TRIPS
-
-
-def test_book_trip_blank_destination_asks_instead_of_booking(monkeypatch, bq):
-    seen = _mock_seed(monkeypatch)
-
-    msg = asyncio.run(concierge.book_trip_impl("room-1", "  "))
-
-    assert seen["calls"] == []
-    assert "Where would you like to go" in msg
-
-
-def test_instructions_carry_the_booking_rule():
-    assert "book_trip" in concierge.BASE_INSTRUCTIONS
-    assert "no booked trip" in concierge.BASE_INSTRUCTIONS
-    assert "destination" in concierge.BASE_INSTRUCTIONS
-    # And the guard against double-booking a pinned trip.
-    assert "Never call book_trip when a trip is already booked" in (
-        concierge.BASE_INSTRUCTIONS
+def test_book_flight_write_failure_is_speakable(monkeypatch, bq):
+    _mock_repos(monkeypatch)
+    _search()
+    monkeypatch.setattr(
+        concierge.trips, "create_trip",
+        lambda trip: (False, None, "bq down"),
     )
+
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 1))
+
+    assert "couldn't get that flight booked" in msg
+
+
+def test_complete_trip_without_pin_is_speakable(bq):
+    msg = asyncio.run(concierge.complete_trip_impl("room-1"))
+
+    assert "flight" in msg and "booked first" in msg
+
+
+def test_complete_trip_spaces_items_and_returns_immediately(monkeypatch, bq):
+    seen = _mock_repos(monkeypatch)
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(concierge, "_sleep", fake_sleep)
+    concierge._SESSION_TRIPS["room-1"] = concierge.TripContext(
+        trip=concierge.Trip(**trip_row()), items=[], summary="pinned",
+    )
+
+    async def scenario():
+        msg = await asyncio.wait_for(concierge.complete_trip_impl("room-1"), 2.0)
+        # The reply came back before the build-out ran its course.
+        assert "building the rest of your trip" in msg
+        await asyncio.gather(*concierge._BUILD_TASKS)
+
+    asyncio.run(scenario())
+
+    # Four items, spaced by a sleep each (asserted on calls, not wall clock),
+    # each created planned then flipped to booked.
+    assert sleeps == [1.5, 1.5, 1.5, 1.5]
+    created = [w[1] for w in seen["writes"] if w[0] == "item"]
+    assert [i.type for i in created] == ["hotel", "ground", "dining", "experience"]
+    assert all(i.status == "planned" for i in created)
+    flips = [w for w in seen["writes"] if w[0] == "status"]
+    assert [f[1] for f in flips] == [i.item_id for i in created]
+    assert all(f[2] == "booked" for f in flips)
+    # Dates and destination derive from the booked trip.
+    assert all(i.trip_id == "t-1" for i in created)
+    assert "SFO" in created[0].location
+
+
+def test_instructions_carry_the_guided_script():
+    for phrase in ("search_flights", "book_flight", "complete_trip",
+                   "destination", "pick one by number"):
+        assert phrase in concierge.BASE_INSTRUCTIONS
+    # The retired magic utterance is gone from the script...
+    assert "book_trip " not in concierge.BASE_INSTRUCTIONS
+    # ...and the guard against re-booking a pinned trip stands.
+    assert (
+        "Never call search_flights or book_flight when a trip is already "
+        "booked" in concierge.BASE_INSTRUCTIONS
+    )
+    # Disruption rules untouched.
+    assert "fix_trip" in concierge.BASE_INSTRUCTIONS
 
 
 # --- the acceptance shape (Phase 5's test over the seam) -------------------------

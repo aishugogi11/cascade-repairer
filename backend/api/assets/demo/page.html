@@ -288,6 +288,15 @@
   const ITINERARY_API = "/v1/itinerary";
   const DEMO_API = "/v1/demo";
 
+  // Access-code pass-through (Phase 17): ?code= wins and is persisted, so a
+  // reload without the param keeps working; with no code the page still
+  // renders and its API calls 401 cleanly.
+  const codeFromUrl = new URL(window.location).searchParams.get("code");
+  if (codeFromUrl) localStorage.setItem("vb_access_code", codeFromUrl);
+  const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
+  const codeHeaders = (extra = {}) =>
+    ACCESS_CODE ? { ...extra, "X-Access-Code": ACCESS_CODE } : extra;
+
   const KIND = {
     flight:     { icon: "✈️", label: "Flight" },
     hotel:      { icon: "🏨", label: "Hotel" },
@@ -517,7 +526,7 @@
     if (!state.tripId) return;
     let resp;
     try {
-      resp = await fetch(`${ITINERARY_API}/status/${encodeURIComponent(state.tripId)}`);
+      resp = await fetch(`${ITINERARY_API}/status/${encodeURIComponent(state.tripId)}`, { headers: codeHeaders() });
     } catch {
       banner.className = "banner is-stale";
       bannerText.textContent = "Connection hiccup — catching back up…";
@@ -566,7 +575,7 @@
     try {
       resp = await fetch(`${DEMO_API}/book`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: codeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({}),
       });
     } catch {
@@ -595,7 +604,7 @@
     try {
       resp = await fetch(`${DEMO_API}/disrupt`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: codeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ trip_id: state.tripId }),
       });
     } catch {

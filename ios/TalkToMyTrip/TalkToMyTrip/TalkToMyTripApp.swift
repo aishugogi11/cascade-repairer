@@ -9,9 +9,18 @@ import SwiftUI
 
 @main
 struct TalkToMyTripApp: App {
+    @State private var accessManager = AccessManager()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // The gate comes first: no stored code, no main screen. A 401
+            // on any later call re-locks (see AccessManager), so a rotated
+            // code lands the traveler back here instead of erroring out.
+            if accessManager.isUnlocked {
+                ContentView()
+            } else {
+                AccessGateView(accessManager: accessManager)
+            }
         }
     }
 }

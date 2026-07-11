@@ -35,10 +35,6 @@ final class TripManager {
 
     var repairingCount: Int { summary?.counts["repairing"] ?? 0 }
 
-    var hasBreakableFlight: Bool {
-        items.contains { $0.type == "flight" && $0.status != "broken" }
-    }
-
     func start() {
         guard pollTask == nil else { return }
         pollTask = Task { await pollLoop() }
@@ -55,21 +51,31 @@ final class TripManager {
         needsTripRefresh = true
     }
 
-    // MARK: - Demo controls
+    // MARK: - Hidden demo controls (Phase 17 — no visible buttons)
 
-    func simulateFlightCancellation() async {
+    /// Triple-tap on the orb: the Act 2/3 backup trigger. Fires the demo
+    /// orchestrator's disrupt beat — a REAL outbound phone call plus the
+    /// cascade (10 calls/day quota; rehearse with care).
+    func triggerHiddenDisrupt() async {
         guard let tripID, !demoActionInFlight else { return }
         demoActionInFlight = true
         defer { demoActionInFlight = false }
-        try? await APIService.shared.breakFlight(tripID: tripID)
+        try? await APIService.shared.demoDisrupt(tripID: tripID)
     }
 
-    /// The reviewer-path fallback — heals the trip without speaking.
-    func repairNow() async {
-        guard let tripID, !demoActionInFlight else { return }
-        demoActionInFlight = true
-        defer { demoActionInFlight = false }
-        try? await APIService.shared.repairTrip(tripID: tripID)
+    /// Long-press trip selector: repoint the polling at a chosen trip and
+    /// reset the diff/timer state so old statuses don't ghost-announce.
+    func selectTrip(_ id: String) {
+        needsTripRefresh = false
+        guard id != tripID else { return }
+        tripID = id
+        previousStatuses = [:]
+        recoveryStartedAt = nil
+        recoveryElapsed = nil
+        changedItemIDs = []
+        trip = nil
+        items = []
+        summary = nil
     }
 
     // MARK: - Polling

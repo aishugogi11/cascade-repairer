@@ -19,6 +19,8 @@ from api.itinerary_ui import itinerary_ui
 from api.demo import demo
 from api.legal import legal
 from api.mobile_voice import mobile_voice
+from api.access_gate import access_gate_middleware
+from api.auth import auth
 
 
 app = FastAPI(
@@ -26,6 +28,8 @@ app = FastAPI(
     version="1.0",
     description="Vocal Bridge Training API",
 )
+
+app.middleware("http")(access_gate_middleware)
 
 app.include_router(
     hello,
@@ -97,6 +101,12 @@ app.include_router(
     mobile_voice,
     prefix="/v1/mobile_voice",
     tags=["mobile_voice"],
+)
+
+app.include_router(
+    auth,
+    prefix="/v1/auth",
+    tags=["auth"],
 )
 
 if __name__ == "__main__":

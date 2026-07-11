@@ -216,6 +216,18 @@ import { ConnectionState } from 'https://esm.sh/@vocalbridgeai/sdk@$vb_sdk_ver';
 
 const e = React.createElement;
 
+// Access-code pass-through (Phase 17): ?code= wins and is persisted, so a
+// reload without the param keeps working; with no code the page still
+// renders and its API calls 401 cleanly.
+const codeFromUrl = new URL(window.location).searchParams.get('code');
+if (codeFromUrl) localStorage.setItem('vb_access_code', codeFromUrl);
+const ACCESS_CODE = codeFromUrl || localStorage.getItem('vb_access_code') || '';
+function codeHeaders(extra) {
+  const headers = Object.assign({}, extra);
+  if (ACCESS_CODE) headers['X-Access-Code'] = ACCESS_CODE;
+  return headers;
+}
+
 const ROLE_COLOR = { user: '#4f46e5', agent: '#10b981', backend: '#f59e0b' };
 const styles = {
   row: { display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 },
@@ -247,7 +259,7 @@ function VoiceUI({ tokenError, sessionRef }) {
       try {
         const res = await fetch('/v1/web_call/query', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: codeHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             query,
             session_name: sessionRef.current || 'unknown-session',
@@ -305,7 +317,7 @@ function App() {
   // so a missing env var is diagnosable from the page itself.
   const tokenProvider = useCallback(async () => {
     setTokenError(null);
-    const res = await fetch('/v1/web_call/token', { method: 'POST' });
+    const res = await fetch('/v1/web_call/token', { method: 'POST', headers: codeHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = 'token mint failed (HTTP ' + res.status + '): ' + JSON.stringify(data);

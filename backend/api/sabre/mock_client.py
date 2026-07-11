@@ -33,48 +33,81 @@ class MockSabreClient:
         if self.latency_seconds:
             await asyncio.sleep(self.latency_seconds)
 
+    # Three deterministic variants per search (BFM returns many; the guided
+    # voice booking needs 2–3 speakable choices). The first stays the
+    # original 8 AM nonstop so callers that pick [0] behave exactly as
+    # before: (depart, arrive, stops, elapsed_minutes, price_delta).
+    _FLIGHT_VARIANTS = [
+        ("08:00:00-05:00", "10:05:00-07:00", 0, 245, 0.0),
+        ("11:30:00-05:00", "13:40:00-07:00", 0, 250, 54.4),
+        ("06:15:00-05:00", "11:20:00-07:00", 1, 425, -32.6),
+    ]
+
     async def flight_search(
         self, request: shapes.FlightSearchRequest
     ) -> shapes.FlightSearchResponse:
-        """Bargain Finder Max v5 — one nonstop itinerary per leg searched."""
+        """Bargain Finder Max v5 — three itineraries per leg searched."""
         await self._lag()
         od = request.OTA_AirLowFareSearchRQ.OriginDestinationInformation[0]
         origin = od.OriginLocation.LocationCode
         dest = od.DestinationLocation.LocationCode
         flight_number = int(hashlib.sha256(f"{origin}{dest}".encode()).hexdigest(), 16) % 900 + 100
+        schedule_descs, leg_descs, itineraries = [], [], []
+        for i, (depart, arrive, stops, elapsed, delta) in enumerate(
+            self._FLIGHT_VARIANTS, start=1
+        ):
+            schedule_descs.append(
+                shapes.ScheduleDesc(
+                    id=i,
+                    stopCount=stops,
+                    eTicketable=True,
+                    elapsedTime=elapsed,
+                    departure=shapes.ScheduleEndpoint(
+                        airport=origin, city=origin, country="US", time=depart,
+                    ),
+                    arrival=shapes.ScheduleEndpoint(
+                        airport=dest, city=dest, country="US", time=arrive,
+                    ),
+                    carrier=shapes.ScheduleCarrier(
+                        marketing="AA",
+                        marketingFlightNumber=flight_number + (i - 1) * 7,
+                        operating="AA",
+                        operatingFlightNumber=flight_number + (i - 1) * 7,
+                        equipment=shapes.Equipment(code="E75"),
+                    ),
+                )
+            )
+            leg_descs.append(
+                shapes.LegDesc(
+                    id=i, elapsedTime=elapsed,
+                    schedules=[shapes.ScheduleRef(ref=i)],
+                )
+            )
+            itineraries.append(
+                shapes.Itinerary(
+                    id=i,
+                    legs=[shapes.LegRef(ref=i)],
+                    pricingInformation=[
+                        shapes.PricingInformation(
+                            fare=shapes.Fare(
+                                validatingCarrierCode="AA",
+                                totalFare=shapes.TotalFare(
+                                    totalPrice=round(187.6 + delta, 2),
+                                    currency="USD",
+                                    baseFareAmount=round(143.0 + delta, 2),
+                                    totalTaxAmount=44.6,
+                                ),
+                            )
+                        )
+                    ],
+                )
+            )
         return shapes.FlightSearchResponse(
             groupedItineraryResponse=shapes.GroupedItineraryResponse(
                 version="5",
-                statistics=shapes.GirStatistics(itineraryCount=1),
-                scheduleDescs=[
-                    shapes.ScheduleDesc(
-                        id=1,
-                        stopCount=0,
-                        eTicketable=True,
-                        elapsedTime=245,
-                        departure=shapes.ScheduleEndpoint(
-                            airport=origin, city=origin, country="US",
-                            time="08:00:00-05:00",
-                        ),
-                        arrival=shapes.ScheduleEndpoint(
-                            airport=dest, city=dest, country="US",
-                            time="10:05:00-07:00",
-                        ),
-                        carrier=shapes.ScheduleCarrier(
-                            marketing="AA",
-                            marketingFlightNumber=flight_number,
-                            operating="AA",
-                            operatingFlightNumber=flight_number,
-                            equipment=shapes.Equipment(code="E75"),
-                        ),
-                    )
-                ],
-                legDescs=[
-                    shapes.LegDesc(
-                        id=1, elapsedTime=245,
-                        schedules=[shapes.ScheduleRef(ref=1)],
-                    )
-                ],
+                statistics=shapes.GirStatistics(itineraryCount=len(itineraries)),
+                scheduleDescs=schedule_descs,
+                legDescs=leg_descs,
                 itineraryGroups=[
                     shapes.ItineraryGroup(
                         groupDescription=shapes.GroupDescription(
@@ -86,25 +119,7 @@ class MockSabreClient:
                                 )
                             ]
                         ),
-                        itineraries=[
-                            shapes.Itinerary(
-                                id=1,
-                                legs=[shapes.LegRef(ref=1)],
-                                pricingInformation=[
-                                    shapes.PricingInformation(
-                                        fare=shapes.Fare(
-                                            validatingCarrierCode="AA",
-                                            totalFare=shapes.TotalFare(
-                                                totalPrice=187.6,
-                                                currency="USD",
-                                                baseFareAmount=143.0,
-                                                totalTaxAmount=44.6,
-                                            ),
-                                        )
-                                    )
-                                ],
-                            )
-                        ],
+                        itineraries=itineraries,
                     )
                 ],
             )

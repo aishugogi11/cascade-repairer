@@ -252,6 +252,15 @@
   const TARGET_S = 60;
   const API = "/v1/itinerary";
 
+  // Access-code pass-through (Phase 17): ?code= wins and is persisted, so a
+  // reload without the param keeps working; with no code the page still
+  // renders and its API calls 401 cleanly.
+  const codeFromUrl = new URL(window.location).searchParams.get("code");
+  if (codeFromUrl) localStorage.setItem("vb_access_code", codeFromUrl);
+  const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
+  const codeHeaders = (extra = {}) =>
+    ACCESS_CODE ? { ...extra, "X-Access-Code": ACCESS_CODE } : extra;
+
   const KIND = {
     flight:     { icon: "✈️", label: "Flight" },
     hotel:      { icon: "🏨", label: "Hotel" },
@@ -445,7 +454,7 @@
     if (!state.tripId) return;
     let resp;
     try {
-      resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`);
+      resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`, { headers: codeHeaders() });
     } catch {
       banner.className = "banner is-stale";
       bannerText.textContent = "Connection hiccup — catching back up…";
@@ -494,7 +503,7 @@
   async function init() {
     let tripsBody = { trips: [] };
     try {
-      const resp = await fetch(`${API}/trips`);
+      const resp = await fetch(`${API}/trips`, { headers: codeHeaders() });
       if (resp.ok) tripsBody = await resp.json();
     } catch { /* handled below as the no-trips state */ }
 

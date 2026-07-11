@@ -26,7 +26,10 @@ struct VoiceWebView: UIViewRepresentable {
         webView.uiDelegate = voiceManager
         voiceManager.attach(webView: webView)
         // HTTPS is required for getUserMedia — the page loads from Cloud Run.
-        webView.load(URLRequest(url: APIConfig.mobileVoiceURL))
+        // The gate ran before this view exists, so the code is in the Keychain.
+        webView.load(URLRequest(url: APIConfig.mobileVoiceURL(
+            accessCode: KeychainHelper.loadAccessCode()
+        )))
         return webView
     }
 

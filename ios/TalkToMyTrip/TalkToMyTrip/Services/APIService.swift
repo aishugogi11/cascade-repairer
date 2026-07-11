@@ -21,6 +21,14 @@ struct Trip: Codable, Equatable {
     let end_date: String?
 }
 
+/// Why an item is what it is — additive on /status since Phase 17; absent
+/// for items without a booking (the sheet falls back to static text).
+struct ItemDetail: Codable, Equatable {
+    let why_chosen: String?
+    let price_delta: String?
+    let impact: String?
+}
+
 struct ItineraryItem: Codable, Identifiable, Equatable {
     let item_id: String
     let trip_id: String
@@ -31,6 +39,7 @@ struct ItineraryItem: Codable, Identifiable, Equatable {
     let end_ts: String?
     let price: Double?
     let currency: String?
+    let detail: ItemDetail?
 
     var id: String { item_id }
 }
@@ -61,6 +70,7 @@ enum APIError: Error {
     case badURL
     case httpStatus(Int)
     case notFound
+    case unauthorized
 }
 
 // MARK: - Service
@@ -97,18 +107,29 @@ actor APIService {
         return list.trips
     }
 
-    /// The in-app demo trigger: flip the trip's flight to broken.
-    func breakFlight(tripID: String) async throws {
-        try await post("/v1/disruption/break_flight", body: ["trip_id": tripID])
+    /// Hidden Act 2/3 trigger — the demo orchestrator's disrupt beat.
+    /// Places a REAL outbound phone call (10/day Vocal Bridge quota).
+    func demoDisrupt(tripID: String) async throws {
+        try await post("/v1/demo/disrupt", body: ["trip_id": tripID])
     }
 
-    /// Non-voice repair fallback — launches the cascade and returns
-    /// immediately (wait: false); the poll watches it land.
-    func repairTrip(tripID: String) async throws {
-        try await post(
-            "/v1/sabre_tools/repair_trip",
-            body: ["trip_id": tripID, "wait": false]
-        )
+    /// The first-launch gate check. True on 200, false on 401 (wrong code);
+    /// anything else throws so network trouble reads differently to the user.
+    /// Validated with an explicit header (nothing stored yet), and exempt
+    /// from the 401 → .accessCodeRejected notification — a wrong guess at
+    /// the gate isn't a rotation.
+    func validateAccessCode(_ code: String) async throws -> Bool {
+        var request = URLRequest(url: try url("/v1/auth/validate"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return false }
+        if http.statusCode == 401 { return false }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.httpStatus(http.statusCode)
+        }
+        return true
     }
 
     // MARK: - Plumbing
@@ -120,8 +141,18 @@ actor APIService {
         return url
     }
 
+    /// Every request carries the stored access code — the backend gates
+    /// /v1/* on it (Phase 17).
+    private func attachAccessCode(_ request: inout URLRequest) {
+        if let code = KeychainHelper.loadAccessCode() {
+            request.setValue(code, forHTTPHeaderField: "X-Access-Code")
+        }
+    }
+
     private func get<T: Decodable>(_ path: String) async throws -> T {
-        let (data, response) = try await session.data(from: try url(path))
+        var request = URLRequest(url: try url(path))
+        attachAccessCode(&request)
+        let (data, response) = try await session.data(for: request)
         try check(response)
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -131,12 +162,19 @@ actor APIService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        attachAccessCode(&request)
         let (_, response) = try await session.data(for: request)
         try check(response)
     }
 
     private func check(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { return }
+        if http.statusCode == 401 {
+            // The stored code no longer works (rotated server-side) — tell
+            // the gate, which clears the Keychain and re-locks the app.
+            NotificationCenter.default.post(name: .accessCodeRejected, object: nil)
+            throw APIError.unauthorized
+        }
         if http.statusCode == 404 { throw APIError.notFound }
         guard (200..<300).contains(http.statusCode) else {
             throw APIError.httpStatus(http.statusCode)

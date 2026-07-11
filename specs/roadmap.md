@@ -6,7 +6,7 @@ Completed phases have moved to [changelog.md](changelog.md) — this file tracks
 
 **Updated 2026-07-11 (changelog):** Phase 16 (the "Talk to My Trip" App Store MVP) is implementation- and QA-complete and has moved to the changelog — but the build is **not yet submitted to the App Store**; that submission is the immediate open item and Phase 17 ships as an app update behind it. The phases already queued in [BACKLOG.md](BACKLOG.md) (14 → 13 → 15) wait behind Phase 17. `IOS_PLAN.md` at the repo root is the umbrella plan.
 
-## Phase 17: Talk to My Trip — full voice demo experience
+## Phase 17: Talk to My Trip — full voice demo experience [x] COMPLETE (implementation; manual QA pending)
 
 *(Prerequisite: the Phase 16 build is QA-complete but still needs archive → upload → **submit for review** in App Store Connect — see [changelog.md](changelog.md) Phase 16.)*
 
