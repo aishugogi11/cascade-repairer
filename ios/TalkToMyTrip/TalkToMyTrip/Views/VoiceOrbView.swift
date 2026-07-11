@@ -17,13 +17,16 @@ struct VoiceOrbView: View {
     @State private var breathe = false
     @State private var spin = false
 
+    // Stage-readability (Phase 17): saturated, well-separated hues so
+    // idle / listening / speaking read from the back of a room; the orange
+    // repairing ring overrides all of them.
     private var orbColors: [Color] {
         if micDenied { return [.gray, .gray.opacity(0.6)] }
         switch orbState {
-        case .idle: return [.indigo.opacity(0.7), .purple.opacity(0.5)]
+        case .idle: return [.indigo, .purple]
         case .connecting: return [.indigo, .blue]
         case .listening: return [.blue, .cyan]
-        case .speaking: return [.teal, .green]
+        case .speaking: return [.green, .mint]
         }
     }
 
@@ -70,9 +73,9 @@ struct VoiceOrbView: View {
                                 colors: [.orange, .yellow, .orange.opacity(0.1), .orange],
                                 center: .center
                             ),
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round)
                         )
-                        .frame(width: 146, height: 146)
+                        .frame(width: 148, height: 148)
                         .rotationEffect(.degrees(spin ? 360 : 0))
                 }
 
@@ -83,7 +86,7 @@ struct VoiceOrbView: View {
             .frame(height: 190)
 
             Text(caption)
-                .font(.subheadline)
+                .font(.headline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }

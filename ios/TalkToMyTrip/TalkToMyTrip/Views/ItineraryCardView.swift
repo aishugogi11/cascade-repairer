@@ -56,16 +56,19 @@ struct ItineraryCardView: View {
     }
 
     var body: some View {
+        // Stage-readability (Phase 17): larger type, icons, and badge, with
+        // higher-contrast status colors — legible on a projected phone
+        // screen from the back of a room.
         HStack(spacing: 14) {
             Image(systemName: typeIcon)
-                .font(.title3)
-                .frame(width: 40, height: 40)
-                .background(statusColor.opacity(0.15), in: Circle())
+                .font(.title2)
+                .frame(width: 46, height: 46)
+                .background(statusColor.opacity(0.18), in: Circle())
                 .foregroundStyle(statusColor)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(typeLabel)
-                    .font(.headline)
+                    .font(.title3.bold())
                 if let location = item.location {
                     Text(location)
                         .font(.subheadline)
@@ -76,7 +79,7 @@ struct ItineraryCardView: View {
 
             Spacer()
 
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: statusIcon)
                     .symbolEffect(
                         .pulse,
@@ -85,17 +88,17 @@ struct ItineraryCardView: View {
                     )
                 Text(item.status.capitalized)
             }
-            .font(.caption.bold())
+            .font(.subheadline.bold())
             .foregroundStyle(statusColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(statusColor.opacity(0.12), in: Capsule())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(statusColor.opacity(0.18), in: Capsule())
         }
         .padding(14)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(justChanged ? statusColor : .clear, lineWidth: 2)
+                .stroke(justChanged ? statusColor : .clear, lineWidth: 3)
         )
         .scaleEffect(justChanged ? 1.02 : 1.0)
         .animation(.spring(duration: 0.5), value: item.status)
@@ -109,7 +112,7 @@ struct ItineraryCardView: View {
             item: ItineraryItem(
                 item_id: "1", trip_id: "t", type: "flight", status: "repairing",
                 location: "MSP-SFO", start_ts: nil, end_ts: nil,
-                price: 385, currency: "USD"
+                price: 385, currency: "USD", detail: nil
             ),
             justChanged: true
         )

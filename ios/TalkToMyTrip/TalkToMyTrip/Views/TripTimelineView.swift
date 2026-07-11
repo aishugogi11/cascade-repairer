@@ -11,6 +11,9 @@ import SwiftUI
 struct TripTimelineView: View {
     let tripManager: TripManager
 
+    /// Card tap → the "AI Recommended" bottom sheet (swipe to dismiss).
+    @State private var selectedItem: ItineraryItem?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
@@ -38,6 +41,7 @@ struct TripTimelineView: View {
                         justChanged: tripManager.changedItemIDs.contains(item.item_id)
                     )
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .onTapGesture { selectedItem = item }
                 }
 
                 if tripManager.trip == nil {
@@ -59,21 +63,26 @@ struct TripTimelineView: View {
             .padding(.horizontal)
             .animation(.spring(duration: 0.6), value: tripManager.items)
         }
+        .sheet(item: $selectedItem) { item in
+            RecommendationSheet(item: item)
+        }
     }
 
     @ViewBuilder
     private var recoveryTimer: some View {
+        // Stage-readability (Phase 17): the timer is the demo's scoreboard —
+        // big enough to read at arm's length on a projected phone screen.
         if let started = tripManager.recoveryStartedAt {
             // Live count-up while the trip heals, against the 60s target.
             TimelineView(.periodic(from: started, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(started))
                 Label("\(elapsed)s / 60s", systemImage: "timer")
-                    .font(.caption.bold().monospacedDigit())
+                    .font(.title3.bold().monospacedDigit())
                     .foregroundStyle(elapsed <= 60 ? .orange : .red)
             }
         } else if let elapsed = tripManager.recoveryElapsed {
             Label("Recovered in \(Int(elapsed))s", systemImage: "checkmark.seal.fill")
-                .font(.caption.bold())
+                .font(.title3.bold().monospacedDigit())
                 .foregroundStyle(.green)
         }
     }

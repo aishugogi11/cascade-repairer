@@ -2,9 +2,11 @@
 //  ContentView.swift
 //  TalkToMyTrip
 //
-//  The single main screen: voice orb on top, live trip timeline below,
-//  demo controls at the bottom. The hidden VoiceWebView rides in the
-//  background — in the hierarchy (never detached), invisible.
+//  The single main screen: voice orb on top, live trip timeline below.
+//  No visible demo controls — the stage triggers are hidden gestures on
+//  the orb (triple-tap disrupts, long-press picks a trip). The hidden
+//  VoiceWebView rides in the background — in the hierarchy (never
+//  detached), invisible.
 //
 
 import SwiftUI
@@ -13,6 +15,7 @@ struct ContentView: View {
     @State private var voiceManager = VoiceManager()
     @State private var tripManager = TripManager()
     @State private var showAbout = false
+    @State private var showTripSelector = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -35,12 +38,22 @@ struct ContentView: View {
                 isRepairing: tripManager.repairingCount > 0,
                 micDenied: voiceManager.micDenied
             )
+            // Order matters: the triple-tap must be declared before the
+            // single tap so SwiftUI waits for it to fail first.
+            .onTapGesture(count: 3) {
+                // Hidden Act 2/3 trigger — real outbound call, no button.
+                Task { await tripManager.triggerHiddenDisrupt() }
+            }
             .onTapGesture {
                 if voiceManager.isConnected {
                     voiceManager.disconnect()
                 } else {
                     voiceManager.connect()
                 }
+            }
+            .onLongPressGesture {
+                // Hidden operator surface: repoint the timeline at a trip.
+                showTripSelector = true
             }
             .accessibilityLabel(voiceManager.isConnected ? "End conversation" : "Start conversation")
 
@@ -53,10 +66,6 @@ struct ContentView: View {
             }
 
             TripTimelineView(tripManager: tripManager)
-
-            demoControls
-                .padding(.horizontal)
-                .padding(.bottom, 6)
         }
         .background(
             VoiceWebView(voiceManager: voiceManager)
@@ -66,40 +75,17 @@ struct ContentView: View {
         .sheet(isPresented: $showAbout) {
             AboutSheetView()
         }
+        .sheet(isPresented: $showTripSelector) {
+            TripSelectorSheet(currentTripID: tripManager.tripID) { trip in
+                tripManager.selectTrip(trip.trip_id)
+            }
+        }
         .task {
             tripManager.start()
         }
         .onChange(of: voiceManager.replyCount) {
             // The agent may have just booked a trip — pick it up next poll.
             tripManager.noteAgentReply()
-        }
-    }
-
-    /// The reviewer-facing demo: break the flight, then heal it — by voice
-    /// ("fix my trip") or with the button fallback.
-    private var demoControls: some View {
-        HStack(spacing: 10) {
-            Button {
-                Task { await tripManager.simulateFlightCancellation() }
-            } label: {
-                Label("Simulate flight cancellation", systemImage: "exclamationmark.triangle")
-                    .font(.footnote.bold())
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-            .disabled(!tripManager.hasBreakableFlight || tripManager.demoActionInFlight)
-
-            Button {
-                Task { await tripManager.repairNow() }
-            } label: {
-                Label("Repair now", systemImage: "wrench.and.screwdriver")
-                    .font(.footnote.bold())
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.green)
-            .disabled(tripManager.trip == nil || tripManager.demoActionInFlight)
         }
     }
 }

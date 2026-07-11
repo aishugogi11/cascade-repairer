@@ -34,8 +34,14 @@ struct APIConfig {
         currentEnvironment.baseURL
     }
 
-    /// The headless Vocal Bridge bridge page the hidden webview loads.
-    static var mobileVoiceURL: URL {
-        URL(string: "\(baseURL)/v1/mobile_voice/")!
+    /// The headless Vocal Bridge bridge page the hidden webview loads. The
+    /// access code rides as ?code= so the page's token/query fetches can
+    /// attach the X-Access-Code header behind the Phase 17 gate.
+    static func mobileVoiceURL(accessCode: String?) -> URL {
+        var components = URLComponents(string: "\(baseURL)/v1/mobile_voice/")!
+        if let accessCode, !accessCode.isEmpty {
+            components.queryItems = [URLQueryItem(name: "code", value: accessCode)]
+        }
+        return components.url!
     }
 }

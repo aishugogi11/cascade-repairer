@@ -46,6 +46,18 @@ function postNative(msg) {
   }
 }
 
+// Access-code pass-through (Phase 17): the app loads this page as
+// /v1/mobile_voice/?code=… so the token/query fetches carry the gate
+// header; localStorage keeps a reload inside the webview working.
+const codeFromUrl = new URL(window.location).searchParams.get('code');
+if (codeFromUrl) localStorage.setItem('vb_access_code', codeFromUrl);
+const ACCESS_CODE = codeFromUrl || localStorage.getItem('vb_access_code') || '';
+function codeHeaders(extra) {
+  const headers = Object.assign({}, extra);
+  if (ACCESS_CODE) headers['X-Access-Code'] = ACCESS_CODE;
+  return headers;
+}
+
 const e = React.createElement;
 
 function Bridge({ sessionRef }) {
@@ -80,7 +92,7 @@ function Bridge({ sessionRef }) {
       try {
         const res = await fetch('/v1/web_call/query', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: codeHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             query,
             session_name: sessionRef.current || 'unknown-session',
@@ -106,7 +118,7 @@ function App() {
   const sessionRef = useRef(null);
 
   const tokenProvider = useCallback(async () => {
-    const res = await fetch('/v1/web_call/token', { method: 'POST' });
+    const res = await fetch('/v1/web_call/token', { method: 'POST', headers: codeHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = 'token mint failed (HTTP ' + res.status + '): ' + JSON.stringify(data);
