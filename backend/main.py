@@ -17,6 +17,8 @@ from api.cascade_demo import cascade_demo
 from api.web_call import web_call
 from api.itinerary_ui import itinerary_ui
 from api.demo import demo
+from api.legal import legal
+from api.mobile_voice import mobile_voice
 
 
 app = FastAPI(
@@ -83,6 +85,18 @@ app.include_router(
     demo,
     prefix="/v1/demo",
     tags=["demo"],
+)
+
+app.include_router(
+    legal,
+    prefix="/v1/legal",
+    tags=["legal"],
+)
+
+app.include_router(
+    mobile_voice,
+    prefix="/v1/mobile_voice",
+    tags=["mobile_voice"],
 )
 
 if __name__ == "__main__":

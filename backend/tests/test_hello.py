@@ -25,3 +25,6 @@ def test_expected_routes_registered():
     assert "/v1/hello/hello_world" in paths
     assert "/v1/itinerary/status/{trip_id}" in paths
     assert "/v1/itinerary/trips" in paths
+    assert "/v1/legal/privacy" in paths
+    assert "/v1/legal/support" in paths
+    assert "/v1/mobile_voice/" in paths
