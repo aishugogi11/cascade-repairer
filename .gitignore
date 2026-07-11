@@ -231,8 +231,10 @@ temp_file_storage/
 
 about/*
 another_project/*
+example_project/*
 
 NOTES.md
 TODO.md
+IOS_PLAN.md
 
 .DS_Store
