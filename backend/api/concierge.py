@@ -39,7 +39,7 @@ from api import concurrency_core as core
 from api.concurrency_agent import session_snapshot
 from api.repositories import itinerary_items, trips
 from api.repositories.models import ItineraryItem, Trip, rows_to_models
-from api.sabre_tools import launch_trip_repairs
+from api.sabre_tools import create_seed_trip, launch_trip_repairs
 
 DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 
@@ -55,7 +55,12 @@ BASE_INSTRUCTIONS = (
     "for repairs to finish and never refuse other questions while they run; "
     "keep helping. You cannot send notifications or follow up on your own — "
     "never promise to 'let them know' when something finishes; instead "
-    "invite the traveler to ask again in a moment. Your replies are spoken "
+    "invite the traveler to ask again in a moment. When there is no booked "
+    "trip and the traveler wants to plan or book one, confirm the "
+    "destination in one short turn, then call the book_trip tool "
+    "immediately — it books the complete trip in one go. Never call "
+    "book_trip when a trip is already booked; offer fix_trip or answer "
+    "questions about the existing trip instead. Your replies are spoken "
     "aloud: one or two short, conversational sentences. No markdown, no "
     "lists, no stage directions, and never speak ids or tool names. "
 )
@@ -189,6 +194,83 @@ async def fix_trip_impl(session_id: str) -> str:
     )
 
 
+# How each seed item type is spoken in the booking confirmation — the MVP
+# books the fixed seed-trip shape, so the parts are known.
+_SPOKEN_PARTS = {
+    "flight": "a flight",
+    "hotel": "a hotel in Mountain View",
+    "ground": "a ride from the airport",
+    "dining": "dinner",
+    "experience": "a museum visit",
+}
+
+
+def _spoken_date(d) -> str:
+    """'July 17th' — dates are read aloud, never ISO."""
+    day = d.day
+    if 11 <= day % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{d.strftime('%B')} {day}{suffix}"
+
+
+async def book_trip_impl(
+    session_id: str, destination: str, title: Optional[str] = None
+) -> str:
+    """Book the complete trip in one shot — the magic utterance. The tool
+    body, kept a plain function for tests (the fix_trip_impl pattern).
+
+    Wraps create_seed_trip (blocking BigQuery — off the loop via to_thread)
+    with the spoken destination folded into the trip title, then replaces
+    the session's pinned trip with the new one: ensure_trip_context caches
+    the pin for the session's life, so without replacement the agent would
+    keep answering from the old/no-trip context after booking. Failures
+    return speakable strings — a tool that raises kills the spoken turn."""
+    destination = (destination or "").strip()
+    if not destination:
+        return "Where would you like to go? Tell me and I'll book the trip."
+    trip_title = title or f"Trip to {destination}"
+    try:
+        result = await asyncio.to_thread(
+            create_seed_trip, "demo-traveler", trip_title
+        )
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        return (
+            "I couldn't get that trip booked just now — give me a second "
+            "and ask me again."
+        )
+
+    # The booking is real from here on; replace the pin so this session's
+    # remaining turns answer from the new trip, not the old one.
+    _SESSION_TRIPS.pop(session_id, None)
+    context, _speakable_error = await ensure_trip_context(
+        session_id, trip_id=result["trip_id"]
+    )
+    if context is None:
+        # Booked but the read-back failed; the pin isn't cached, so a later
+        # turn retries and lands on this (latest) trip.
+        return (
+            "Your trip is booked! Give me a moment to pull up the details, "
+            "then ask me anything about it."
+        )
+
+    parts = [_SPOKEN_PARTS.get(item.type, item.type) for item in context.items]
+    spoken_parts = (
+        ", ".join(parts[:-1]) + f", and {parts[-1]}" if len(parts) > 1 else parts[0]
+    )
+    trip = context.trip
+    dates = (
+        f", {_spoken_date(trip.start_date)} through {_spoken_date(trip.end_date)}"
+        if trip.start_date and trip.end_date
+        else ""
+    )
+    return (
+        f"Your trip to {destination} is booked — {spoken_parts}{dates}. "
+        "Ask me anything about it."
+    )
+
+
 def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> Agent:
     """The foreground agent for one turn. Tools close over session_id so
     background completions report into this voice session's log; the fresh
@@ -201,12 +283,21 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         the conversation going while they work."""
         return await fix_trip_impl(session_id)
 
+    async def _book_trip(destination: str) -> str:
+        """Book a complete trip to the given destination in one shot —
+        flight, hotel, ride, dinner, and an activity. Use only when the
+        traveler has no booked trip yet."""
+        return await book_trip_impl(session_id, destination)
+
     trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
         model=_llm_model(),
         instructions=BASE_INSTRUCTIONS + trip_line + session_snapshot(session_id),
-        tools=[function_tool(_fix_trip, name_override="fix_trip")],
+        tools=[
+            function_tool(_fix_trip, name_override="fix_trip"),
+            function_tool(_book_trip, name_override="book_trip"),
+        ],
     )
 
 
