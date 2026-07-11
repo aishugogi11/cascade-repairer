@@ -105,6 +105,10 @@ final class TripManager {
             let status = try await APIService.shared.status(tripID: tripID)
             apply(status)
             pollFailed = false
+        } catch APIError.unauthorized {
+            // The access code was rejected — the app is heading back to the
+            // gate; stop this loop rather than spamming 401s.
+            stop()
         } catch {
             pollFailed = true  // keep polling; next success clears it
         }
