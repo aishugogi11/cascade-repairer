@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 16 — Talk to My Trip: App Store submission MVP
+**Completed:** 2026-07-11 (implementation + QA; **App Store submission still pending**) · **Spec:** [specs/2026-07-11-talk-to-my-trip-appstore-mvp/](2026-07-11-talk-to-my-trip-appstore-mvp/)
+
+The "Talk to My Trip" iOS app exists and the whole user story works end to end — QA'd 2026-07-11 against the deployed backend (a San Francisco trip voice-booked through the new magic-utterance `book_trip` Concierge tool with the session pin replaced mid-call, five cards materializing on the native SwiftUI timeline, break → heal in 51s with a live mid-repair spoken answer): an Xcode 26 project (iOS 17+, iPhone-only, zero third-party dependencies) whose visible UI is fully native while a hidden 1×1pt WKWebView runs the Vocal Bridge WebRTC client via the new headless `GET /v1/mobile_voice/` page, backed by new `/v1/legal/privacy` + `/v1/legal/support` pages, `PrivacyInfo.xcprivacy`, and in-app break/repair demo controls for App Review — **not yet submitted to the App Store**: the archive → upload → submit step (this phase's original definition of shipped) remains open, and Phase 17 ships as an app update behind that submission.
+
 ## Phase 12 — Dress rehearsal: the cascade, end to end
 **Completed:** 2026-07-10 · **Spec:** [specs/2026-07-10-dress-rehearsal/](2026-07-10-dress-rehearsal/)
 
