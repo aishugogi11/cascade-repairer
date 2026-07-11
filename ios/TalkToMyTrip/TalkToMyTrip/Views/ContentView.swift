@@ -83,6 +83,13 @@ struct ContentView: View {
         .task {
             tripManager.start()
         }
+        .onDisappear {
+            // The access gate re-locked (401 → AccessManager) and this view
+            // is gone — without this, the poll task retains TripManager and
+            // polls a 401ing backend forever.
+            tripManager.stop()
+            voiceManager.disconnect()
+        }
         .onChange(of: voiceManager.replyCount) {
             // The agent may have just booked a trip — pick it up next poll.
             tripManager.noteAgentReply()
