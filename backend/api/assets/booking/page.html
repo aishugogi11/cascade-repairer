@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
+<title>Voice Booking — Cascade Repairer</title>
+<style>
+  /* The mockup's card/pill/color language (ui_mockup_2026_07_09.png) on the
+     itinerary page's projector-calibrated palette — opt out of forced
+     dark-mode inversion. This frame is the shared visual base Phases 22–23
+     lift for the dashboard. */
+  :root { color-scheme: only light; }
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --ink-faint: #94a3b8;
+    --paper: #f6f8fb;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --brand: #2563eb;
+    --brand-soft: #eff6ff;
+
+    --booked: #2563eb;   --booked-bg: #eff6ff;
+    --planned: #2563eb;  --planned-bg: #eff6ff;
+    --broken: #dc2626;   --broken-bg: #fef2f2;
+    --repairing: #d97706;--repairing-bg: #fffbeb;
+    --fixed: #16a34a;    --fixed-bg: #f0fdf4;
+    --cancelled: #64748b;--cancelled-bg: #f1f5f9;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+
+  /* ---- app header (mockup: product name · current traveler · pill) ---- */
+  header {
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; gap: 14px;
+    padding: 12px 28px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  .masthead { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center;
+    font-size: 21px;
+  }
+  .masthead .name { font-size: 17px; font-weight: 700; }
+  .masthead .sub { font-size: 13px; color: var(--ink-soft); }
+  .traveler-head { text-align: center; }
+  .traveler-head .label {
+    font-size: 12px; color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .traveler-head .who { font-size: 17px; font-weight: 700; }
+  .head-pill { justify-self: end; }
+  .overall-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 600;
+    padding: 8px 16px; border-radius: 999px;
+    background: var(--booked-bg); color: var(--booked);
+    white-space: nowrap;
+  }
+  .overall-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor;
+  }
+  .overall-pill.is-voice     { background: var(--brand-soft); color: var(--brand); }
+  .overall-pill.is-voice .dot { animation: pulse 1.2s ease-in-out infinite; }
+  .overall-pill.is-broken    { background: var(--broken-bg);    color: var(--broken); }
+  .overall-pill.is-repairing { background: var(--repairing-bg); color: var(--repairing); }
+  .overall-pill.is-fixed     { background: var(--fixed-bg);     color: var(--fixed); }
+  .overall-pill.is-awaiting  { background: var(--cancelled-bg); color: var(--ink-soft); }
+
+  /* ---- narrative banner (mockup's line under the header) ---- */
+  .banner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 28px;
+    font-size: 15px;
+    background: var(--brand-soft); color: #1e40af;
+  }
+  .banner .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: currentColor; flex: none;
+  }
+  .banner.is-voice .dot { animation: pulse 1.2s ease-in-out infinite; }
+  .banner.is-broken    { background: var(--broken-bg);    color: #991b1b; }
+  .banner.is-repairing { background: var(--repairing-bg); color: #92400e; }
+  .banner.is-fixed     { background: var(--fixed-bg);     color: #166534; }
+  .banner.is-stale     { background: var(--cancelled-bg); color: var(--ink-soft); }
+
+  /* ---- layout: left rail + main content (Phases 22–23 add the center
+         voice column; the grid leaves no broken-looking gap without it) ---- */
+  .layout {
+    display: grid; grid-template-columns: 300px minmax(0, 1fr);
+    gap: 20px; align-items: start;
+    max-width: 1240px; margin: 0 auto; padding: 20px 28px 48px;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  h2 {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin-bottom: 12px;
+  }
+  .rail { display: grid; gap: 16px; align-content: start; }
+  .rail-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px 20px;
+  }
+
+  /* ---- traveler context card ---- */
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%; flex: none;
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center;
+    font-size: 16px; font-weight: 700;
+  }
+  .traveler-row { display: flex; align-items: center; gap: 12px; }
+  .traveler-row .who { font-size: 16px; font-weight: 700; }
+  .traveler-tag {
+    display: inline-block; margin-top: 4px;
+    font-size: 12px; font-weight: 600;
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .fact-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin-top: 14px;
+  }
+  .fact {
+    background: var(--paper); border-radius: 12px; padding: 10px 12px;
+  }
+  .fact .k { font-size: 12px; color: var(--ink-faint); }
+  .fact .v { font-size: 14px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+  .route-summary { font-size: 14px; color: var(--ink-soft); margin-top: 14px; }
+
+  /* ---- trip timeline ---- */
+  .timeline { list-style: none; padding: 0; display: grid; }
+  .tl-node { display: flex; gap: 12px; }
+  .tl-rail { display: flex; flex-direction: column; align-items: center; width: 26px; flex: none; }
+  .tl-dot {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    display: grid; place-items: center; font-size: 12px;
+    background: var(--booked-bg); color: var(--booked);
+    border: 2px solid currentColor;
+  }
+  .tl-line { flex: 1; width: 2px; background: var(--line); min-height: 14px; }
+  .tl-node:last-child .tl-line { display: none; }
+  .tl-body { padding-bottom: 16px; min-width: 0; }
+  .tl-title { font-size: 14px; font-weight: 700; }
+  .tl-sub { font-size: 13px; color: var(--ink-soft); margin-top: 1px; }
+  .tl-when { font-size: 12px; color: var(--ink-faint); margin-top: 1px; }
+  .tl-node[data-status="broken"]    .tl-dot { background: var(--broken-bg);    color: var(--broken); }
+  .tl-node[data-status="broken"]    .tl-title { color: var(--broken); }
+  .tl-node[data-status="repairing"] .tl-dot { background: var(--repairing-bg); color: var(--repairing); animation: pulse 1.2s ease-in-out infinite; }
+  .tl-node[data-status="fixed"]     .tl-dot { background: var(--fixed-bg);     color: var(--fixed); }
+  .tl-node[data-status="cancelled"] .tl-dot { background: var(--cancelled-bg); color: var(--cancelled); }
+  .timeline-empty { font-size: 14px; color: var(--ink-faint); }
+
+  /* ---- recent trips (collapsible) ---- */
+  details.recent summary {
+    cursor: pointer; list-style: none;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 700;
+  }
+  details.recent summary::-webkit-details-marker { display: none; }
+  details.recent summary .chev { margin-left: auto; transition: transform 0.2s; }
+  details.recent[open] summary .chev { transform: rotate(180deg); }
+  .recent-list { list-style: none; padding: 0; margin-top: 12px; display: grid; gap: 6px; }
+  .recent-list button {
+    font: inherit; text-align: left; width: 100%;
+    background: var(--paper); color: var(--ink);
+    border: 1px solid transparent; border-radius: 10px;
+    padding: 9px 12px; cursor: pointer;
+  }
+  .recent-list button:hover { border-color: var(--line); }
+  .recent-list button.is-active {
+    background: var(--brand-soft); border-color: var(--brand);
+  }
+  .recent-list .t-title { font-size: 14px; font-weight: 600; }
+  .recent-list .t-when { font-size: 12px; color: var(--ink-faint); margin-top: 1px; }
+  .recent-empty { font-size: 13px; color: var(--ink-faint); margin-top: 12px; }
+
+  /* ---- main content ---- */
+  .content { display: grid; gap: 20px; align-content: start; min-width: 0; }
+
+  /* current flight card — the prominent one */
+  .flight-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-left: 6px solid var(--booked);
+    border-radius: 16px; padding: 22px 24px;
+    transition: border-color 0.4s, background 0.4s;
+  }
+  .flight-card .top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .flight-route { font-size: 28px; font-weight: 800; letter-spacing: 0.01em; }
+  .flight-price { font-size: 22px; font-weight: 700; color: var(--brand); margin-left: auto; }
+  .flight-times { font-size: 16px; color: var(--ink-soft); margin-top: 6px; }
+  .flight-meta { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .chip {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
+    padding: 6px 14px; border-radius: 999px; flex: none;
+    text-transform: capitalize;
+    background: var(--booked-bg); color: var(--booked);
+  }
+  .flight-detail {
+    margin-top: 14px; padding: 14px 16px;
+    background: var(--brand-soft); border-radius: 12px;
+    font-size: 14px; color: #1e40af; line-height: 1.5;
+  }
+  .flight-detail .d-head {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  .flight-detail .d-delta { font-weight: 700; }
+
+  /* reservation cards — the rest of the trip, six-status hooks */
+  .reservations { list-style: none; padding: 0; display: grid; gap: 12px; }
+  .item-card {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 6px solid var(--booked);
+    border-radius: 14px;
+    padding: 16px 20px;
+    transition: border-color 0.4s, background 0.4s;
+  }
+  .item-card .icon {
+    width: 46px; height: 46px; border-radius: 12px; flex: none;
+    display: grid; place-items: center; font-size: 22px;
+    background: var(--paper);
+  }
+  .item-card .what { flex: 1; min-width: 0; }
+  .item-card .kind { font-size: 16px; font-weight: 700; }
+  .item-card .where { font-size: 14px; color: var(--ink-soft); margin-top: 2px; }
+  .item-card .when { font-size: 13px; color: var(--ink-faint); margin-top: 2px; }
+  .item-card .price { font-size: 15px; font-weight: 700; margin-right: 4px; }
+
+  .flight-card[data-status="booked"], .item-card[data-status="booked"],
+  .flight-card[data-status="planned"], .item-card[data-status="planned"] {
+    border-left-color: var(--booked);
+  }
+  .item-card[data-status="booked"] .chip,
+  .item-card[data-status="planned"] .chip { background: var(--booked-bg); color: var(--booked); }
+
+  .flight-card[data-status="broken"], .item-card[data-status="broken"] {
+    border-left-color: var(--broken); background: var(--broken-bg);
+  }
+  .item-card[data-status="broken"] .chip,
+  .flight-card[data-status="broken"] .chip { background: var(--broken); color: #fff; }
+
+  .flight-card[data-status="repairing"], .item-card[data-status="repairing"] {
+    border-left-color: var(--repairing); background: var(--repairing-bg);
+  }
+  .item-card[data-status="repairing"] .chip,
+  .flight-card[data-status="repairing"] .chip {
+    background: var(--repairing); color: #fff;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .flight-card[data-status="fixed"], .item-card[data-status="fixed"] {
+    border-left-color: var(--fixed);
+  }
+  .item-card[data-status="fixed"] .chip,
+  .flight-card[data-status="fixed"] .chip { background: var(--fixed); color: #fff; }
+
+  .flight-card[data-status="cancelled"], .item-card[data-status="cancelled"] {
+    border-left-color: var(--cancelled); opacity: 0.7;
+  }
+  .item-card[data-status="cancelled"] .chip,
+  .flight-card[data-status="cancelled"] .chip { background: var(--cancelled-bg); color: var(--cancelled); }
+
+  @keyframes pulse { 50% { opacity: 0.45; } }
+
+  /* ---- candidate options panel (mockup's "AI Recommended" card) ---- */
+  .layout.has-candidates { grid-template-columns: 300px minmax(0, 1fr) 340px; }
+  @media (max-width: 1100px) {
+    .layout.has-candidates { grid-template-columns: 300px minmax(0, 1fr); }
+    .candidates { grid-column: 2; }
+  }
+  @media (max-width: 900px) {
+    .layout.has-candidates { grid-template-columns: 1fr; }
+    .candidates { grid-column: auto; }
+  }
+  .candidates-panel {
+    background: var(--card); border: 1px solid var(--brand);
+    border-radius: 16px; overflow: hidden;
+  }
+  .candidates-head {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--brand); color: #fff;
+    padding: 12px 18px;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .candidates-sub {
+    padding: 12px 18px 0;
+    font-size: 14px; color: var(--ink-soft);
+  }
+  .candidate-list { list-style: none; padding: 14px 18px 18px; display: grid; gap: 12px; }
+  .candidate {
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px;
+    background: var(--card);
+  }
+  .candidate .c-top { display: flex; align-items: baseline; gap: 10px; }
+  .candidate .c-arrives { font-size: 19px; font-weight: 800; }
+  .candidate .c-price {
+    margin-left: auto; font-size: 17px; font-weight: 700; color: var(--brand);
+  }
+  .candidate .c-sub { font-size: 14px; color: var(--ink-soft); margin-top: 4px; }
+  .candidate .c-route { font-size: 13px; color: var(--ink-faint); margin-top: 2px; }
+  .candidate .c-number {
+    display: inline-block; margin-top: 10px;
+    font-size: 12px; font-weight: 700;
+    padding: 4px 12px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+
+  /* ---- awaiting / cold-start state ---- */
+  .awaiting {
+    background: var(--card); border: 1px dashed var(--line);
+    border-radius: 16px; padding: 56px 24px;
+    text-align: center;
+  }
+  .awaiting .big { font-size: 20px; font-weight: 700; }
+  .awaiting .sub { font-size: 15px; color: var(--ink-soft); margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">
+    <div class="logo">🧭</div>
+    <div>
+      <div class="name">Cascade Repairer</div>
+      <div class="sub">Voice booking</div>
+    </div>
+  </div>
+  <div class="traveler-head">
+    <div class="label">Current Traveler</div>
+    <div class="who" id="traveler-name">—</div>
+  </div>
+  <div class="head-pill">
+    <span class="overall-pill is-awaiting" id="overall-pill">
+      <span class="dot"></span><span id="overall-pill-text">Awaiting trip</span>
+    </span>
+  </div>
+</header>
+
+<div class="banner is-stale" id="banner">
+  <span class="dot"></span>
+  <span id="banner-text">Connecting to your trip…</span>
+</div>
+
+<div class="layout">
+  <aside class="rail">
+    <div class="rail-card" id="traveler-card">
+      <h2>Traveler Context</h2>
+      <div class="traveler-row">
+        <div class="avatar" id="avatar">—</div>
+        <div>
+          <div class="who" id="traveler-card-name">Waiting for a trip</div>
+          <span class="traveler-tag">Books by voice</span>
+        </div>
+      </div>
+      <div class="fact-grid">
+        <div class="fact"><div class="k">Booked via</div><div class="v" id="fact-provider">—</div></div>
+        <div class="fact"><div class="k">Booking Ref</div><div class="v" id="fact-ref">—</div></div>
+      </div>
+      <div class="route-summary" id="route-summary">&nbsp;</div>
+    </div>
+
+    <div class="rail-card">
+      <h2>Trip Timeline</h2>
+      <ul class="timeline" id="timeline"></ul>
+      <div class="timeline-empty" id="timeline-empty">
+        The journey appears here as it's booked.
+      </div>
+    </div>
+
+    <details class="rail-card recent" id="recent-panel">
+      <summary>🕘 Recent Trips <span class="chev">▾</span></summary>
+      <ul class="recent-list" id="recent-list"></ul>
+      <div class="recent-empty" id="recent-empty" hidden>No trips yet.</div>
+    </details>
+  </aside>
+
+  <main class="content">
+    <div class="awaiting" id="awaiting">
+      <div class="big">Ready when you are</div>
+      <div class="sub">
+        Book a trip by voice and it will appear here as the conversation
+        happens.
+      </div>
+    </div>
+
+    <section id="flight-section" hidden>
+      <h2>Current Flight</h2>
+      <div class="flight-card" id="flight-card" data-status="planned">
+        <div class="top">
+          <div class="flight-route" id="flight-route">—</div>
+          <div class="flight-price" id="flight-price"></div>
+        </div>
+        <div class="flight-times" id="flight-times"></div>
+        <div class="flight-meta">
+          <span class="chip" id="flight-chip">planned</span>
+        </div>
+        <div class="flight-detail" id="flight-detail" hidden>
+          <div class="d-head">Why this flight</div>
+          <div id="detail-why"></div>
+          <div style="margin-top:6px">
+            <span class="d-delta" id="detail-delta"></span>
+            <span id="detail-impact"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="reservations-section" hidden>
+      <h2>The Rest of the Trip</h2>
+      <ul class="reservations" id="reservations"></ul>
+    </section>
+  </main>
+
+  <aside class="candidates" id="candidates" hidden>
+    <h2>Flight Options</h2>
+    <div class="candidates-panel">
+      <div class="candidates-head">✨ AI Recommended</div>
+      <div class="candidates-sub">
+        What this booking could be — your concierge is reading these out.
+        Pick one by voice.
+      </div>
+      <ul class="candidate-list" id="candidate-list"></ul>
+    </div>
+  </aside>
+</div>
+
+<template id="item-template">
+  <li class="item-card">
+    <div class="icon"></div>
+    <div class="what">
+      <div class="kind"></div>
+      <div class="where"></div>
+      <div class="when"></div>
+    </div>
+    <span class="price"></span>
+    <span class="chip"></span>
+  </li>
+</template>
+
+<script>
+(() => {
+  const POLL_MS = 1500;
+  const LATEST_MS = 4000;
+  const API = "/v1/itinerary";
+  const TOOLS = "/v1/sabre_tools";
+
+  // Access-code pass-through (Phase 17 convention): ?code= wins and is
+  // persisted, so a reload without the param keeps working; with no code the
+  // page still renders and its API calls 401 cleanly.
+  const codeFromUrl = new URL(window.location).searchParams.get("code");
+  if (codeFromUrl) localStorage.setItem("vb_access_code", codeFromUrl);
+  const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
+  const codeHeaders = (extra = {}) =>
+    ACCESS_CODE ? { ...extra, "X-Access-Code": ACCESS_CODE } : extra;
+
+  const KIND = {
+    flight:     { icon: "✈️", label: "Flight" },
+    hotel:      { icon: "🏨", label: "Hotel" },
+    ground:     { icon: "🚗", label: "Ride" },
+    dining:     { icon: "🍽️", label: "Dinner" },
+    experience: { icon: "🎟️", label: "Experience" },
+  };
+
+  const el = (id) => document.getElementById(id);
+  const banner = el("banner"), bannerText = el("banner-text");
+  const pill = el("overall-pill"), pillText = el("overall-pill-text");
+  const template = el("item-template");
+
+  const state = {
+    tripId: null,
+    latestSeen: null,   // last /latest_trip_id answer — a change means a
+                        // trip was booked mid-conversation: adopt it.
+    cards: new Map(),   // item_id -> reservation <li>
+  };
+
+  // ---- formatting ----
+
+  function fmtWhen(item) {
+    if (!item.start_ts) return "";
+    // Times render Pacific for every viewer (standing decision) — labeled
+    // "PT", the season-proof abbreviation (July is PDT).
+    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                   timeZone: "America/Los_Angeles" };
+    let text = new Date(item.start_ts).toLocaleString([], opts);
+    if (item.end_ts) {
+      text += " – " + new Date(item.end_ts).toLocaleString([], opts);
+    }
+    return text + " PT";
+  }
+
+  function fmtCreated(ts) {
+    if (!ts) return "";
+    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                   timeZone: "America/Los_Angeles" };
+    return new Date(ts).toLocaleString([], opts) + " PT";
+  }
+
+  // Prices round like the Concierge speaks them.
+  const fmtPrice = (price) => price == null ? "" : "$" + Math.round(price);
+
+  // "MSP-SFO" (item.location) -> "MSP → SFO"
+  const fmtRoute = (location) => (location || "").replace("-", " → ");
+
+  // "demo-traveler" -> "Demo Traveler" — the traveler on screen, not an id.
+  function travelerName(userId) {
+    if (!userId) return "Traveler";
+    return userId.split(/[-_]/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+  const initials = (name) =>
+    name.split(" ").map((w) => w.charAt(0)).join("").slice(0, 2).toUpperCase();
+
+  // ---- header + banner ----
+
+  function renderMood(items, pendingOptions) {
+    let mode, text, message;
+    const counts = { broken: 0, repairing: 0, fixed: 0 };
+    for (const item of items) {
+      if (item.status in counts) counts[item.status] += 1;
+    }
+    if (counts.broken > 0) {
+      mode = "broken"; text = "Disruption detected";
+      message = "We found a problem with your trip — repairs are starting now.";
+    } else if (counts.repairing > 0) {
+      mode = "repairing"; text = "Repairing trip";
+      message = "Cascade is actively repairing your itinerary — sit tight.";
+    } else if (pendingOptions) {
+      mode = "voice"; text = "Booking by voice";
+      message = "Your concierge is reading out flight options — pick one to book it.";
+    } else if (counts.fixed > 0) {
+      mode = "fixed"; text = "Trip repaired";
+      message = "All done — your trip is repaired and back on track.";
+    } else {
+      mode = "booked"; text = "Trip confirmed";
+      message = "Your trip is booked and everything looks good.";
+    }
+    pill.className = `overall-pill is-${mode}`;
+    pillText.textContent = text;
+    banner.className = `banner is-${mode}`;
+    bannerText.textContent = message;
+  }
+
+  function renderAwaitingMood(pendingOptions) {
+    if (pendingOptions) {
+      pill.className = "overall-pill is-voice";
+      pillText.textContent = "Booking by voice";
+      banner.className = "banner is-voice";
+      bannerText.textContent =
+        "Your concierge is reading out flight options — pick one to book it.";
+    } else {
+      pill.className = "overall-pill is-awaiting";
+      pillText.textContent = "Awaiting trip";
+      banner.className = "banner is-stale";
+      bannerText.textContent =
+        "No trip on screen yet — book one by voice and it will appear here.";
+    }
+  }
+
+  // ---- left rail ----
+
+  function renderTraveler(trip, items) {
+    const name = travelerName(trip.user_id);
+    el("traveler-name").textContent = name;
+    el("traveler-card-name").textContent = name;
+    el("avatar").textContent = initials(name);
+    const flight = items.find((i) => i.type === "flight");
+    el("fact-provider").textContent =
+      flight && flight.provider === "sabre" ? "Sabre" : (flight ? "Partner" : "—");
+    el("fact-ref").textContent = (flight && flight.provider_ref) || "—";
+    const route = [trip.origin, ...(trip.destinations || [])].filter(Boolean).join(" → ");
+    el("route-summary").textContent =
+      route + (trip.start_date ? ` · ${trip.start_date} to ${trip.end_date || "?"}` : "");
+  }
+
+  function renderTimeline(trip, items) {
+    const timeline = el("timeline");
+    const nodes = [];
+    if (trip.origin) {
+      nodes.push(makeNode("📍", trip.origin, "Where the trip starts", "", "booked"));
+    }
+    for (const item of items) {
+      const kind = KIND[item.type] || { icon: "📍", label: item.type };
+      nodes.push(makeNode(
+        kind.icon, kind.label, item.location || "", fmtWhen(item), item.status,
+      ));
+    }
+    timeline.replaceChildren(...nodes);
+    el("timeline-empty").hidden = nodes.length > 0;
+  }
+
+  function makeNode(icon, title, sub, when, status) {
+    const li = document.createElement("li");
+    li.className = "tl-node";
+    li.dataset.status = status;
+    const rail = document.createElement("div");
+    rail.className = "tl-rail";
+    const dot = document.createElement("div");
+    dot.className = "tl-dot";
+    dot.textContent = icon;
+    const line = document.createElement("div");
+    line.className = "tl-line";
+    rail.append(dot, line);
+    const body = document.createElement("div");
+    body.className = "tl-body";
+    const t = document.createElement("div");
+    t.className = "tl-title"; t.textContent = title;
+    const s = document.createElement("div");
+    s.className = "tl-sub"; s.textContent = sub;
+    const w = document.createElement("div");
+    w.className = "tl-when"; w.textContent = when;
+    body.append(t, s, w);
+    li.append(rail, body);
+    return li;
+  }
+
+  // ---- main content ----
+
+  function renderFlight(items) {
+    const flight = items.find((i) => i.type === "flight");
+    el("flight-section").hidden = !flight;
+    if (!flight) return;
+    const card = el("flight-card");
+    card.dataset.status = flight.status;
+    el("flight-route").textContent = fmtRoute(flight.location) || "Your flight";
+    el("flight-price").textContent = fmtPrice(flight.price);
+    el("flight-times").textContent = fmtWhen(flight);
+    el("flight-chip").textContent = flight.status;
+    const detail = flight.detail;
+    el("flight-detail").hidden = !detail;
+    if (detail) {
+      el("detail-why").textContent = detail.why_chosen || "";
+      el("detail-delta").textContent =
+        detail.price_delta ? `${detail.price_delta} vs the other options — ` : "";
+      el("detail-impact").textContent = detail.impact || "";
+    }
+  }
+
+  function renderReservations(items) {
+    const rest = items.filter((i) => i.type !== "flight");
+    el("reservations-section").hidden = rest.length === 0;
+    const list = el("reservations");
+    const seen = new Set();
+    for (const item of rest) {
+      seen.add(item.item_id);
+      let card = state.cards.get(item.item_id);
+      if (!card) {
+        card = template.content.firstElementChild.cloneNode(true);
+        state.cards.set(item.item_id, card);
+        list.appendChild(card);
+      }
+      const kind = KIND[item.type] || { icon: "📍", label: item.type };
+      card.dataset.status = item.status;
+      card.querySelector(".icon").textContent = kind.icon;
+      card.querySelector(".kind").textContent =
+        (item.details && item.details.description) || kind.label;
+      card.querySelector(".where").textContent = item.location || "";
+      card.querySelector(".when").textContent = fmtWhen(item);
+      card.querySelector(".price").textContent = fmtPrice(item.price);
+      card.querySelector(".chip").textContent = item.status;
+    }
+    for (const [id, card] of state.cards) {
+      if (!seen.has(id)) { card.remove(); state.cards.delete(id); }
+    }
+  }
+
+  // ---- candidate options panel ----
+
+  function renderCandidates(pending) {
+    const options = (pending && pending.options) || [];
+    const has = options.length > 0;
+    el("candidates").hidden = !has;
+    document.querySelector(".layout").classList.toggle("has-candidates", has);
+    const list = el("candidate-list");
+    if (!has) {
+      // The block disappeared — the booking happened; the chosen flight
+      // arrives through the items path within one poll.
+      list.replaceChildren();
+      return;
+    }
+    const stopsLine = (stops) =>
+      stops === 0 ? "Nonstop" : (stops === 1 ? "One stop" : `${stops} stops`);
+    list.replaceChildren(...options.map((o) => {
+      const li = document.createElement("li");
+      li.className = "candidate";
+      const top = document.createElement("div");
+      top.className = "c-top";
+      const arrives = document.createElement("div");
+      arrives.className = "c-arrives";
+      arrives.textContent = `Arrives ${o.arrive_time} PT`;
+      const price = document.createElement("div");
+      price.className = "c-price";
+      price.textContent = fmtPrice(o.price);
+      top.append(arrives, price);
+      const sub = document.createElement("div");
+      sub.className = "c-sub";
+      sub.textContent = `${stopsLine(o.stops)} · departs ${o.depart_time} PT`;
+      const route = document.createElement("div");
+      route.className = "c-route";
+      route.textContent = `${o.route} · ${o.depart_date}`;
+      const number = document.createElement("span");
+      number.className = "c-number";
+      number.textContent = `Option ${o.option_number}`;
+      li.append(top, sub, route, number);
+      return li;
+    }));
+  }
+
+  function showAwaiting(pendingOptions) {
+    el("awaiting").hidden = false;
+    el("flight-section").hidden = true;
+    el("reservations-section").hidden = true;
+    // Candidates render only while some trip is displayed.
+    renderCandidates(null);
+    renderAwaitingMood(pendingOptions);
+  }
+
+  // ---- polling ----
+
+  async function poll() {
+    if (!state.tripId) { showAwaiting(null); return; }
+    let resp;
+    try {
+      resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`,
+                         { headers: codeHeaders() });
+    } catch {
+      banner.className = "banner is-stale";
+      bannerText.textContent = "Connection hiccup — catching back up…";
+      return;
+    }
+    if (resp.status === 404) {
+      showAwaiting(null);
+      bannerText.textContent = "That trip isn't available — waiting for the next one.";
+      return;
+    }
+    if (!resp.ok) {
+      banner.className = "banner is-stale";
+      bannerText.textContent = "Having trouble reaching your trip — retrying…";
+      return;
+    }
+    const body = await resp.json();
+    el("awaiting").hidden = true;
+    renderMood(body.items, body.pending_options);
+    renderTraveler(body.trip, body.items);
+    renderTimeline(body.trip, body.items);
+    renderFlight(body.items);
+    renderReservations(body.items);
+    renderCandidates(body.pending_options);
+  }
+
+  // ---- trip pinning (the web_call/iOS contract) ----
+
+  function resetForTrip(tripId) {
+    state.tripId = tripId;
+    state.cards.clear();
+    el("reservations").replaceChildren();
+    const url = new URL(window.location);
+    url.searchParams.set("trip_id", tripId);
+    history.replaceState(null, "", url);
+    markActiveTrip();
+    poll();
+  }
+
+  // The same contract as the web_call/mobile_voice pages: external control
+  // (a wrapping shell, the console) can repoint the displayed trip.
+  window.vbSetTrip = (id) => { if (id) resetForTrip(id); };
+
+  // A trip booked mid-conversation appears without a reload (the iOS
+  // TripManager pattern): when the latest trip *changes*, adopt it.
+  async function checkLatest() {
+    let latest = null;
+    try {
+      const resp = await fetch(`${TOOLS}/latest_trip_id`, { headers: codeHeaders() });
+      if (!resp.ok) return;
+      latest = (await resp.json()).trip_id;
+    } catch { return; }
+    if (!latest) return;
+    if (state.latestSeen === null) {
+      state.latestSeen = latest;
+      if (!state.tripId) resetForTrip(latest);  // cold start, nothing pinned
+      return;
+    }
+    if (latest !== state.latestSeen) {
+      state.latestSeen = latest;
+      resetForTrip(latest);
+      refreshTrips();
+    }
+  }
+
+  // ---- recent trips panel ----
+
+  async function refreshTrips() {
+    let trips = [];
+    try {
+      const resp = await fetch(`${API}/trips`, { headers: codeHeaders() });
+      if (resp.ok) trips = (await resp.json()).trips;
+    } catch { /* the empty state below covers it */ }
+
+    // Newest first — explicit, never transport order — each labeled with its
+    // creation time in Pacific like every other rendered time.
+    trips.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    const list = el("recent-list");
+    list.replaceChildren(...trips.map((trip) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.tripId = trip.trip_id;
+      const title = document.createElement("div");
+      title.className = "t-title";
+      title.textContent = trip.title || trip.trip_id;
+      const when = document.createElement("div");
+      when.className = "t-when";
+      when.textContent = fmtCreated(trip.created_at);
+      btn.append(title, when);
+      btn.addEventListener("click", () => resetForTrip(trip.trip_id));
+      li.appendChild(btn);
+      return li;
+    }));
+    el("recent-empty").hidden = trips.length > 0;
+    markActiveTrip();
+  }
+
+  function markActiveTrip() {
+    for (const btn of el("recent-list").querySelectorAll("button")) {
+      btn.classList.toggle("is-active", btn.dataset.tripId === state.tripId);
+    }
+  }
+
+  // ---- start ----
+
+  async function init() {
+    await refreshTrips();
+    const requested = new URL(window.location).searchParams.get("trip_id");
+    if (requested) {
+      resetForTrip(requested);
+    } else {
+      showAwaiting(null);
+    }
+    // With no ?trip_id= the first checkLatest adopts the latest trip (the
+    // deployed dataset always has prior trips); an unreachable backend just
+    // leaves the awaiting state up and both intervals keep trying.
+    await checkLatest();
+    setInterval(poll, POLL_MS);
+    setInterval(checkLatest, LATEST_MS);
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>

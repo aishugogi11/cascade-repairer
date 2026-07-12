@@ -52,6 +52,7 @@ def fresh_state(monkeypatch):
     monkeypatch.setattr(concierge, "_HISTORY", {})
     monkeypatch.setattr(concierge, "_SESSION_TRIPS", {})
     monkeypatch.setattr(concierge, "_SESSION_FLIGHT_OPTIONS", {})
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", None)
     core._SESSIONS.clear()
     yield
     core._SESSIONS.clear()
@@ -428,6 +429,60 @@ def test_search_flights_blank_args_ask_instead_of_searching(bq):
 
     assert "where" in msg.lower()
     assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_search_flights_records_the_latest_search_slot(bq):
+    """Phase 21: the booking page's candidates come from this slot — search
+    fills it with the same options the session stores, stamped when."""
+    _search()
+
+    slot = concierge._LATEST_SEARCH
+    assert slot is not None
+    assert slot.session_id == "room-1"
+    assert slot.options == concierge._SESSION_FLIGHT_OPTIONS["room-1"]
+    assert slot.recorded_at.tzinfo is not None  # an honest UTC instant
+
+
+def test_second_search_replaces_the_latest_search_slot(bq):
+    _search("room-1")
+    first = concierge._LATEST_SEARCH
+    _search("room-2")
+
+    assert concierge._LATEST_SEARCH is not first
+    assert concierge._LATEST_SEARCH.session_id == "room-2"
+
+
+def test_search_failure_leaves_the_latest_search_slot_empty(monkeypatch, bq):
+    async def broken_search(request):
+        raise RuntimeError("sabre down")
+
+    monkeypatch.setattr(concierge.sabre_client, "flight_search", broken_search)
+    _search()
+
+    assert concierge._LATEST_SEARCH is None
+
+
+def test_book_flight_clears_the_latest_search_slot(monkeypatch, bq):
+    _mock_repos(monkeypatch)
+    _search()
+    assert concierge._LATEST_SEARCH is not None
+
+    asyncio.run(concierge.book_flight_impl("room-1", 1))
+
+    assert concierge._LATEST_SEARCH is None
+
+
+def test_book_flight_leaves_another_sessions_slot_alone(monkeypatch, bq):
+    """room-2 searched after room-1 — room-1's booking must not clear the
+    candidates room-2's conversation is still discussing."""
+    _mock_repos(monkeypatch)
+    _search("room-1")
+    _search("room-2")
+
+    asyncio.run(concierge.book_flight_impl("room-1", 1))
+
+    assert concierge._LATEST_SEARCH is not None
+    assert concierge._LATEST_SEARCH.session_id == "room-2"
 
 
 def test_book_flight_without_search_is_speakable_and_writes_nothing(monkeypatch, bq):

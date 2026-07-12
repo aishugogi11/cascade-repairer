@@ -6,6 +6,10 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **State as of 2026-07-12 (night):** Phases 18 and 19 are merged, deployed, and QA'd (details in [changelog.md](changelog.md)) — the timezone/pin gates on Phase 17 are cleared, so Phase 17's remainder (empty-start onboarding → device QA → **first** App Store submission; the Phase 16 build was never submitted) is the only open work. Runbook: `IOS_DEPLOY.md`.
 
+## Phase 21: Voice booking page — the pre-disruption beat on screen [x] COMPLETE (implementation; manual QA pending)
+
+**Spec:** [specs/2026-07-12-voice-booking-page/](2026-07-12-voice-booking-page/) · landed 2026-07-12 on `vb/feature/voice-booking-page`. `GET /v1/booking/` shows the booking conversation's candidates (new additive `pending_options` block on the status poll) and the full five-item reservation, styled to `about/ui_ideas/ui_mockup_2026_07_09.png` — the visual frame Phases 22–23 lift. Automated suite green (331 passed); the manual walkthrough in the spec's `validation.md` (curl rehearsal on the `/query` seam with the page open) is still owed.
+
 ## Phase 17: Talk to My Trip — full voice demo experience
 
 **Shipped 2026-07-11** (`vb/dev`, deployed): guided multi-turn voice booking on the Concierge, the `DEMO_ACCESS_CODE` gate across backend/pages/iOS, the additive `detail` payload + native recommendation sheet, hidden demo gestures, stage-readability polish, and the App-Review privacy hardening. 290 backend tests green; simulator-verified end to end.

@@ -27,7 +27,10 @@ _PUBLIC_PREFIXES = ("/v1/legal/",)
 _PUBLIC_POSTS = {"/v1/auth/validate"}
 # The static HTML shells (with or without the trailing slash, so FastAPI's
 # 307 redirect to the canonical path stays reachable too).
-_PUBLIC_PAGES = {"/v1/web_call", "/v1/mobile_voice", "/v1/itinerary", "/v1/demo"}
+_PUBLIC_PAGES = {
+    "/v1/web_call", "/v1/mobile_voice", "/v1/itinerary", "/v1/demo",
+    "/v1/booking",
+}
 
 _warned_open = False
 
