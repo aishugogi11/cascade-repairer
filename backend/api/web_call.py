@@ -24,7 +24,7 @@ import logging
 import os
 import time
 from string import Template
-from typing import Set
+from typing import Optional, Set
 
 import requests
 from fastapi import APIRouter
@@ -107,11 +107,14 @@ def mint_token():
     }
 
 
-async def answer_query(session_name: str, query: str) -> str:
+async def answer_query(
+    session_name: str, query: str, trip_id: Optional[str] = None
+) -> str:
     """One delegated spoken turn. Kept as the stable seam (tests patch here,
     rollback is this one line); since Phase 9 the implementation is the
-    Concierge hybrid."""
-    return await concierge.answer_query(session_name, query)
+    Concierge hybrid. trip_id is the caller's displayed trip (Phase 19) —
+    it pins the session only if nothing is pinned yet."""
+    return await concierge.answer_query(session_name, query, trip_id)
 
 
 async def _log_query_turns(
@@ -157,6 +160,11 @@ class QueryRequest(BaseModel):
     session_name: str = Field(
         ..., description="The VB session name from the token response."
     )
+    trip_id: Optional[str] = Field(
+        None,
+        description="The trip the caller is displaying — pins the session "
+        "to it unless a trip is already pinned.",
+    )
 
     @field_validator("query", "session_name")
     @classmethod
@@ -164,6 +172,13 @@ class QueryRequest(BaseModel):
         if not v.strip():
             raise ValueError("must not be blank")
         return v.strip()
+
+    @field_validator("trip_id")
+    @classmethod
+    def _blank_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.strip() or None
 
 
 @web_call.post(
@@ -176,7 +191,9 @@ async def delegated_query(request: QueryRequest):
 
     started = time.monotonic()
     try:
-        reply = await answer_query(request.session_name, request.query)
+        reply = await answer_query(
+            request.session_name, request.query, request.trip_id
+        )
     except Exception as exc:
         return JSONResponse(
             status_code=502, content={"error": f"agent query failed: {exc}"}
@@ -228,6 +245,17 @@ function codeHeaders(extra) {
   return headers;
 }
 
+// Trip pin pass-through (Phase 19): ?trip_id= seeds the displayed trip and
+// window.vbSetTrip updates it after load; when set it rides in every /query
+// POST so the session pins that trip (the server ignores it once pinned).
+let tripId = new URL(window.location).searchParams.get('trip_id') || '';
+window.vbSetTrip = (id) => { tripId = id || ''; };
+function queryBody(query, sessionName) {
+  const body = { query, session_name: sessionName };
+  if (tripId) body.trip_id = tripId;
+  return body;
+}
+
 const ROLE_COLOR = { user: '#4f46e5', agent: '#10b981', backend: '#f59e0b' };
 const styles = {
   row: { display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 },
@@ -260,10 +288,9 @@ function VoiceUI({ tokenError, sessionRef }) {
         const res = await fetch('/v1/web_call/query', {
           method: 'POST',
           headers: codeHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            query,
-            session_name: sessionRef.current || 'unknown-session',
-          }),
+          body: JSON.stringify(
+            queryBody(query, sessionRef.current || 'unknown-session')
+          ),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {

@@ -10,8 +10,9 @@ Two endpoints:
 """
 import asyncio
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -30,37 +31,42 @@ class SeedTripRequest(BaseModel):
     title: str = "The Complete Trip — hackathon demo"
 
 
+# Everything displayed or spoken to a user is Pacific time (decision
+# 2026-07-12): seed wall-clock times are *declared* Pacific here, and
+# BigQuery TIMESTAMP stores the honest UTC instant on write.
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
 # One itinerary item per required category. Dates match the demo story:
 # fly in July 17, event July 18, fly out July 19.
 _SEED_ITEMS = [
     {
         "type": "flight", "provider": "sabre", "location": "MSP-SFO",
-        "start": datetime(2026, 7, 17, 8, 0, tzinfo=timezone.utc),
-        "end": datetime(2026, 7, 17, 12, 5, tzinfo=timezone.utc),
+        "start": datetime(2026, 7, 17, 8, 0, tzinfo=_PACIFIC),
+        "end": datetime(2026, 7, 17, 12, 5, tzinfo=_PACIFIC),
         "price": 385.0,
     },
     {
         "type": "hotel", "provider": "sabre", "location": "Mountain View, CA",
-        "start": datetime(2026, 7, 17, 22, 0, tzinfo=timezone.utc),
-        "end": datetime(2026, 7, 19, 18, 0, tzinfo=timezone.utc),
+        "start": datetime(2026, 7, 17, 22, 0, tzinfo=_PACIFIC),
+        "end": datetime(2026, 7, 19, 18, 0, tzinfo=_PACIFIC),
         "price": 412.0,
     },
     {
         "type": "ground", "provider": "other", "location": "SFO -> Mountain View",
-        "start": datetime(2026, 7, 17, 12, 30, tzinfo=timezone.utc),
-        "end": datetime(2026, 7, 17, 13, 15, tzinfo=timezone.utc),
+        "start": datetime(2026, 7, 17, 12, 30, tzinfo=_PACIFIC),
+        "end": datetime(2026, 7, 17, 13, 15, tzinfo=_PACIFIC),
         "price": 58.0,
     },
     {
         "type": "dining", "provider": "other", "location": "Castro St, Mountain View",
-        "start": datetime(2026, 7, 17, 19, 0, tzinfo=timezone.utc),
-        "end": datetime(2026, 7, 17, 21, 0, tzinfo=timezone.utc),
+        "start": datetime(2026, 7, 17, 19, 0, tzinfo=_PACIFIC),
+        "end": datetime(2026, 7, 17, 21, 0, tzinfo=_PACIFIC),
         "price": 120.0,
     },
     {
         "type": "experience", "provider": "other", "location": "Computer History Museum",
-        "start": datetime(2026, 7, 19, 10, 0, tzinfo=timezone.utc),
-        "end": datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc),
+        "start": datetime(2026, 7, 19, 10, 0, tzinfo=_PACIFIC),
+        "end": datetime(2026, 7, 19, 12, 0, tzinfo=_PACIFIC),
         "price": 37.5,
     },
 ]

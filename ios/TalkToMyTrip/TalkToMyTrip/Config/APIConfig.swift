@@ -36,11 +36,20 @@ struct APIConfig {
 
     /// The headless Vocal Bridge bridge page the hidden webview loads. The
     /// access code rides as ?code= so the page's token/query fetches can
-    /// attach the X-Access-Code header behind the Phase 17 gate.
-    static func mobileVoiceURL(accessCode: String?) -> URL {
+    /// attach the X-Access-Code header behind the Phase 17 gate; the
+    /// displayed trip rides as ?trip_id= so the voice session pins it
+    /// (VoiceManager.setTrip covers trips resolved after the page loads).
+    static func mobileVoiceURL(accessCode: String?, tripId: String? = nil) -> URL {
         var components = URLComponents(string: "\(baseURL)/v1/mobile_voice/")!
+        var queryItems: [URLQueryItem] = []
         if let accessCode, !accessCode.isEmpty {
-            components.queryItems = [URLQueryItem(name: "code", value: accessCode)]
+            queryItems.append(URLQueryItem(name: "code", value: accessCode))
+        }
+        if let tripId, !tripId.isEmpty {
+            queryItems.append(URLQueryItem(name: "trip_id", value: tripId))
+        }
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
         }
         return components.url!
     }

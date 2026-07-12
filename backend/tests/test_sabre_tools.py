@@ -1,5 +1,6 @@
 """Walkthrough-surface tests (seed + repair endpoints) — hermetic, BigQuery
 mocked at the bq_helper boundary per test_repositories.py conventions."""
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 from api import concurrency_core as core
 from api.helpers.bigquery_helper import bq_helper
 from api.sabre import client as sabre_client
-from api.sabre_tools import sabre_tools
+from api.sabre_tools import _SEED_ITEMS, sabre_tools
 
 app = FastAPI()
 app.include_router(sabre_tools, prefix="/v1/sabre_tools")
@@ -53,6 +54,23 @@ def test_seed_trip_creates_booked_trip_all_five_items_and_two_bookings(bq):
     assert bq.dml.call_count == 8
     queries = [c.args[0] for c in bq.dml.call_args_list]
     assert all("INSERT INTO" in q for q in queries)
+
+
+def test_seed_items_declare_pacific_wall_clock():
+    """Phase 19 timezone discipline: seed wall clocks are Pacific, so the
+    stored UTC instant is shifted, not equal — the 8:00 AM July 17 flight
+    is 15:00Z (PDT = UTC−7)."""
+    flight = next(s for s in _SEED_ITEMS if s["type"] == "flight")
+    assert flight["start"].astimezone(timezone.utc) == datetime(
+        2026, 7, 17, 15, 0, tzinfo=timezone.utc
+    )
+    assert flight["end"].astimezone(timezone.utc) == datetime(
+        2026, 7, 17, 19, 5, tzinfo=timezone.utc
+    )
+    # Every seed timestamp carries the Pacific declaration (July = PDT).
+    for seed in _SEED_ITEMS:
+        for key in ("start", "end"):
+            assert seed[key].utcoffset() == timedelta(hours=-7)
 
 
 def test_seed_trip_failed_item_insert_aborts_with_500(bq):

@@ -75,6 +75,15 @@ def test_demo_page_is_served_as_html():
     assert "Flight canceled" in resp.text
 
 
+def test_demo_page_renders_times_pacific_labeled_pt():
+    """Phase 19: same timezone discipline as the itinerary page — card times
+    and the feed clock render America/Los_Angeles, labeled "PT"."""
+    text = client.get("/v1/demo/").text
+    assert text.count('timeZone: "America/Los_Angeles"') == 2
+    assert text.count('" PT"') == 2
+    assert "PST" not in text
+
+
 # ── POST /book ─────────────────────────────────────────────────────────
 
 

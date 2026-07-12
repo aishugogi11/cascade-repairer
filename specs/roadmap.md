@@ -118,7 +118,7 @@ Scope (ships together):
 
 </details>
 
-## Phase 19: Validation hotfixes — Pacific-time discipline & pin the displayed trip
+## Phase 19: Validation hotfixes — Pacific-time discipline & pin the displayed trip [x] COMPLETE (implementation; manual QA pending)
 
 Two bugs surfaced by the 2026-07-12 post-Phase-18 validation pass (live web call + Talk to My Trip device check), promoted per Josh as one combined hotfix phase — both must land before Phase 17's device QA, which would hit them immediately. One branch via `sdd-feature-spec`.
 

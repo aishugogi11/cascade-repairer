@@ -243,3 +243,4 @@ xcuserdata/
 DerivedData/
 ios/**/build/
 *.xcuserstate
+CORPUS_*

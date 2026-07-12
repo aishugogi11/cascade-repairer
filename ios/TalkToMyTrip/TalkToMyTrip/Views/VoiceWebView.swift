@@ -13,6 +13,10 @@ import WebKit
 
 struct VoiceWebView: UIViewRepresentable {
     let voiceManager: VoiceManager
+    /// The trip on screen when the webview is created — usually nil at
+    /// cold start (the latest-trip resolution races the page load); later
+    /// changes reach the page through VoiceManager.setTrip instead.
+    var tripId: String?
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -28,7 +32,8 @@ struct VoiceWebView: UIViewRepresentable {
         // HTTPS is required for getUserMedia — the page loads from Cloud Run.
         // The gate ran before this view exists, so the code is in the Keychain.
         webView.load(URLRequest(url: APIConfig.mobileVoiceURL(
-            accessCode: KeychainHelper.loadAccessCode()
+            accessCode: KeychainHelper.loadAccessCode(),
+            tripId: tripId
         )))
         return webView
     }

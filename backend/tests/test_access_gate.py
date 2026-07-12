@@ -39,7 +39,7 @@ PAGE_PATHS = (
 def _mock_query_seam(monkeypatch, reply="hi from the agent"):
     """Make POST /v1/web_call/query answer hermetically behind the gate."""
 
-    async def fake_answer(session_name, query):
+    async def fake_answer(session_name, query, trip_id=None):
         return reply
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
