@@ -6,7 +6,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **State as of 2026-07-12:** the Phase 17 build is on `vb/dev` and deployed (PR #26, access gate armed), but Act 1 — booking a new trip by voice — is unreachable. The 2026-07-12 browser rehearsal traced it to the latest-trip auto-pin in `ensure_trip_context`; the fix is **Phase 18**, which gates Phase 17's remaining device QA and App Store submission. That submission is the **first** one (the Phase 16 build was never submitted); runbook: `IOS_DEPLOY.md`.
 
-## Phase 18: Unpin fresh sessions — make Act 1 guided booking reachable
+## Phase 18: Unpin fresh sessions — make Act 1 guided booking reachable [x] COMPLETE (implementation; manual QA pending)
 
 Fresh sessions auto-pin the backend's most recently created trip (`ensure_trip_context`, `backend/api/concierge.py`), and the guided-booking instructions then forbid `search_flights`/`book_flight` — so voice-booking a new trip fails whenever the trips table is non-empty, which it always is. Not a Sabre issue: fully broken in `SABRE_MODE=mock`. One branch via `sdd-feature-spec`; rehearse via `/v1/web_call/?code=…`.
 

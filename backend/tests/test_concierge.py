@@ -8,10 +8,12 @@ session snapshot, failures come back speakable, and the acceptance shape —
 a turn is answered while five real repair coroutines run — holds end to end.
 """
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from agents.tool_context import ToolContext
 
 from api import concierge
 from api import concurrency_core as core
@@ -164,7 +166,13 @@ def test_trip_summary_injected_into_instructions(monkeypatch, bq):
     captured = {}
     _mock_runner(monkeypatch, captured=captured)
 
-    asyncio.run(concierge.answer_query("room-1", "where do I fly into?"))
+    async def scenario():
+        # Phase 18: pins come only from an explicit trip_id (the disrupt
+        # flow's seam) — a cold answer_query no longer pins anything.
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
+        await concierge.answer_query("room-1", "where do I fly into?")
+
+    asyncio.run(scenario())
 
     instructions = captured["agent"].instructions
     assert "TRIP CONTEXT" in instructions and "authoritative" in instructions
@@ -179,6 +187,7 @@ def test_trip_is_pinned_once_per_session(monkeypatch, bq):
     _mock_runner(monkeypatch)
 
     async def scenario():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
         await concierge.answer_query("room-1", "hi")
         await concierge.answer_query("room-1", "where am I staying?")
 
@@ -190,19 +199,46 @@ def test_trip_is_pinned_once_per_session(monkeypatch, bq):
     ]) == 1
 
 
+def test_cold_session_stays_unpinned_no_fallback_query(monkeypatch, bq):
+    """Phase 18: with no cached pin and no trip_id there is NO trips-table
+    SELECT — the latest-trip fallback is gone — and the speakable no-trip
+    line comes back instead."""
+    context, error = asyncio.run(concierge.ensure_trip_context("room-1"))
+
+    assert context is None
+    assert error == "I don't see a booked trip for you yet."
+    assert "room-1" not in concierge._SESSION_TRIPS
+    assert bq.select.call_args_list == []
+
+
 def test_failed_pin_never_blocks_the_turn_and_retries(monkeypatch, bq):
+    """A failed explicit pin comes back speakable, is never cached, and the
+    session keeps answering unpinned until a healthy pin lands."""
     captured = {}
     _mock_runner(monkeypatch, reply="Still here.", captured=captured)
     healthy_route = bq.select.side_effect
     bq.select.side_effect = lambda query, params=None: (False, [], "bq down")
 
-    reply = asyncio.run(concierge.answer_query("room-1", "hello?"))
+    async def failed_pin_then_turn():
+        context, error = await concierge.ensure_trip_context(
+            "room-1", trip_id="t-1"
+        )
+        assert context is None
+        assert "trouble reaching the booking system" in error
+        return await concierge.answer_query("room-1", "hello?")
+
+    reply = asyncio.run(failed_pin_then_turn())
     assert reply == "Still here."  # the turn survived the failed pin
     assert concierge._NO_TRIP_LINE in captured["agent"].instructions
     assert "room-1" not in concierge._SESSION_TRIPS  # failure not cached
 
     bq.select.side_effect = healthy_route
-    asyncio.run(concierge.answer_query("room-1", "and now?"))
+
+    async def healthy_pin_then_turn():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
+        await concierge.answer_query("room-1", "and now?")
+
+    asyncio.run(healthy_pin_then_turn())
     assert "TRIP CONTEXT" in captured["agent"].instructions  # retry pinned it
 
 
@@ -230,15 +266,17 @@ def test_ensure_trip_context_explicit_trip_id_is_the_phase_12_seam(monkeypatch, 
 
 
 def test_fix_trip_no_trip_is_speakable(monkeypatch, bq):
-    bq.select.side_effect = lambda query, params=None: (True, [], None)
+    """A cold unpinned session gets the no-trip line — no raise, and no
+    trips-table read now that the latest-trip fallback is gone (Phase 18)."""
     msg = asyncio.run(concierge.fix_trip_impl("room-1"))
     assert "don't see a booked trip" in msg
+    assert bq.select.call_args_list == []
 
 
-def test_fix_trip_lookup_failure_is_speakable_never_raises(monkeypatch, bq):
+def test_explicit_pin_lookup_failure_is_speakable_never_raises(monkeypatch, bq):
     bq.select.side_effect = lambda query, params=None: (False, [], "bq down")
-    msg = asyncio.run(concierge.fix_trip_impl("room-1"))
-    assert "trouble reaching the booking system" in msg
+    _, error = asyncio.run(concierge.ensure_trip_context("room-1", trip_id="t-1"))
+    assert "trouble reaching the booking system" in error
 
 
 def test_fix_trip_launches_all_items_and_returns_before_completion(monkeypatch, bq):
@@ -253,6 +291,7 @@ def test_fix_trip_launches_all_items_and_returns_before_completion(monkeypatch, 
     monkeypatch.setattr(concierge, "launch_trip_repairs", fake_launch)
 
     async def scenario():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
         # wait_for is the await-guard: if fix_trip awaited the repair task,
         # this would time out instead of returning.
         msg = await asyncio.wait_for(concierge.fix_trip_impl("room-1"), 2.0)
@@ -465,6 +504,58 @@ def test_complete_trip_spaces_items_and_returns_immediately(monkeypatch, bq):
     assert "SFO" in created[0].location
 
 
+def test_fresh_session_booking_reaches_search_flights(monkeypatch, bq):
+    """The Phase 18 regression guard: a fresh session with a NON-EMPTY trips
+    table (the bq fixture serves a latest trip) stays unpinned, its agent is
+    built with _NO_TRIP_LINE — not the authoritative TRIP CONTEXT block that
+    forbade booking — and a booking-intent turn's search_flights call goes
+    through search_flights_impl to the mock Sabre client and comes back as a
+    speakable options string. Fails on the old latest-trip auto-pin."""
+    seen = {}
+
+    class _BookingIntentRunner:
+        """Acts like a model with booking intent: invokes the agent's real
+        search_flights FunctionTool, exactly as the SDK would."""
+
+        @classmethod
+        async def run(cls, agent, input, max_turns=None):
+            seen["agent"] = agent
+            tool = next(t for t in agent.tools if t.name == "search_flights")
+            args = (
+                '{"origin": "MSP", "destination": "DFW", '
+                '"depart_date": "2026-07-13"}'
+            )
+            ctx = ToolContext(
+                context=None, tool_name=tool.name, tool_call_id="call-1",
+                tool_arguments=args,
+            )
+            seen["tool_result"] = await tool.on_invoke_tool(ctx, args)
+            return _FakeResult(input, "Here are your options.")
+
+    monkeypatch.setattr(concierge, "Runner", _BookingIntentRunner)
+
+    reply = asyncio.run(concierge.answer_query(
+        "fresh-session",
+        "book me a flight from Minneapolis to Dallas on 2026-07-13",
+    ))
+
+    assert reply == "Here are your options."
+    # The non-empty trips table never shadowed the session: no pin, no
+    # latest-trip read, and the agent was told there is no trip.
+    assert "fresh-session" not in concierge._SESSION_TRIPS
+    assert _trip_selects(bq.select) == []
+    instructions = seen["agent"].instructions
+    assert concierge._NO_TRIP_LINE in instructions
+    assert "TRIP CONTEXT" not in instructions
+    # The search reached the mock Sabre client: options stored per session,
+    # readback speakable.
+    options = concierge._SESSION_FLIGHT_OPTIONS["fresh-session"]
+    assert 2 <= len(options) <= 3
+    assert all(o.origin == "MSP" and o.destination == "DFW" for o in options)
+    assert "Option one" in seen["tool_result"]
+    assert "dollars" in seen["tool_result"]
+
+
 def test_instructions_carry_the_guided_script():
     for phrase in ("search_flights", "book_flight", "complete_trip",
                    "destination", "pick one by number"):
@@ -480,6 +571,36 @@ def test_instructions_carry_the_guided_script():
     assert "fix_trip" in concierge.BASE_INSTRUCTIONS
 
 
+# --- today's date in the instructions (Phase 18) -----------------------------
+
+
+class _FrozenDatetime(datetime):
+    """Clock frozen at 2026-07-13 02:30 UTC — 19:30 on Sunday 2026-07-12 in
+    Pacific time, so the Pacific date differs from the UTC date and a wrong
+    (or missing) timezone conversion fails the assertion."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 7, 13, 2, 30, tzinfo=timezone.utc).astimezone(tz)
+
+
+def test_today_line_renders_pacific_date(monkeypatch):
+    monkeypatch.setattr(concierge, "datetime", _FrozenDatetime)
+
+    line = concierge._today_line()
+
+    assert line.startswith("Today is Sunday, 2026-07-12 (US Pacific time).")
+    assert "always into the future" in line
+
+
+def test_agent_instructions_carry_today_line(monkeypatch):
+    monkeypatch.setattr(concierge, "datetime", _FrozenDatetime)
+
+    agent = concierge.build_agent("room-1")
+
+    assert "Today is Sunday, 2026-07-12 (US Pacific time)." in agent.instructions
+
+
 # --- the acceptance shape (Phase 5's test over the seam) -------------------------
 
 
@@ -491,6 +612,9 @@ def test_talk_while_repairing_acceptance_shape(monkeypatch, bq):
     _mock_runner(monkeypatch, reply="Repairs are humming along.")
 
     async def scenario():
+        # The disrupt flow pins the broken trip explicitly (the Phase 12
+        # seam) — the only way a session gets a trip besides booking one.
+        await concierge.ensure_trip_context("vb-room-1", trip_id="t-1")
         msg = await asyncio.wait_for(concierge.fix_trip_impl("vb-room-1"), 2.0)
         assert "5 parts" in msg
 
