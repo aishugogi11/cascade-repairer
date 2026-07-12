@@ -15,14 +15,15 @@ clarifying questions instead of answering "how are the repairs coming?").
 The VB session name is the concurrency session id, so the snapshot, the
 event log, and the voice session are one thing.
 
-Trip context (QA addendum, 2026-07-09 — see the phase spec's
-addendum-trip-context.md): the traveler's trip is pinned to the session at
-first need — resolved once (latest trip, or an explicit trip_id via
-ensure_trip_context's parameter, the Phase 12 seam), its static facts cached
-in process and injected into every turn's instructions. Static facts come
-from that one read; live repair progress comes only from the in-memory
-snapshot — so no BigQuery read ever lands on the per-turn hot path after the
-pin, and a mid-call seed of a new trip cannot switch the agent's trip.
+Trip context (QA addendum, 2026-07-09; narrowed by Phase 18): a trip pins
+to the session only on an explicit trip_id (ensure_trip_context's
+parameter, the Phase 12 seam) or when book_flight re-pins the trip it just
+created — a fresh session stays unpinned so guided booking is reachable.
+Once pinned, static facts come from that one read, cached in process and
+injected into every turn's instructions; live repair progress comes only
+from the in-memory snapshot — so no BigQuery read ever lands on the
+per-turn hot path after the pin, and a mid-call seed of a new trip cannot
+switch the agent's trip.
 
 Session history is an in-process dict (single Cloud Run instance — the
 standing scope decision); blocking BigQuery reads go through
@@ -34,6 +35,7 @@ import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 from agents import Agent, Runner, function_tool
 from pydantic import BaseModel
@@ -41,7 +43,7 @@ from pydantic import BaseModel
 from api import concurrency_core as core
 from api.concurrency_agent import session_snapshot
 from api.repositories import bookings, itinerary_items, trips
-from api.repositories.models import Booking, ItineraryItem, Trip, rows_to_models
+from api.repositories.models import Booking, ItineraryItem, Trip
 from api.sabre import client as sabre_client
 from api.sabre import shapes
 from api.sabre_tools import launch_trip_repairs
@@ -84,6 +86,10 @@ _NO_TRIP_LINE = (
     "if asked about trip details. "
 )
 
+# The speakable reply for a session with no pinned trip — one line shared by
+# the unpinned and trip-not-found paths so fix_trip answers the same either way.
+_NO_TRIP_SPOKEN = "I don't see a booked trip for you yet."
+
 # session_name -> Agents SDK input list (multi-turn memory).
 _HISTORY: Dict[str, List] = {}
 
@@ -100,9 +106,11 @@ class TripContext(BaseModel):
     summary: str
 
 
-# session_name -> pinned trip. Pinned once per session so a mid-call seed of
-# a new trip can't switch the agent's trip, and no turn after the first pays
-# a BigQuery read for context.
+# session_name -> pinned trip. A trip pins in exactly two cases: an explicit
+# trip_id (the Phase 12 disrupt seam) or book_flight re-pinning the trip it
+# just created — a fresh session stays unpinned (Phase 18). Pinned once per
+# session so a mid-call seed of a new trip can't switch the agent's trip, and
+# no turn after the first pays a BigQuery read for context.
 _SESSION_TRIPS: Dict[str, TripContext] = {}
 
 
@@ -137,32 +145,25 @@ async def ensure_trip_context(
     resolution is never cached, so the next turn retries.
 
     trip_id is the Phase 12 seam: the disruption/outbound-call flow knows
-    exactly which trip broke and pins it explicitly. Without it, the most
-    recently created trip wins — a voice flow can never ask for a UUID."""
+    exactly which trip broke and pins it explicitly (book_flight re-pins its
+    new trip through the same parameter). Without it, the session stays
+    unpinned — no fallback read. The old latest-trip fallback shadowed every
+    fresh session with someone else's trip and made guided booking
+    unreachable (Phase 18)."""
     context = _SESSION_TRIPS.get(session_id)
     if context is not None:
         return context, None
+    if not trip_id:
+        return None, _NO_TRIP_SPOKEN
 
-    if trip_id:
-        success, trip, _error = await asyncio.to_thread(trips.get_trip, trip_id)
-    else:
-        query = f"""
-            SELECT *
-            FROM `{trips._table()}`
-            ORDER BY created_at DESC
-            LIMIT 1
-        """
-        success, rows, _error = await asyncio.to_thread(
-            trips.bq_helper.run_select, query
-        )
-        trip = rows_to_models(Trip, rows)[0] if success and rows else None
+    success, trip, _error = await asyncio.to_thread(trips.get_trip, trip_id)
     if not success:
         return None, (
             "I'm having trouble reaching the booking system right now — "
             "give me a second and ask me again."
         )
     if trip is None:
-        return None, "I don't see a booked trip for you yet."
+        return None, _NO_TRIP_SPOKEN
 
     success, items, _error = await asyncio.to_thread(
         itinerary_items.list_items_for_trip, trip.trip_id
@@ -583,6 +584,20 @@ async def complete_trip_impl(session_id: str) -> str:
     )
 
 
+def _today_line() -> str:
+    """Today's date for the instructions — without it the model cannot turn
+    'leaving on Monday' into YYYY-MM-DD. Rendered fresh per build_agent call
+    so a long-lived process never serves a stale date; Pacific because the
+    demo audience and event are (decision 2026-07-12). A helper, not
+    inlined, so tests can freeze the clock."""
+    today = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return (
+        f"Today is {today:%A}, {today:%Y-%m-%d} (US Pacific time). Resolve "
+        "relative dates like 'Monday' or 'tomorrow' from this date, always "
+        "into the future. "
+    )
+
+
 def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> Agent:
     """The foreground agent for one turn. Tools close over session_id so
     background completions report into this voice session's log; the fresh
@@ -617,7 +632,10 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
     return Agent(
         name="Concierge",
         model=_llm_model(),
-        instructions=BASE_INSTRUCTIONS + trip_line + session_snapshot(session_id),
+        instructions=(
+            BASE_INSTRUCTIONS + _today_line() + trip_line
+            + session_snapshot(session_id)
+        ),
         tools=[
             function_tool(_fix_trip, name_override="fix_trip"),
             function_tool(_search_flights, name_override="search_flights"),
