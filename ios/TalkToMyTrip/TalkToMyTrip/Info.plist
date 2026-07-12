@@ -30,7 +30,7 @@
 		<true/>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Talk to My Trip uses the microphone so you can speak with your trip assistant.</string>
+	<string>Talk to My Trip uses the microphone so you can speak with your trip assistant. Your voice is processed by Vocal Bridge (speech) and OpenAI (AI replies), as described in the consent screen and privacy policy.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
