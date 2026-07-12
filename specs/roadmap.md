@@ -4,7 +4,7 @@ High-level implementation order for the hackathon-ready foundation. Hackathon da
 
 Phases appear in **execution order** — the first heading not marked `[x] COMPLETE` is what `sdd-feature-spec` picks up next. Phase numbers are historical IDs, not ordering: Phase 18 runs before Phase 17's remainder. Completed phases live in [changelog.md](changelog.md); deferred phases (14 → 13 → 15) wait in [BACKLOG.md](BACKLOG.md) behind everything here. `IOS_PLAN.md` is the umbrella plan.
 
-**State as of 2026-07-12:** the Phase 17 build is on `vb/dev` and deployed (PR #26, access gate armed), but Act 1 — booking a new trip by voice — is unreachable. The 2026-07-12 browser rehearsal traced it to the latest-trip auto-pin in `ensure_trip_context`; the fix is **Phase 18**, which gates Phase 17's remaining device QA and App Store submission. That submission is the **first** one (the Phase 16 build was never submitted); runbook: `IOS_DEPLOY.md`.
+**State as of 2026-07-12 (evening):** Phase 18 is merged and deployed (PR #29, image `c897f15`) and the live web-call rehearsal confirmed Act 1 guided booking works end to end. That same validation pass surfaced two hotfixes — timezone display is wrong on every surface, and the iOS app's voice session can't reach the trip on its own screen — promoted (TODO triage 2026-07-12) as **Phase 19**, which now gates Phase 17's remaining device QA and App Store submission. That submission is the **first** one (the Phase 16 build was never submitted); runbook: `IOS_DEPLOY.md`.
 
 ## Phase 18: Unpin fresh sessions — make Act 1 guided booking reachable [x] COMPLETE (implementation; manual QA pending)
 
@@ -118,11 +118,123 @@ Scope (ships together):
 
 </details>
 
+## Phase 19: Validation hotfixes — Pacific-time discipline & pin the displayed trip
+
+Two bugs surfaced by the 2026-07-12 post-Phase-18 validation pass (live web call + Talk to My Trip device check), promoted per Josh as one combined hotfix phase — both must land before Phase 17's device QA, which would hit them immediately. One branch via `sdd-feature-spec`.
+
+Scope (ships together):
+
+- **Timezone discipline across the codebase** (decision 2026-07-12): **the database stores UTC;
+  the edges speak Pacific.** Josh booked the 6:15 AM MSP→DFW flight by voice; the itinerary page
+  showed 1:15 AM — `_booking_writes`/`_completion_items` stamp wall-clock times as UTC and the
+  page renders browser-local. Fix at ingest (declare mock Sabre times Pacific wall-clock, convert
+  to UTC at write — `concierge.py`, seed items in `sabre_tools.py`) and at display (every user
+  surface renders `America/Los_Angeles` explicitly: itinerary `page.html`, iOS formatters, a
+  sweep of demo/web_call pages; label "PT"/"Pacific time", never "PST" — it's PDT in July).
+  Existing dev rows were written under the old fiction and will display ~7 h off — cosmetic,
+  reseed or ignore.
+- **Voice session pins the trip the app is displaying**: Phase 18's documented accepted loss
+  surfaced on device — the iOS UI shows the trip (server-side latest-trip reads were kept) but
+  the in-app voice agent starts unpinned and denies it, which also breaks in-app "my flight was
+  cancelled, fix it" on pre-existing trips. Thread the app's known `trip_id` through the existing
+  explicit-pin seam (Phase 12): iOS → `/v1/mobile_voice/?trip_id=…` → the `/v1/web_call/query`
+  delegation → `concierge.answer_query` → `ensure_trip_context(session, trip_id=…)`. Deliberate
+  context, not the removed latest-trip fallback — fresh users with no trips still start unpinned
+  and get guided booking. Spec decision to settle: re-pin semantics when the displayed trip
+  changes mid-session (suggested: only pin when the session has no pin yet, so a just-booked
+  trip's pin is never clobbered). Same seam serves `/v1/web_call/?trip_id=…` for desktop parity.
+
+<details>
+<summary>Original TODO entries (verbatim, raised 2026-07-12) — kept here because TODO.md is gitignored</summary>
+
+> **TODO:**
+>
+> ## HOTFIX — Timezone discipline across the codebase: store UTC, display/speak Pacific
+>
+> **Raised:** 2026-07-12 (Josh, comparing the live web-call transcript against
+> `/v1/itinerary/?trip_id=…`). **Priority: hotfix** — Josh wants this implemented across the
+> entire codebase ahead of normal triage order.
+>
+> **The bug that exposed it:** Josh booked the 6:15 AM MSP→DFW flight by voice; the itinerary
+> page showed 1:15 AM. `_booking_writes` (`backend/api/concierge.py`) stamps the mock's
+> wall-clock departure time with `tzinfo=timezone.utc` (6:15 stored as 06:15 UTC), and
+> `page.html` renders `new Date(ts).toLocaleString()` in the **browser's** timezone (CDT for
+> Josh = −5 h). Every card is shifted; every viewer in a different timezone sees different
+> times; none match what the agent spoke.
+>
+> **Decision (Josh, 2026-07-12):** everything displayed or spoken to a user is **Pacific time**
+> (`America/Los_Angeles` — PDT in July, so label it "PT"/"Pacific time", never hardcode "PST"),
+> regardless of where the user sits. Storage stays honest UTC instants:
+>
+> > **The database stores UTC. The edges speak Pacific.**
+>
+> - **Storage:** BigQuery `TIMESTAMP` is a UTC instant by definition — never store wall-clock
+>   fiction stamped as UTC. Nothing between storage and display needs timezone knowledge.
+> - **Ingest rule (the single missing declaration):** mock Sabre times are timezone-less
+>   wall-clock fiction — declare them **Pacific wall-clock** and convert Pacific→UTC at write.
+>   Real Sabre responses carry offsets (`06:15:00-05:00`) and convert naturally.
+> - **Display rule:** every user surface renders `America/Los_Angeles` explicitly, never
+>   browser/device-local.
+>
+> **Touch points:**
+> - `backend/api/concierge.py` — `_booking_writes` + `_completion_items`: build `start_ts`/
+>   `end_ts` with `ZoneInfo("America/Los_Angeles")` instead of `timezone.utc`.
+> - `backend/api/sabre_tools.py` — `_SEED_ITEMS` (same wall-clock-as-UTC pattern).
+> - `backend/api/assets/itinerary/page.html` — `toLocaleString`/`toLocaleTimeString` calls
+>   (~lines 325–400): add `timeZone: 'America/Los_Angeles'`, label times "PT" (includes the
+>   repair-feed clock).
+> - `ios/TalkToMyTrip/` — date formatters (`TripManager`/card views): fixed
+>   `TimeZone(identifier: "America/Los_Angeles")`.
+> - Voice readback (`_spoken_clock`/`FlightOption`) — fine for mock once mock times are defined
+>   as Pacific (spoken == stored wall clock); when real Sabre lands, convert to Pacific before
+>   speaking.
+> - Check other user-facing timestamps (demo page, web_call page) for browser-local rendering.
+>
+> **Known cosmetic fallout:** existing dev-table rows were written wall-clock-as-UTC, so after
+> the fix they display ~7 h off. Rehearsal junk — let it age out or reseed; don't chase it.
+>
+> ## HOTFIX — iOS voice session can't reach the trip the app is displaying
+>
+> **Raised:** 2026-07-12 (Josh, Talk to My Trip device check right after Phase 18 deployed).
+> **Priority: hotfix** — Josh wants this handled right away, together with the timezone fix
+> above; it blocks the iOS demo walkthrough (device QA is exactly what Phase 18 unblocked).
+>
+> **What happened:** the app's UI shows the seed trip (TripManager polls
+> `GET /v1/sabre_tools/latest_trip_id` + the status endpoint — server-side latest-trip *reads*
+> were deliberately kept), but the in-app voice agent says there's no trip. This is Phase 18's
+> **documented accepted loss** surfacing on device, not a regression: fresh Concierge sessions
+> no longer auto-pin the backend's latest trip, and nothing in the app's voice path passes a
+> `trip_id` — `POST /v1/web_call/query` carries only `session_name` and `query`.
+>
+> **Goes past Q&A:** in-app voice can't do anything with a pre-existing trip — including "my
+> flight was cancelled, fix it" (`fix_trip` needs the session pin). Still working: voice-booking
+> a new trip in-session (pins it; Q&A and cancel-then-fix then work), and the triple-tap disrupt
+> gesture (server-side cascade, doesn't need the voice pin).
+>
+> **Proposed fix (small; does NOT reopen the Phase 18 bug):** the app already knows which trip
+> it's displaying — let it tell the voice session. Thread the trip_id through the existing
+> explicit-pin seam (`ensure_trip_context(session, trip_id=…)`, the Phase 12 seam, built for
+> exactly this):
+>
+> - iOS loads `/v1/mobile_voice/?trip_id=…` (or includes trip_id in the query POST body);
+> - the mobile_voice page's `useAIAgent → POST /v1/web_call/query` delegation carries it;
+> - `web_call.py` passes it through to `concierge.answer_query` → `ensure_trip_context`.
+>
+> This is *deliberate* context ("pin the trip on my screen"), completely different from the
+> removed fallback ("silently grab whoever's latest trip") — a fresh user with no trips still
+> starts unpinned and gets guided booking. Decide the re-pin semantics while speccing: what
+> happens when the app's displayed trip changes mid-session (e.g. after an in-session booking,
+> or the long-press trip selector) — probably only pin when the session has no pin yet, so a
+> just-booked trip's pin is never clobbered. Same seam would serve the web pages
+> (`/v1/web_call/?trip_id=…`) for parity and desktop testing.
+
+</details>
+
 ## Phase 17: Talk to My Trip — full voice demo experience
 
 **Shipped 2026-07-11** (`vb/dev`, deployed): guided multi-turn voice booking on the Concierge, the `DEMO_ACCESS_CODE` gate across backend/pages/iOS, the additive `detail` payload + native recommendation sheet, hidden demo gestures, stage-readability polish, and the App-Review privacy hardening. 290 backend tests green; simulator-verified end to end.
 
-**Still open:** device QA (2026-07-11) exposed the Act 1 blocker, since diagnosed and carved out as **Phase 18 above** — it must land first. Then, in order:
+**Still open:** device QA (2026-07-11) exposed the Act 1 blocker, carved out as **Phase 18 above** (landed 2026-07-12); the post-Phase-18 validation pass carved out the two hotfixes in **Phase 19 above** — it must land first. Then, in order:
 
 - **iOS empty-start onboarding** (promoted from TODO 2026-07-11): don't auto-resolve
   `latest_trip_id` on cold start — show the "tap the orb" empty state; remember this
