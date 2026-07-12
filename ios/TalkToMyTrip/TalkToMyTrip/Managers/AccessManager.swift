@@ -25,6 +25,14 @@ final class AccessManager {
     var errorMessage: String?
 
     init() {
+        // iOS keeps Keychain items across app deletion, so a reinstall would
+        // silently skip the gate with a code from a previous install.
+        // UserDefaults IS wiped on uninstall — a missing first-launch marker
+        // means fresh install: purge any stale code and gate normally.
+        if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
+            KeychainHelper.deleteAccessCode()
+            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+        }
         isUnlocked = KeychainHelper.loadAccessCode() != nil
         NotificationCenter.default.addObserver(
             forName: .accessCodeRejected, object: nil, queue: .main
