@@ -69,6 +69,7 @@ struct ItineraryCardView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(typeLabel)
                     .font(.title3.bold())
+                    .lineLimit(1)
                 if let location = item.location {
                     Text(location)
                         .font(.subheadline)
@@ -77,8 +78,10 @@ struct ItineraryCardView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
+            // The badge never wraps or truncates — the location text on the
+            // left is what gives way on narrow screens.
             HStack(spacing: 6) {
                 Image(systemName: statusIcon)
                     .symbolEffect(
@@ -89,6 +92,8 @@ struct ItineraryCardView: View {
                 Text(item.status.capitalized)
             }
             .font(.subheadline.bold())
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundStyle(statusColor)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)

@@ -16,6 +16,10 @@ struct ContentView: View {
     @State private var tripManager = TripManager()
     @State private var showAbout = false
     @State private var showTripSelector = false
+    @State private var showVoiceConsent = false
+    /// Voice-data consent (guidelines 5.1.1/5.1.2): asked before the mic
+    /// ever activates, withdrawable from the About sheet.
+    @AppStorage(voiceConsentKey) private var voiceConsentGranted = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -47,8 +51,12 @@ struct ContentView: View {
             .onTapGesture {
                 if voiceManager.isConnected {
                     voiceManager.disconnect()
-                } else {
+                } else if voiceConsentGranted {
                     voiceManager.connect()
+                } else {
+                    // Consent first — the mic (and every provider behind it)
+                    // stays untouched until the traveler agrees.
+                    showVoiceConsent = true
                 }
             }
             .onLongPressGesture {
@@ -73,7 +81,15 @@ struct ContentView: View {
                 .opacity(0)
         )
         .sheet(isPresented: $showAbout) {
-            AboutSheetView()
+            AboutSheetView(onWithdrawVoiceConsent: {
+                voiceManager.disconnect()
+            })
+        }
+        .sheet(isPresented: $showVoiceConsent) {
+            VoiceConsentSheet {
+                voiceConsentGranted = true
+                voiceManager.connect()
+            }
         }
         .sheet(isPresented: $showTripSelector) {
             TripSelectorSheet(currentTripID: tripManager.tripID) { trip in

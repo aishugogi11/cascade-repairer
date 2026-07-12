@@ -34,6 +34,21 @@ def test_privacy_page_covers_microphone_and_contact():
     assert "mailto:" in text
 
 
+def test_privacy_page_covers_ai_disclosure_retention_and_withdrawal():
+    """Guidelines 5.1.1/5.1.2: every third-party AI processor named, a
+    retention period, a consent-withdrawal path, and equivalent-protection
+    language must all be present."""
+    with TestClient(app) as client:
+        text = client.get("/v1/legal/privacy").text.lower()
+
+    assert "openai" in text
+    assert "google cloud" in text
+    assert "90 days" in text            # retention period
+    assert "withdraw" in text           # consent withdrawal
+    assert "consent" in text
+    assert "equivalent" in text         # third-party protection
+
+
 def test_support_page_serves_html():
     with TestClient(app) as client:
         resp = client.get("/v1/legal/support")
