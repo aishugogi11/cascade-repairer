@@ -4,28 +4,36 @@ High-level implementation order for the hackathon-ready foundation. Hackathon da
 
 Completed phases have moved to [changelog.md](changelog.md) — this file tracks only open and upcoming work.
 
-**Updated 2026-07-11 (changelog):** Phase 16 (the "Talk to My Trip" App Store MVP) is implementation- and QA-complete and has moved to the changelog — but the build is **not yet submitted to the App Store**; that submission is the immediate open item and Phase 17 ships as an app update behind it. The phases already queued in [BACKLOG.md](BACKLOG.md) (14 → 13 → 15) wait behind Phase 17. `IOS_PLAN.md` at the repo root is the umbrella plan.
+**Updated 2026-07-11 (replan #2):** the Phase 17 build landed on `vb/dev` (PR #26) and is deployed with the access gate armed — but the phase is **not complete**: QA on device revealed the core Act 1 story is unreachable (see below), so Phase 17 stays open with a re-scoped remainder. The Phase 16 build was never submitted; **the Phase 17 build is the first App Store submission**, per `IOS_DEPLOY.md`. The phases queued in [BACKLOG.md](BACKLOG.md) (14 → 13 → 15) wait behind Phase 17. `IOS_PLAN.md` is the umbrella plan.
 
 ## Phase 17: Talk to My Trip — full voice demo experience
 
-> **Not complete (Josh, 2026-07-11):** implementation landed and is simulator-verified,
-> but the core Act 1 user story is unreachable in practice — the Concierge pins the
-> backend's most recent trip to every new session and then refuses to search/book
-> ("never book when a trip is already booked"), so a fresh user gets a pre-loaded trip
-> and can never pick a flight by voice. Resolve the pinned-trip vs. new-booking
-> behavior (spec decision) before this phase can close; device QA and the App Store
-> submission also remain open.
+**Shipped 2026-07-11 (in `vb/dev`, deployed):** guided multi-turn voice booking on the
+Concierge (`search_flights` → 2–3 spoken options → `book_flight` → `complete_trip`),
+the `DEMO_ACCESS_CODE` gate across backend/pages/iOS, the additive `detail` payload +
+native recommendation sheet, hidden demo gestures replacing all visible demo buttons,
+stage-readability polish, and the App-Review privacy hardening (first-use AI-consent
+sheet, withdrawal path, retention-complete privacy policy). 290 backend tests green;
+simulator-verified end to end.
 
-*(Prerequisite: the Phase 16 build is QA-complete but still needs archive → upload → **submit for review** in App Store Connect — see [changelog.md](changelog.md) Phase 16.)*
+**Why it's still open (Josh, QA on device 2026-07-11):** new sessions pin the
+backend's *latest* trip and the guided script then refuses to search/book, so a fresh
+user gets a pre-loaded trip and can never pick a flight by voice — Act 1 is
+undemoable. Remaining scope (replan decisions 2026-07-11):
 
-Turn the submitted app into the full three-act demo from `IOS_PLAN.md`, shipped as an app update (updates re-review much faster than a first submission). The voice bridge, headless page, and magic-utterance booking shipped in Phase 16; this phase is the upgrade:
-
-- **Backend (Track A remainder):** guided multi-turn voice booking on the Concierge (`search_flights` → speak 2–3 options → `book_flight` by voice → `complete_trip` with ~1.5s card spacing), replacing the magic utterance; demo-orchestration reuse (`/v1/demo/disrupt` as the Act 2/3 trigger with the real outbound call); the additive `detail` payload on `/status/{trip_id}` for the recommendation sheet (first thing to cut).
-- **iOS (Track B remainder):** recommendation bottom sheet, hidden demo gestures (triple-tap disrupt, long-press trip selector), orb/timeline polish for stage readability.
-- **Access-code gate** (TODO triage 2026-07-11, ships in this update — the Phase 16 first submission goes out ungated to keep review fastest): a single shared access code on first launch before the main screen, validated by the backend, protecting the public backend's OpenAI/Vocal Bridge spend. Deliberately *not* username/password accounts (avoids Apple's account-deletion requirements and the Sign-in-with-Apple obligation); the code goes in the App Review notes and the judges' hands.
-- Vocal Bridge + Sabre remain the hard requirements: Sabre stays in `SABRE_MODE=mock` until real keys arrive **Monday 7/14**, then flip on Cloud Run (per-call mock fallback already protects the demo).
-- Revisit `APIConfig.swift`'s hardcoded Cloud Run dev URL before event day (replan note 2026-07-11): the store build points at `vocal-bridge-be-dev-…run.app` — fine while that service is stable, but a URL change breaks the shipped app silently; a custom domain or prod service is post-hackathon.
-- Verify per `IOS_PLAN.md` § Verification: Act 1 booked by voice on device, Act 2 cascade < 60s while conversing, Act 3 the phone rings — minding the 10 outbound-calls/day Vocal Bridge quota.
-
-> **TODO (2026-07-11, promoted into this phase):** In the iOS make sure The Phase 17 has this: some sort of authentication for this hackathon demo. Right now, it jumps right to talk to my trip, which is great, but in order for this to actually get to the app store, there needs to be a test username and pass, or some sort of authentication that allows users to use this.
-> *(Triage note 2026-07-11: promoted as the access-code-gate bullet above — Josh chose a shared access code over test username/password (no accounts → no Apple account-deletion / Sign-in-with-Apple obligations), shipping in the Phase 17 update; the Phase 16 first submission proceeds ungated for fastest first review.)*
+- **Concierge new-trip booking (the blocker):** when the traveler explicitly asks to
+  plan/book a **new** trip while one is pinned, confirm once, then run the guided
+  search; `book_flight` already replaces the pin. Supersedes the requirements.md
+  "never search when a trip is already pinned" decision — route through
+  `sdd-feature-spec` as a Phase 17 addendum, rehearse via `/v1/web_call/?code=…`.
+- **iOS empty-start onboarding** (promoted from TODO 2026-07-11): don't auto-resolve
+  `latest_trip_id` on cold start — show the "tap the orb" empty state; remember this
+  device's own trip in UserDefaults once booked; keep the after-reply re-resolve and
+  the long-press selector.
+- **Device QA:** the three acts on a physical iPhone (`SABRE_MODE=mock`; one run =
+  2 outbound calls, 10/day quota), sheet & gestures, edge cases (validation.md § 7).
+- **Submit:** archive → upload → submit per `IOS_DEPLOY.md` (access code in the review
+  notes; the deployed privacy policy already matches).
+- Standing pre-event items: verify Cloud Run `min/max-instances=1`; flip
+  `SABRE_MODE=real` when keys arrive **Monday 7/14**; review the hardcoded dev
+  Cloud Run URL in `APIConfig.swift`.
