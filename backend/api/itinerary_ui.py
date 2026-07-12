@@ -18,6 +18,7 @@ from typing import Optional, get_args
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
+from api import concierge
 from api.repositories import bookings as bookings_repo
 from api.repositories import trips
 from api.repositories.models import Booking, ItemStatus, ItineraryItem
@@ -148,6 +149,16 @@ async def _details_for(trip_id: str, items) -> dict:
     return details
 
 
+def _pending_options(trip_id: str) -> Optional[dict]:
+    """The Concierge's in-flight flight options for the booking page's
+    candidates panel (Phase 21) — best-effort like `detail`: any failure
+    omits the block, never breaks the poll."""
+    try:
+        return concierge.pending_options_for_trip(trip_id)
+    except Exception:  # noqa: BLE001 — additive, never load-bearing
+        return None
+
+
 @itinerary_ui.get("/status/{trip_id}")
 async def trip_status(trip_id: str):
     """The poll target: trip header + items (sorted by start_ts) + summary.
@@ -155,7 +166,10 @@ async def trip_status(trip_id: str):
     404 for an unknown trip; a repository failure is a 500, never an empty
     200 the page would render as a healthy trip. Items with a booking carry
     an additive `detail` object (why chosen / price delta / impact) for the
-    iOS recommendation sheet; everything else in the payload is unchanged.
+    iOS recommendation sheet; while a guided booking conversation has live
+    flight options the payload carries an additive `pending_options` block
+    (Phase 21, the booking page's candidates panel); everything else in the
+    payload is unchanged.
     """
     success, view, error = await asyncio.to_thread(trips.get_trip_with_items, trip_id)
     if not success:
@@ -171,12 +185,16 @@ async def trip_status(trip_id: str):
             payload["detail"] = details[item.item_id]
         items.append(payload)
 
-    return {
+    body = {
         "trip": view.trip,
         "items": items,
         "summary": _summarize(view.items),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+    pending = _pending_options(trip_id)
+    if pending:
+        body["pending_options"] = pending
+    return body
 
 
 @itinerary_ui.get("/trips")

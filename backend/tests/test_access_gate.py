@@ -26,6 +26,7 @@ PUBLIC_GETS = (
     "/v1/mobile_voice/",
     "/v1/itinerary/",
     "/v1/demo/",
+    "/v1/booking/",
 )
 
 PAGE_PATHS = (
@@ -33,6 +34,7 @@ PAGE_PATHS = (
     "/v1/mobile_voice/",
     "/v1/itinerary/",
     "/v1/demo/",
+    "/v1/booking/",
 )
 
 

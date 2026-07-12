@@ -4,6 +4,7 @@ boundary per test_repositories.py conventions.
 The router is mounted on a local app here; main.py wiring has its own smoke
 test.
 """
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -11,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from api import concierge
 from api.helpers.bigquery_helper import bq_helper
 from api.itinerary_ui import itinerary_ui
 
@@ -261,6 +263,118 @@ def test_status_detail_read_failure_never_breaks_the_poll(bq):
 
     assert resp.status_code == 200
     assert "detail" not in resp.json()["items"][0]
+
+
+# --- pending_options (Phase 21, feeds the booking page's candidates) ----------
+
+
+def flight_option(n, price=250.0):
+    return concierge.FlightOption(
+        option_number=n, airline="AA", flight_number=100 + n, origin="MSP",
+        destination="SFO", depart_date="2026-07-17", depart_time="08:00",
+        arrive_time="10:05", stops=0, price=price, currency="USD",
+        spoken=f"Option {n}.",
+    )
+
+
+def latest_search(session="s-1"):
+    return concierge.LatestSearch(
+        session_id=session,
+        options=[flight_option(1), flight_option(2, price=311.4)],
+        recorded_at=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+    )
+
+
+def pinned_context(trip_id):
+    return concierge.TripContext(
+        trip=concierge.Trip(**dict(TRIP_ROW, trip_id=trip_id)),
+        items=[], summary="pinned",
+    )
+
+
+def _one_flight_status(bq):
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("flight", "booked")), None),
+        (True, [], None),
+    ]
+
+
+def test_status_pending_options_for_unpinned_session(bq, monkeypatch):
+    """The pre-booking window: a search happened but no trip is pinned yet —
+    whatever trip the page polls sees the candidates."""
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", latest_search())
+    monkeypatch.setattr(concierge, "_SESSION_TRIPS", {})
+    _one_flight_status(bq)
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    block = body["pending_options"]
+    assert block["recorded_at"] == "2026-07-12T18:00:00+00:00"
+    assert [o["option_number"] for o in block["options"]] == [1, 2]
+    option = block["options"][0]
+    # The speakable-summary shape: route, PT wall-clock labels, rounded
+    # price — and no airline codes anywhere in it.
+    assert option["route"] == "MSP → SFO"
+    assert option["depart_time"] == "8 AM"
+    assert option["arrive_time"] == "10:05 AM"
+    assert option["stops"] == 0
+    assert option["price"] == 250
+    assert block["options"][1]["price"] == 311
+    assert "airline" not in option and "AA" not in str(block)
+    # The additive contract: everything else is untouched.
+    assert body["trip"]["trip_id"] == "t-1"
+    assert body["summary"]["counts"]["booked"] == 1
+
+
+def test_status_pending_options_for_session_pinned_to_this_trip(bq, monkeypatch):
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", latest_search())
+    monkeypatch.setattr(
+        concierge, "_SESSION_TRIPS", {"s-1": pinned_context("t-1")}
+    )
+    _one_flight_status(bq)
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    assert "pending_options" in body
+
+
+def test_status_omits_pending_options_when_slot_empty(bq, monkeypatch):
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", None)
+    _one_flight_status(bq)
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    assert "pending_options" not in body
+
+
+def test_status_omits_pending_options_pinned_to_a_different_trip(bq, monkeypatch):
+    """A session mid-conversation about trip t-other must not leak its
+    candidates onto every other trip's poll."""
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", latest_search())
+    monkeypatch.setattr(
+        concierge, "_SESSION_TRIPS", {"s-1": pinned_context("t-other")}
+    )
+    _one_flight_status(bq)
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    assert "pending_options" not in body
+
+
+def test_status_pending_options_read_failure_never_breaks_the_poll(bq, monkeypatch):
+    def explode(trip_id):
+        raise RuntimeError("slot on fire")
+
+    monkeypatch.setattr(concierge, "pending_options_for_trip", explode)
+    _one_flight_status(bq)
+    with TestClient(app) as client:
+        resp = client.get("/v1/itinerary/status/t-1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "pending_options" not in body
+    assert body["trip"]["trip_id"] == "t-1"  # the poll stays valid
 
 
 # --- GET /trips --------------------------------------------------------------

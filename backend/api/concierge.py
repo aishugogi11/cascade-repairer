@@ -33,7 +33,7 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
@@ -251,6 +251,25 @@ class FlightOption(BaseModel):
 # every search, cleared by a successful booking.
 _SESSION_FLIGHT_OPTIONS: Dict[str, List[FlightOption]] = {}
 
+
+class LatestSearch(BaseModel):
+    """The most recent search, bridged for the booking page (Phase 21):
+    _SESSION_FLIGHT_OPTIONS is session-keyed and the trip doesn't exist until
+    book_flight, so the trip-keyed status endpoint needs this one slot to
+    surface what the Concierge just offered."""
+
+    session_id: str
+    options: List[FlightOption]
+    recorded_at: datetime
+
+
+# Written by search_flights_impl alongside _SESSION_FLIGHT_OPTIONS, cleared
+# by book_flight_impl on a successful booking. One slot, not per-session:
+# with two simultaneous unpinned conversations an unrelated trip's poll could
+# briefly show the other session's candidates — accepted demo-grade looseness
+# for a single-operator demo.
+_LATEST_SEARCH: Optional[LatestSearch] = None
+
 # Strong refs so the complete_trip background task isn't garbage-collected
 # (the web_call._LOG_TASKS pattern).
 _BUILD_TASKS: Set[asyncio.Task] = set()
@@ -382,6 +401,12 @@ async def search_flights_impl(
         )
 
     _SESSION_FLIGHT_OPTIONS[session_id] = options
+    global _LATEST_SEARCH
+    _LATEST_SEARCH = LatestSearch(
+        session_id=session_id,
+        options=options,
+        recorded_at=datetime.now(timezone.utc),
+    )
     count_word = {2: "two", 3: "three"}.get(len(options), str(len(options)))
     spoken = " ".join(option.spoken for option in options)
     if len(options) == 1:
@@ -492,6 +517,9 @@ async def book_flight_impl(session_id: str, option_number: int) -> str:
     # The booking is real from here on; replace the pin so this session's
     # remaining turns answer from the new trip, and drop the spent options.
     _SESSION_FLIGHT_OPTIONS.pop(session_id, None)
+    global _LATEST_SEARCH
+    if _LATEST_SEARCH is not None and _LATEST_SEARCH.session_id == session_id:
+        _LATEST_SEARCH = None
     _SESSION_TRIPS.pop(session_id, None)
     await ensure_trip_context(session_id, trip_id=trip.trip_id)
 
@@ -503,6 +531,38 @@ async def book_flight_impl(session_id: str, option_number: int) -> str:
         f"{_spoken_clock(option.depart_time)}. Want me to arrange the rest "
         "of the trip — hotel, ride, dinner, and something fun?"
     )
+
+
+def pending_options_for_trip(trip_id: str) -> Optional[dict]:
+    """The latest search's options when they could be about this trip: the
+    slot's session is pinned to it, or has no pin yet (the pre-booking
+    window, where the trip being polled is whatever the page displays).
+    None otherwise — the status endpoint omits the block entirely.
+
+    The shape mirrors the speakable summary the Concierge reads aloud —
+    option number, route, wall-clock times (already declared Pacific, the
+    Phase 19 discipline), rounded price, no airline codes."""
+    slot = _LATEST_SEARCH
+    if slot is None:
+        return None
+    pinned = _SESSION_TRIPS.get(slot.session_id)
+    if pinned is not None and pinned.trip.trip_id != trip_id:
+        return None
+    return {
+        "recorded_at": slot.recorded_at.isoformat(),
+        "options": [
+            {
+                "option_number": o.option_number,
+                "route": f"{o.origin} → {o.destination}",
+                "depart_date": o.depart_date,
+                "depart_time": _spoken_clock(o.depart_time),
+                "arrive_time": _spoken_clock(o.arrive_time),
+                "stops": o.stops,
+                "price": round(o.price),
+            }
+            for o in slot.options
+        ],
+    }
 
 
 def _completion_items(trip: Trip) -> List[ItineraryItem]:
