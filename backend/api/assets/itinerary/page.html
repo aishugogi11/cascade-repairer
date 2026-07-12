@@ -332,6 +332,13 @@
     return text + " PT";
   }
 
+  function fmtCreated(ts) {
+    if (!ts) return "";
+    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                   timeZone: "America/Los_Angeles" };
+    return " (" + new Date(ts).toLocaleString([], opts) + " PT)";
+  }
+
   function renderItems(items) {
     const seen = new Set();
     for (const item of items) {
@@ -512,11 +519,15 @@
       if (resp.ok) tripsBody = await resp.json();
     } catch { /* handled below as the no-trips state */ }
 
+    // Newest first (the endpoint already orders this way — kept explicit so
+    // the dropdown never depends on transport order), each labeled with its
+    // creation time in Pacific, like every other rendered time.
     const trips = tripsBody.trips;
+    trips.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     for (const trip of trips) {
       const opt = document.createElement("option");
       opt.value = trip.trip_id;
-      opt.textContent = trip.title || trip.trip_id;
+      opt.textContent = (trip.title || trip.trip_id) + fmtCreated(trip.created_at);
       select.appendChild(opt);
     }
 
