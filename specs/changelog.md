@@ -8,6 +8,16 @@ Ordered newest phase first.
 
 ---
 
+## Phase 19 — Validation hotfixes: Pacific-time discipline & pin the displayed trip
+**Completed:** 2026-07-12 (QA passed same day; validation report in the spec dir) · **Spec:** [specs/2026-07-12-pacific-time-trip-pin/](2026-07-12-pacific-time-trip-pin/)
+
+Both post-Phase-18 hotfixes shipped together (PR #31, image `be3937a`) and were QA'd live the same day: mock wall-clock times are now declared Pacific at ingest and stored as honest UTC while every user surface renders explicit `America/Los_Angeles` labeled "PT" — the voice-booked 6:15 AM flight that displayed as 1:15 AM now reads 6:15 AM PT for every viewer — and the app's displayed trip pins the voice session through an optional `trip_id` on the `/query` seam (pin-only-if-unpinned, so a just-booked trip is never clobbered), with a TEMP mobile-page latest-trip bridge making the in-review App Store binary trip-aware from a backend deploy alone (removal in v1.0.1 is reminded in TODO.md); one residual rides with Phase 17: real Sabre offset-bearing times still need Pacific conversion when `SABRE_MODE=real` flips.
+
+## Phase 18 — Unpin fresh sessions: make Act 1 guided booking reachable
+**Completed:** 2026-07-12 · **Spec:** [specs/2026-07-12-unpin-fresh-sessions/](2026-07-12-unpin-fresh-sessions/)
+
+Act 1 (voice-booking a brand-new trip) is reachable again — deployed 2026-07-12 (PR #29, image `c897f15`) and confirmed by the same-day live web-call rehearsal: the latest-trip auto-pin that shadowed every fresh session with the table's newest trip is gone (`ensure_trip_context` pins only on an explicit `trip_id` or after `book_flight`), today's Pacific date is injected into the agent instructions so relative dates resolve, and a new end-to-end regression test guards the seam that let the bug ship; the documented accepted loss (in-app voice couldn't see a pre-existing displayed trip) surfaced on device the same day and was closed by Phase 19's pin seam.
+
 ## Phase 16 — Talk to My Trip: App Store submission MVP
 **Completed:** 2026-07-11 (implementation + QA; **App Store submission still pending**) · **Spec:** [specs/2026-07-11-talk-to-my-trip-appstore-mvp/](2026-07-11-talk-to-my-trip-appstore-mvp/)
 
