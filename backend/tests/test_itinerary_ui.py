@@ -69,6 +69,17 @@ def test_page_is_self_contained(bq):
     assert "src=\"http" not in text and "href=\"http" not in text
 
 
+def test_page_renders_times_pacific_labeled_pt(bq):
+    """Phase 19: card times and the feed clock render America/Los_Angeles
+    for every viewer, labeled "PT" — never "PST" (it's PDT in July), never
+    browser-local."""
+    with TestClient(app) as client:
+        text = client.get("/v1/itinerary/").text
+    assert text.count('timeZone: "America/Los_Angeles"') == 2
+    assert text.count('" PT"') == 2
+    assert "PST" not in text
+
+
 # --- GET /status/{trip_id} ---------------------------------------------------
 
 def test_status_returns_trip_items_summary_and_fetched_at(bq):

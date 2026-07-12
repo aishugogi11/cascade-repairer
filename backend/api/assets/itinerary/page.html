@@ -321,12 +321,15 @@
 
   function fmtWhen(item) {
     if (!item.start_ts) return "";
-    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
+    // Times render Pacific for every viewer (decision 2026-07-12) — labeled
+    // "PT", the season-proof abbreviation (July is PDT).
+    const opts = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                   timeZone: "America/Los_Angeles" };
     let text = new Date(item.start_ts).toLocaleString([], opts);
     if (item.end_ts) {
       text += " – " + new Date(item.end_ts).toLocaleString([], opts);
     }
-    return text;
+    return text + " PT";
   }
 
   function renderItems(items) {
@@ -397,7 +400,9 @@
     const li = document.createElement("li");
     const t = document.createElement("span");
     t.className = "t";
-    t.textContent = when.toLocaleTimeString([], { hour12: false });
+    t.textContent = when.toLocaleTimeString([], {
+      hour12: false, timeZone: "America/Los_Angeles",
+    }) + " PT";
     const mark = document.createElement("span");
     mark.className = "mark";
     mark.textContent = FEED_MARK[status] || "•";

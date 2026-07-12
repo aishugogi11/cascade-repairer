@@ -88,6 +88,17 @@ final class VoiceManager: NSObject {
         orbState = .idle
     }
 
+    /// Tell the voice page which trip the app is displaying — the page sends
+    /// it with every delegated query so the session pins that trip (the
+    /// server ignores it once a trip is pinned). Called on every displayed-
+    /// trip change, which closes the race where the webview loads before the
+    /// cold-start latest-trip resolution lands.
+    func setTrip(_ tripId: String) {
+        webView?.evaluateJavaScript(
+            "window.vbSetTrip && window.vbSetTrip('\(tripId)')"
+        )
+    }
+
     private func updateOrb(forState value: String) {
         let state = value.lowercased()
         if state.contains("disconnect") {

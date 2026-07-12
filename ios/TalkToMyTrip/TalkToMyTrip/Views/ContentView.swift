@@ -76,7 +76,7 @@ struct ContentView: View {
             TripTimelineView(tripManager: tripManager)
         }
         .background(
-            VoiceWebView(voiceManager: voiceManager)
+            VoiceWebView(voiceManager: voiceManager, tripId: tripManager.tripID)
                 .frame(width: 1, height: 1)
                 .opacity(0)
         )
@@ -109,6 +109,13 @@ struct ContentView: View {
         .onChange(of: voiceManager.replyCount) {
             // The agent may have just booked a trip — pick it up next poll.
             tripManager.noteAgentReply()
+        }
+        .onChange(of: tripManager.tripID) { _, newValue in
+            // Every displayed-trip change (cold-start resolution landing,
+            // long-press selector) reaches the voice page, so the session
+            // pins the trip on screen — the URL param alone loses the race
+            // with the cold-start latest-trip resolution.
+            if let newValue { voiceManager.setTrip(newValue) }
         }
     }
 }

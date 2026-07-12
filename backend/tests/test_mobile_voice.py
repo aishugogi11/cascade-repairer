@@ -60,3 +60,21 @@ def test_page_pins_the_web_call_cdn_versions():
     text = _page_text().text
     assert f"@vocalbridgeai/react@{web_call.VB_REACT_VER}" in text
     assert f"react@{web_call.REACT_VER}" in text
+
+
+def test_page_carries_the_trip_pin_wiring():
+    """Phase 19: ?trip_id= and window.vbSetTrip (native's hook) feed trip_id
+    into the /query POST so the session pins the displayed trip."""
+    text = _page_text().text
+    assert "vbSetTrip" in text
+    assert "trip_id" in text
+
+
+def test_page_temp_bridge_self_resolves_latest_trip():
+    """The TEMP bridge for the in-review binary: the page fetches
+    latest_trip_id itself (access-code headers, lowest precedence) and is
+    marked in-code for removal when native vbSetTrip ships in v1.0.1."""
+    text = _page_text().text
+    assert "/v1/sabre_tools/latest_trip_id" in text
+    assert "TEMP bridge" in text
+    assert "v1.0.1" in text

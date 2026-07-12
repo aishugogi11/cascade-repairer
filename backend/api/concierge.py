@@ -33,7 +33,7 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
@@ -51,6 +51,11 @@ from api.sabre_tools import launch_trip_repairs
 logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_MODEL = "gpt-5.4-mini"
+
+# Everything displayed or spoken to a user is Pacific time (decision
+# 2026-07-12): mock wall-clock times are *declared* Pacific here, and
+# BigQuery TIMESTAMP stores the honest UTC instant on write.
+_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 # The self-identification is the live proof answers come from this backend
 # (the Phase 8 manual check); the disruption/launch rules are the Concierge.
@@ -419,9 +424,9 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
         provider="sabre",
         provider_ref=f"VOICE-FLIGHT-{uuid.uuid4().hex[:6].upper()}",
         start_ts=datetime(depart.year, depart.month, depart.day, dep_h, dep_m,
-                          tzinfo=timezone.utc),
+                          tzinfo=_PACIFIC),
         end_ts=datetime(depart.year, depart.month, depart.day, arr_h, arr_m,
-                        tzinfo=timezone.utc),
+                        tzinfo=_PACIFIC),
         location=f"{option.origin}-{option.destination}",
         price=option.price,
         currency=option.currency,
@@ -510,7 +515,7 @@ def _completion_items(trip: Trip) -> List[ItineraryItem]:
 
     def ts(day_offset: int, hour: int, minute: int = 0) -> datetime:
         d = start + timedelta(days=day_offset)
-        return datetime(d.year, d.month, d.day, hour, minute, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, hour, minute, tzinfo=_PACIFIC)
 
     specs = [
         ("hotel", "sabre", f"Hotel in {dest}", ts(0, 22), ts(span, 18), 412.0),
@@ -590,7 +595,7 @@ def _today_line() -> str:
     so a long-lived process never serves a stale date; Pacific because the
     demo audience and event are (decision 2026-07-12). A helper, not
     inlined, so tests can freeze the clock."""
-    today = datetime.now(ZoneInfo("America/Los_Angeles"))
+    today = datetime.now(_PACIFIC)
     return (
         f"Today is {today:%A}, {today:%Y-%m-%d} (US Pacific time). Resolve "
         "relative dates like 'Monday' or 'tomorrow' from this date, always "
@@ -645,15 +650,19 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
     )
 
 
-async def answer_query(session_name: str, query: str) -> str:
+async def answer_query(
+    session_name: str, query: str, trip_id: Optional[str] = None
+) -> str:
     """One delegated spoken turn — the Phase 8 seam, now the Concierge.
 
     A plain `await Runner.run(...)` on the same loop as the background
     repairs (the concurrency_core pattern); history replay makes the
-    session multi-turn. The trip pin resolves on the session's first turn
-    (cached after), and a failed resolution never blocks the turn — the
-    agent just lacks trip details until a later turn's retry lands."""
-    trip_context, _ = await ensure_trip_context(session_name)
+    session multi-turn. trip_id is the caller's displayed trip (Phase 19):
+    ensure_trip_context's cache-first order means it pins only an unpinned
+    session — a just-booked trip's pin is never clobbered — and a failed
+    resolution never blocks the turn; the agent just lacks trip details
+    until a later turn's retry lands."""
+    trip_context, _ = await ensure_trip_context(session_name, trip_id=trip_id)
     agent = build_agent(session_name, trip_context)
     history = _HISTORY.get(session_name, [])
     result = await Runner.run(

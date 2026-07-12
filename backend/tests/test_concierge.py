@@ -8,7 +8,7 @@ session snapshot, failures come back speakable, and the acceptance shape —
 a turn is answered while five real repair coroutines run — holds end to end.
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -242,6 +242,44 @@ def test_failed_pin_never_blocks_the_turn_and_retries(monkeypatch, bq):
     assert "TRIP CONTEXT" in captured["agent"].instructions  # retry pinned it
 
 
+def test_answer_query_trip_id_pins_the_displayed_trip(monkeypatch, bq):
+    """Phase 19: the caller's displayed trip rides through answer_query into
+    ensure_trip_context — an unpinned session pins it and the agent's
+    instructions carry its summary."""
+    captured = {}
+    _mock_runner(monkeypatch, captured=captured)
+
+    asyncio.run(
+        concierge.answer_query("room-1", "where am I staying?", trip_id="t-1")
+    )
+
+    assert concierge._SESSION_TRIPS["room-1"].trip.trip_id == "t-1"
+    instructions = captured["agent"].instructions
+    assert "TRIP CONTEXT" in instructions
+    assert "MSP" in instructions and "SFO, Mountain View" in instructions
+
+
+def test_answer_query_trip_id_never_clobbers_an_existing_pin(monkeypatch, bq):
+    """Pin-only-if-unpinned (decision 2026-07-12): a session pinned to trip A
+    queried with trip_id=B stays on A — no re-read, no re-pin. The selector
+    repoints polling; voice follows the session's first pinned trip."""
+    captured = {}
+    _mock_runner(monkeypatch, captured=captured)
+    pinned = concierge.TripContext(
+        trip=concierge.Trip(**dict(trip_row(), trip_id="t-A", title="Trip A")),
+        items=[],
+        summary="TRIP CONTEXT: Trip A. ",
+    )
+    concierge._SESSION_TRIPS["room-1"] = pinned
+
+    asyncio.run(concierge.answer_query("room-1", "what trip is this?",
+                                       trip_id="t-B"))
+
+    assert concierge._SESSION_TRIPS["room-1"] is pinned
+    assert "Trip A" in captured["agent"].instructions
+    assert bq.select.call_args_list == []  # cache hit — B never read
+
+
 def test_ensure_trip_context_explicit_trip_id_is_the_phase_12_seam(monkeypatch, bq):
     def route_with_lookup(query, params=None):
         if "itinerary_items" in query:
@@ -449,6 +487,47 @@ def test_book_flight_creates_rows_replaces_pin_and_clears_options(monkeypatch, b
     # Spoken copy: confirmation with the spoken date, no ids or markdown.
     assert "booked" in msg and "July 17th" in msg
     assert trip.trip_id not in msg and "*" not in msg
+
+
+def test_booking_writes_declare_pacific_wall_clock(monkeypatch, bq):
+    """Phase 19 timezone discipline: the mock's 06:15 wall clock is Pacific,
+    so the stored instant is 13:15Z for a July date (PDT = UTC−7) — not the
+    old wall-clock-as-UTC that displayed 1:15 AM to Josh."""
+    seen = _mock_repos(monkeypatch)
+    option = concierge.FlightOption(
+        option_number=1, airline="AA", flight_number=100, origin="MSP",
+        destination="DFW", depart_date="2026-07-13", depart_time="06:15",
+        arrive_time="09:52", stops=0, price=250.0, currency="USD",
+        spoken="Option one.",
+    )
+
+    concierge._booking_writes(option, [option])
+
+    item = next(w[1] for w in seen["writes"] if w[0] == "item")
+    assert item.start_ts.astimezone(timezone.utc) == datetime(
+        2026, 7, 13, 13, 15, tzinfo=timezone.utc
+    )
+    assert item.end_ts.astimezone(timezone.utc) == datetime(
+        2026, 7, 13, 16, 52, tzinfo=timezone.utc
+    )
+
+
+def test_completion_items_declare_pacific_wall_clock():
+    """Same discipline for the build-out items: the 7 PM dinner is 02:00Z
+    the next day (PDT = UTC−7)."""
+    trip = concierge.Trip(**dict(trip_row(), trip_id="t-1"))
+    assert trip.start_date == date(2026, 7, 17)
+
+    items = concierge._completion_items(trip)
+
+    dinner = next(i for i in items if i.type == "dining")
+    assert dinner.start_ts.astimezone(timezone.utc) == datetime(
+        2026, 7, 18, 2, 0, tzinfo=timezone.utc
+    )
+    hotel = next(i for i in items if i.type == "hotel")
+    assert hotel.start_ts.astimezone(timezone.utc) == datetime(
+        2026, 7, 18, 5, 0, tzinfo=timezone.utc
+    )
 
 
 def test_book_flight_write_failure_is_speakable(monkeypatch, bq):

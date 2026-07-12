@@ -15,6 +15,12 @@ and turn logging behave exactly as the browser surface proved.
 postNative guards every event: when window.webkit is absent (a desktop
 browser), events console.log instead — the page stays smoke-testable
 outside the app shell.
+
+Phase 19: the page holds the app's displayed trip (?trip_id= /
+window.vbSetTrip) and sends it with every /query so the session pins it.
+It also carries a TEMP bridge for the in-review binary — a self-resolved
+latest_trip_id fallback — to be removed when native vbSetTrip ships in
+v1.0.1.
 """
 from string import Template
 
@@ -58,6 +64,32 @@ function codeHeaders(extra) {
   return headers;
 }
 
+// Trip pin pass-through (Phase 19): ?trip_id= seeds the displayed trip and
+// window.vbSetTrip updates it after load (native calls it whenever the app's
+// displayed trip changes); when set it rides in every /query POST so the
+// session pins that trip (the server ignores it once pinned).
+let tripId = new URL(window.location).searchParams.get('trip_id') || '';
+window.vbSetTrip = (id) => { tripId = id || ''; };
+
+// TEMP bridge for the in-review binary — remove when native vbSetTrip ships
+// (v1.0.1). Binaries predating Phase 19 never call vbSetTrip or pass
+// ?trip_id=, so the page resolves the backend's latest trip itself — the
+// same endpoint the app's polling displays. Lowest precedence
+// (vbSetTrip → ?trip_id= → this fetch); a failed fetch just leaves it
+// empty — voice must never break on it.
+let bridgedTripId = '';
+fetch('/v1/sabre_tools/latest_trip_id', { headers: codeHeaders() })
+  .then((res) => (res.ok ? res.json() : null))
+  .then((data) => { if (data && data.trip_id) bridgedTripId = data.trip_id; })
+  .catch(() => {});
+
+function queryBody(query, sessionName) {
+  const body = { query, session_name: sessionName };
+  const pin = tripId || bridgedTripId;
+  if (pin) body.trip_id = pin;
+  return body;
+}
+
 const e = React.createElement;
 
 function Bridge({ sessionRef }) {
@@ -93,10 +125,9 @@ function Bridge({ sessionRef }) {
         const res = await fetch('/v1/web_call/query', {
           method: 'POST',
           headers: codeHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            query,
-            session_name: sessionRef.current || 'unknown-session',
-          }),
+          body: JSON.stringify(
+            queryBody(query, sessionRef.current || 'unknown-session')
+          ),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {

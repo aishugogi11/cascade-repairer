@@ -248,6 +248,57 @@ def test_query_sessions_are_isolated(monkeypatch):
     assert calls[1][0]["content"] == "room two question"
 
 
+# ── trip pin (Phase 19) ────────────────────────────────────────────────
+
+
+def _capture_seam(monkeypatch):
+    """Patch the answer_query seam (the single stable patch point) and
+    record exactly what /query hands it."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _mock_persistence(monkeypatch)
+    seen = []
+
+    async def fake_answer(session_name, query, trip_id=None):
+        seen.append((session_name, query, trip_id))
+        return "seam reply"
+
+    monkeypatch.setattr(web_call_module, "answer_query", fake_answer)
+    return seen
+
+
+def test_query_forwards_trip_id_to_the_seam(monkeypatch):
+    seen = _capture_seam(monkeypatch)
+    resp = client.post(
+        "/v1/web_call/query",
+        json={"query": "where am I staying?", "session_name": "room-1",
+              "trip_id": "t-42"},
+    )
+    assert resp.status_code == 200
+    assert seen == [("room-1", "where am I staying?", "t-42")]
+
+
+def test_query_without_trip_id_reaches_the_seam_as_none(monkeypatch):
+    """A body without trip_id behaves exactly as before Phase 19: the seam
+    sees None and the response shape is unchanged."""
+    seen = _capture_seam(monkeypatch)
+    resp = client.post(
+        "/v1/web_call/query", json={"query": "hello", "session_name": "room-1"}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"response": "seam reply"}
+    assert seen == [("room-1", "hello", None)]
+
+
+def test_query_blank_trip_id_normalizes_to_none(monkeypatch):
+    seen = _capture_seam(monkeypatch)
+    resp = client.post(
+        "/v1/web_call/query",
+        json={"query": "hello", "session_name": "room-1", "trip_id": "  "},
+    )
+    assert resp.status_code == 200
+    assert seen == [("room-1", "hello", None)]
+
+
 # ── turn logging ───────────────────────────────────────────────────────
 
 
@@ -328,3 +379,13 @@ def test_page_serves_l3_widget_wiring():
     assert "useAIAgent" in resp.text
     assert "/v1/web_call/query" in resp.text
     assert "/v1/web_call/token" in resp.text
+
+
+def test_page_carries_the_trip_pin_wiring_without_the_bridge():
+    """Phase 19: ?trip_id= and window.vbSetTrip feed trip_id into the /query
+    POST. Desktop stays explicit-only — no latest-trip bridge here, so Act 1
+    rehearsals keep a clean unpinned default."""
+    text = client.get("/v1/web_call/").text
+    assert "vbSetTrip" in text
+    assert "trip_id" in text
+    assert "latest_trip_id" not in text
