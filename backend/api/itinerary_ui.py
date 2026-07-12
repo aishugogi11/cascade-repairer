@@ -193,6 +193,7 @@ async def recent_trips(limit: int = 10):
                 "status": t.status,
                 "start_date": t.start_date,
                 "end_date": t.end_date,
+                "created_at": t.created_at,
             }
             for t in result
         ]

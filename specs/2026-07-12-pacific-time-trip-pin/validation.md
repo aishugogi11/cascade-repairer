@@ -30,16 +30,40 @@ Restart the container before page checks (`uvicorn --reload` ignores HTML edits)
 
 **Timezone walkthrough (mock mode, local or deployed):**
 
-- [ ] Voice-book a flight via `/v1/web_call/?code=…` (or curl the `/query` seam):
+- [x] Voice-book a flight via `/v1/web_call/?code=…` (or curl the `/query` seam):
       the agent speaks a departure time; open `/v1/itinerary/?trip_id=…` — the card
       shows the **same wall-clock time**, labeled PT.
-- [ ] Repeat the check on `/v1/demo/` cards and both pages' repair-feed clocks.
+- [x] Repeat the check on `/v1/demo/` cards and both pages' repair-feed clocks.
 - [ ] Viewer-independence: switch the OS/browser timezone (Josh is CDT — the
-      original failure mode) and reload; displayed times do not move.
+      original failure mode) and reload; displayed times do not move.I'm not going to do this. You can just handle that. 
 - [ ] Seeded trip (`POST /v1/sabre_tools/seed_trip`): card times match `_SEED_ITEMS`
-      wall clocks (e.g. flight 8:00 AM PT), not shifted.
+      wall clocks (e.g. flight 8:00 AM PT), not shifted. Yeah, can't test that one either because I need an access code. Here's the response I got. You'll have to check this one yourself. 
+      Curl
+
+curl -X 'POST' \
+  'https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/sabre_tools/seed_trip' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "user_id": "demo-traveler",
+  "title": "The Complete Trip — hackathon demo"
+}'
+Request URL
+https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/sabre_tools/seed_trip
+Server response
+Code	Details
+401
+Undocumented
+Error: response status is 401
+
+Response body
+Download
+{
+  "error": "missing or invalid access code"
+}
+Response
 - [ ] Known cosmetic fallout accepted: pre-fix dev rows display ~7 h off — confirm
-      and ignore, do not chase.
+      and ignore, do not chase.  Yeah, I'm done chasing. Let's just get this shit done. 
 
 **Trip-pin walkthrough:**
 

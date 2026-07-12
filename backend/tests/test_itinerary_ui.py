@@ -70,14 +70,24 @@ def test_page_is_self_contained(bq):
 
 
 def test_page_renders_times_pacific_labeled_pt(bq):
-    """Phase 19: card times and the feed clock render America/Los_Angeles
-    for every viewer, labeled "PT" — never "PST" (it's PDT in July), never
-    browser-local."""
+    """Phase 19: card times, the feed clock, and the trip selector's
+    created-at label all render America/Los_Angeles for every viewer,
+    labeled "PT" — never "PST" (it's PDT in July), never browser-local."""
     with TestClient(app) as client:
         text = client.get("/v1/itinerary/").text
-    assert text.count('timeZone: "America/Los_Angeles"') == 2
+    assert text.count('timeZone: "America/Los_Angeles"') == 3
     assert text.count('" PT"') == 2
+    assert '" PT)"' in text  # the selector's "(… PT)" created-at label
     assert "PST" not in text
+
+
+def test_page_selector_labels_and_sorts_by_created_at(bq):
+    """The trip dropdown shows each trip's creation time and orders
+    newest-first client-side (explicit, not transport order)."""
+    with TestClient(app) as client:
+        text = client.get("/v1/itinerary/").text
+    assert "fmtCreated(trip.created_at)" in text
+    assert "trips.sort" in text and "b.created_at" in text
 
 
 # --- GET /status/{trip_id} ---------------------------------------------------
@@ -260,7 +270,8 @@ def test_trips_returns_selector_fields(bq):
         True,
         [
             {**TRIP_ROW, "trip_id": "t-2", "title": "Newer",
-             "start_date": "2026-07-17", "end_date": "2026-07-19"},
+             "start_date": "2026-07-17", "end_date": "2026-07-19",
+             "created_at": "2026-07-12T18:05:52+00:00"},
             TRIP_ROW,
         ],
         None,
@@ -271,8 +282,14 @@ def test_trips_returns_selector_fields(bq):
     assert resp.status_code == 200
     listed = resp.json()["trips"]
     assert [t["trip_id"] for t in listed] == ["t-2", "t-1"]
-    assert set(listed[0]) == {"trip_id", "title", "status", "start_date", "end_date"}
+    assert set(listed[0]) == {
+        "trip_id", "title", "status", "start_date", "end_date", "created_at",
+    }
     assert listed[0]["start_date"] == "2026-07-17"
+    # created_at feeds the selector's "(Jul 12, 11:05 AM PT)" label and its
+    # newest-first sort; a row without one serializes as null, not an error.
+    assert listed[0]["created_at"] == "2026-07-12T18:05:52+00:00"
+    assert listed[1]["created_at"] is None
 
 
 def test_trips_passes_limit_through(bq):
