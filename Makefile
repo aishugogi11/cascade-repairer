@@ -1,8 +1,14 @@
 .PHONY: help run build up down restart logs clean \
         backend jupyter logs-backend logs-jupyter \
-        restart-backend restart-jupyter rebuild-jupyter eval
+        restart-backend restart-jupyter rebuild-jupyter eval gcloud-logs
 
 COMPOSE ?= docker compose
+GCLOUD ?= gcloud
+GCLOUD_PROJECT ?= vocal-bridge-hackathon
+GCLOUD_LOG_SERVICE ?= vocal-bridge-be-dev
+GCLOUD_LOG_LIMIT ?= 25
+GCLOUD_LOG_FILTER ?= resource.type="cloud_run_revision" AND resource.labels.service_name="$(GCLOUD_LOG_SERVICE)"
+GCLOUD_LOG_FORMAT ?= table(timestamp,severity,textPayload,jsonPayload)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -43,6 +49,12 @@ restart-backend: ## Restart the backend
 
 eval: ## Run the eval harness (Phase 11); pass flags via ARGS="--dry-run …"
 	$(COMPOSE) exec -e GIT_SHA=$$(git rev-parse --short HEAD) backend python -m api.eval_harness $(ARGS)
+
+gcloud-logs: ## Stream Cloud Run logs; override GCLOUD_LOG_SERVICE, GCLOUD_PROJECT, GCLOUD_LOG_LIMIT, or GCLOUD_LOG_FILTER
+	$(GCLOUD) logging read '$(GCLOUD_LOG_FILTER)' \
+		--project="$(GCLOUD_PROJECT)" \
+		--limit="$(GCLOUD_LOG_LIMIT)" \
+		--format="$(GCLOUD_LOG_FORMAT)"
 
 # --- Jupyter ---------------------------------------------------------------
 jupyter: ## Build + start only jupyter

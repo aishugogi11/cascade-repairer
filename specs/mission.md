@@ -41,4 +41,3 @@ The foundation still guarantees that every building block from the Vocal Bridge 
 - Building the *finished* hackathon demo in advance — the foundation proves the hard mechanics (concurrent repair during a live voice session, repair-capable Sabre tools, live itinerary view); the demo polish and final assembly stay event-day work with the team.
 - The stretch integrations from the team discussion (Google Maps distances, Uber, Costco Travel bundles) — mocked stretch goals only, and only after the core repair loop works end to end (tracked in `TODO.md`).
 - A general-purpose travel product beyond the hackathon's scope — the App Store app ("Talk to My Trip") is the hackathon demo in consumer clothing, submitted for review-latency reasons, not a product pivot.
-- Using Anthropic/Claude as the agent LLM — the agent layer is standardized on the OpenAI Agents SDK.
