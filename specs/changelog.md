@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 21 — Voice booking page: the pre-disruption beat on screen
+**Completed:** 2026-07-12 (manual QA passed) · **Spec:** [specs/2026-07-12-voice-booking-page/](2026-07-12-voice-booking-page/)
+
+The booking conversation now has a screen: `GET /v1/booking/` shows the candidates the agent is offering mid-call (via a new additive `pending_options` block on the status poll) and the full five-item reservation as it books, styled to `about/ui_ideas/ui_mockup_2026_07_09.png` — the visual frame Phases 22–23 lift — with the automated suite green (331 passed) and the manual curl-rehearsal walkthrough QA'd 2026-07-12.
+
 ## Phase 19 — Validation hotfixes: Pacific-time discipline & pin the displayed trip
 **Completed:** 2026-07-12 (QA passed same day; validation report in the spec dir) · **Spec:** [specs/2026-07-12-pacific-time-trip-pin/](2026-07-12-pacific-time-trip-pin/)
 
@@ -17,6 +22,11 @@ Both post-Phase-18 hotfixes shipped together (PR #31, image `be3937a`) and were 
 **Completed:** 2026-07-12 · **Spec:** [specs/2026-07-12-unpin-fresh-sessions/](2026-07-12-unpin-fresh-sessions/)
 
 Act 1 (voice-booking a brand-new trip) is reachable again — deployed 2026-07-12 (PR #29, image `c897f15`) and confirmed by the same-day live web-call rehearsal: the latest-trip auto-pin that shadowed every fresh session with the table's newest trip is gone (`ensure_trip_context` pins only on an explicit `trip_id` or after `book_flight`), today's Pacific date is injected into the agent instructions so relative dates resolve, and a new end-to-end regression test guards the seam that let the bug ship; the documented accepted loss (in-app voice couldn't see a pre-existing displayed trip) surfaced on device the same day and was closed by Phase 19's pin seam.
+
+## Phase 17 — Talk to My Trip: full voice demo experience
+**Completed:** 2026-07-12 (shipped & submitted to App Review 2026-07-11; marked complete at the 2026-07-12 evening replan) · **Spec:** [specs/2026-07-11-full-voice-demo/](2026-07-11-full-voice-demo/)
+
+The full voice demo experience shipped and the iOS app made its **first App Store submission** 2026-07-11 (closing the step Phase 16 left open): guided multi-turn voice booking on the Concierge (`search_flights` → `book_flight` → `complete_trip`), the `DEMO_ACCESS_CODE` gate across backend/pages/iOS, the additive `detail` payload + native recommendation sheet, hidden demo gestures, stage-readability polish, the App-Review privacy hardening, and the iOS empty-start onboarding — 290 backend tests green, device-QA'd through the Phase 18/19 hotfixes — with approval treated as a bonus per `mission.md` #4 (web surfaces are the demo path; no new binary until the in-review one is approved, BACKLOG Phase 20) and the surviving residuals (the `SABRE_MODE=real` flip + Pacific conversion of real Sabre offset-bearing times, physical-device QA of the three acts, the `APIConfig.swift` URL review) moved to roadmap Phase 24.
 
 ## Phase 16 — Talk to My Trip: App Store submission MVP
 **Completed:** 2026-07-11 (implementation + QA; **App Store submission still pending**) · **Spec:** [specs/2026-07-11-talk-to-my-trip-appstore-mvp/](2026-07-11-talk-to-my-trip-appstore-mvp/)
