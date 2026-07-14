@@ -54,6 +54,35 @@ def test_readme_relative_links_exist():
     assert not missing, f"README links to nonexistent local paths: {missing}"
 
 
+SABRE_CERT_NOTES = (
+    REPO_ROOT / "specs" / "2026-07-13-sabre-cert-exploration" / "sabre-cert-notes.md"
+)
+
+# Markdown headings (any level).
+HEADING_RE = re.compile(r"^#{1,6}\s.*$", re.MULTILINE)
+
+# Stable substrings, not exact strings — the decision record each heading
+# anchors (Phase 26): the auth bridge for the SABRE_MODE flip, the frozen
+# client's work items, rate-limit/reset evidence, the deal-engine gate
+# answer, and the demo recommendations.
+REQUIRED_NOTES_HEADINGS = (
+    "Phase 24 env bridge",
+    "Deltas vs. mock shapes",
+    "Rate limits",
+    "Flight Search API v1",
+    "What this unlocks for the demo",
+)
+
+
+def test_notes_have_required_decision_sections():
+    headings = HEADING_RE.findall(SABRE_CERT_NOTES.read_text())
+    for required in REQUIRED_NOTES_HEADINGS:
+        assert any(required in heading for heading in headings), (
+            f"sabre-cert-notes.md has no heading containing {required!r} — "
+            "downstream phases navigate the Phase 25 findings by these anchors"
+        )
+
+
 def test_agents_md_has_required_sections_and_no_cloud_run_url():
     text = AGENTS_MD.read_text()
     for heading in (

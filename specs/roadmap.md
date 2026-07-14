@@ -10,7 +10,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-13 (evening, this branch):** the Phase 25 findings reshaped the tail of the roadmap. New order: **26 (validation fixes) → 27 (real search in the demo path) → 22 → 23 → 24**. All four validation-triage decisions were answered at the replan interview (targeted sweep additions, executed dummy-PNR probe for modifyBooking, empty-set PNR hygiene, dated re-run artifact); the frozen-client bug fixes (dead `POS` field, empty-BFM response shapes, BM errors-as-200 masking) are deliberately **conditional Phase 24 work** — they only matter if Sabre grants BFM content / booking entitlement, realistically via the event-day ask.
 
-## Phase 26: Validation fixes — close out Phase 25's FAIL
+## Phase 26: Validation fixes — close out Phase 25's FAIL [x] COMPLETE (implementation; manual QA pending)
 
 Small phase, first in line: make the Phase 25 validation report pass on re-validation. All decisions pre-answered (2026-07-13 replan interview) — no open questions. Tests and probes only; `backend/api/sabre/` stays untouched (the client punch list is Phase 24's conditional work).
 
