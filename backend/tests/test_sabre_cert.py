@@ -21,6 +21,7 @@ inside sync tests (the test_sabre_client.py convention).
 import asyncio
 import base64
 import os
+from datetime import date, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -43,6 +44,12 @@ def _build_secret(user_id: str, password: str) -> str:
     """The documented v2 Basic-secret recipe (verified live 2026-07-13)."""
     b64 = lambda s: base64.b64encode(s.encode()).decode()
     return b64(f"{b64(user_id)}:{b64(password)}")
+
+
+def _future_travel_date(days_ahead: int = 30) -> str:
+    """Computed travel date (the probes' pattern) so the suite stays valid on
+    any run date — never hard-code a calendar day."""
+    return (date.today() + timedelta(days=days_ahead)).isoformat()
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +95,7 @@ def _search_request_without_pos() -> shapes.FlightSearchRequest:
             OriginDestinationInformation=[
                 shapes.OriginDestinationInformation(
                     RPH="1",
-                    DepartureDateTime="2026-08-13T08:00:00",
+                    DepartureDateTime=f"{_future_travel_date()}T08:00:00",
                     OriginLocation=shapes.AirportLocation(LocationCode="DFW"),
                     DestinationLocation=shapes.AirportLocation(LocationCode="LAX"),
                 )
@@ -119,7 +126,7 @@ def _booking_request() -> shapes.CreateBookingRequest:
                     airlineCode="DL",
                     fromAirportCode="DFW",
                     toAirportCode="LAX",
-                    departureDate="2026-08-13",
+                    departureDate=_future_travel_date(),
                     departureTime="07:20",
                     bookingClass="E",
                 )
@@ -216,34 +223,105 @@ def test_bfm_empty_response_omits_sections_shapes_require(client):
     assert "scheduleDescs" in missing and "itineraryGroups" in missing
 
 
+def _raw_response_from_validation_error(exc: ValidationError) -> dict | None:
+    """Recover the raw payload `model_validate` received. Each error's
+    `input` is the value at its `loc`, so the shallowest loc walks back
+    closest to the root — a root-level missing-field error (how the
+    entitlement wall and any drifted success both fail validation) carries
+    the whole response dict."""
+    best: dict | None = None
+    best_depth: int | None = None
+    for err in exc.errors():
+        candidate = err.get("input")
+        if isinstance(candidate, dict):
+            depth = len(err.get("loc", ()))
+            if best_depth is None or depth < best_depth:
+                best, best_depth = candidate, depth
+    return best
+
+
+def _attempt_create_harvesting_confirmation(client, request):
+    """Attempt create_booking, harvesting any confirmationId no matter how
+    the response arrives — a validated model, or a raw payload recovered
+    from the ValidationError the unmodified client raises on undocumented
+    shapes. Returns (created_model_or_None, raw_dict_or_None,
+    confirmation_or_None). The client is injected so the hermetic suite
+    (test_sabre_cert_cleanup.py) can drive this exact flow with a fake."""
+    try:
+        created = asyncio.run(client.create_booking(request))
+    except ValidationError as exc:
+        raw = _raw_response_from_validation_error(exc)
+        harvested = raw.get("confirmationId") if raw else None
+        return None, raw, harvested or None
+    return created, None, created.confirmationId
+
+
+def _cancel_harvested_pnr(client, confirmation_id: str) -> None:
+    asyncio.run(
+        client.cancel_booking(
+            shapes.CancelBookingRequest(
+                confirmationId=confirmation_id, cancelAll=True
+            )
+        )
+    )
+
+
+def _run_create_booking_tripwire(client, request) -> None:
+    """The tripwire flow: the ONLY acceptable outcome is the documented
+    entitlement wall — a raw errors[] payload whose categories include
+    UNAUTHORIZED_ACCESS. A validated success, an unrecoverable payload, or
+    any other category set is drift and fails loudly. Whatever the outcome,
+    the finally block cancels any harvested confirmationId, so a
+    created-but-shape-drifted PNR can never leak."""
+    harvested = None
+    try:
+        created, raw, harvested = _attempt_create_harvesting_confirmation(
+            client, request
+        )
+        if created is not None:
+            pytest.fail(
+                f"createBooking now succeeds (PNR {created.confirmationId}) — "
+                "entitlement granted; update sabre-cert-notes.md and Phase 24"
+            )
+        if raw is None:
+            pytest.fail(
+                "create_booking raised ValidationError but the raw response "
+                "payload could not be recovered — response drift; probe live "
+                "with probes/booking_lifecycle.py"
+            )
+        # The wall's marker: UNAUTHORIZED_ACCESS. CERT carries it in `type`
+        # (`category` is UNAUTHORIZED — verified live 2026-07-14), so check
+        # both fields rather than trusting the docs' field placement.
+        tokens = {
+            token
+            for err in raw.get("errors", [])
+            if isinstance(err, dict)
+            for token in (err.get("category"), err.get("type"))
+        }
+        if "UNAUTHORIZED_ACCESS" not in tokens:
+            pytest.fail(
+                "createBooking no longer answers the documented entitlement "
+                f"wall: errors[] category/type values {sorted(t for t in tokens if t)} "
+                "lack UNAUTHORIZED_ACCESS — update sabre-cert-notes.md and "
+                "Phase 24"
+                + (f" (harvested PNR {harvested} cancelled in cleanup)" if harvested else "")
+            )
+    finally:
+        if harvested:
+            _cancel_harvested_pnr(client, harvested)
+
+
 def test_create_booking_unauthorized_tripwire(client):
     """DOCUMENTED GAP (entitlement): createBooking answers HTTP 200 with an
     UNAUTHORIZED_ACCESS errors[] payload (PassengerDetailsRQ) and no
     confirmationId, so the unmodified client raises ValidationError. No PNR
     is created server-side.
 
-    If a booking ever SUCCEEDS here, entitlement was granted: the finally
-    block cancels the PNR, and the test fails loudly so the notes and
-    Phase 24 plan get updated."""
-    created = None
-    try:
-        try:
-            created = asyncio.run(client.create_booking(_booking_request()))
-        except ValidationError:
-            return  # the documented entitlement wall — expected path
-        pytest.fail(
-            f"createBooking now succeeds (PNR {created.confirmationId}) — "
-            "entitlement granted; update sabre-cert-notes.md and Phase 24"
-        )
-    finally:
-        if created is not None:
-            asyncio.run(
-                client.cancel_booking(
-                    shapes.CancelBookingRequest(
-                        confirmationId=created.confirmationId, cancelAll=True
-                    )
-                )
-            )
+    Reworked for Phase 26: a ValidationError alone is no longer proof of the
+    wall — the raw payload must carry the UNAUTHORIZED_ACCESS category, and
+    any confirmationId that arrives (validated OR inside a drifted payload)
+    is cancelled in a finally block before the test resolves."""
+    _run_create_booking_tripwire(client, _booking_request())
 
 
 def test_cancel_booking_is_authorized(client):

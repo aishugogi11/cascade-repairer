@@ -15,6 +15,12 @@ The flight candidate is sourced live from GET /v1/shop/flights (InstaFlights)
 because BFM v5 returns no inventory on this PCC. If createBooking ever
 succeeds (entitlement granted later), the finally block cancels the PNR.
 
+Exit code (hardened Phase 26): nonzero when createBooking drifts from the
+documented UNAUTHORIZED_ACCESS wall — no UNAUTHORIZED_ACCESS among the
+errors[] category/type values (CERT carries it in `type`; `category` is
+UNAUTHORIZED), an empty errors[] without a confirmationId, or an
+unexpected success.
+
 Run:
     set -a && . ./config/.env && set +a && \
     docker compose exec -T -e SABRE_API_USER_ID -e SABRE_API_SECRET backend \
@@ -98,6 +104,7 @@ def main() -> int:
         "flightDetails": {"flights": [flight], "flightPricing": [{}]},
     }
     conf_id = None
+    drift = False
     try:
         st, created = call(token, "POST", "/v1/trip/orders/createBooking", create_rq)
         print(f"createBooking: HTTP {st}")
@@ -105,10 +112,21 @@ def main() -> int:
         if conf_id:
             print("  UNEXPECTED SUCCESS — PNR", conf_id,
                   "(entitlement granted? update sabre-cert-notes.md)")
+            drift = True  # the documented create-side wall is gone
         else:
-            for err in created.get("errors", []):
+            errors = created.get("errors", [])
+            for err in errors:
                 print("  error:", err.get("category"), err.get("type"),
                       "-", (err.get("description") or "")[:120])
+            # CERT carries the marker in `type` (`category` is UNAUTHORIZED,
+            # verified live 2026-07-14) — check both fields.
+            tokens = {err.get("category") for err in errors} | \
+                     {err.get("type") for err in errors}
+            if "UNAUTHORIZED_ACCESS" not in tokens:
+                print("  DRIFT: expected the documented UNAUTHORIZED_ACCESS "
+                      "entitlement wall; errors[] category/type values were",
+                      sorted(t for t in tokens if t) or "empty")
+                drift = True
     finally:
         if conf_id:
             st2, cancelled = call(token, "POST", "/v1/trip/orders/cancelBooking",
@@ -117,7 +135,7 @@ def main() -> int:
                                    "errorHandlingPolicy": "HALT_ON_ERROR"})
             print(f"cancelBooking: HTTP {st2}",
                   "(cleanup of unexpected PNR)" if st2 == 200 else "!! CHECK PNR MANUALLY")
-    return 0
+    return 1 if drift else 0
 
 
 if __name__ == "__main__":

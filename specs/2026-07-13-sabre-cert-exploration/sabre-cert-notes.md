@@ -75,17 +75,49 @@ Re-run `probes/sweep.py` after any credential reset to detect entitlement drift.
 | Supported cities | `GET /v1/lists/supported/cities` | ✅ WORKS |
 | Airline / aircraft lookup | `GET /v1/lists/utilities/{airlines,aircraft/equipment}` | ✅ WORKS |
 | **Bargain Finder Max v5** | `POST /v5/offers/shop` | ⚠️ **Entitled but empty**: request processes only with a POS block and *without* IntelliSell `RequestType` (`50ITINS` → `PROCESSING ERROR DETECTED`); every route/date returns `itineraryCount: 0` / "No Availability" — the hackathon PCC has **no BFM air content agreement**. |
-| **Booking Mgmt createBooking** | `POST /v1/trip/orders/createBooking` | ❌ **NOT ENTITLED**: HTTP 200 + `errors[]` `UNAUTHORIZED_ACCESS` ("The service PassengerDetailsRQ returned an authorization failure. Please verify the used credentials with your account manager."). No PNR is created. |
+| **Booking Mgmt createBooking** | `POST /v1/trip/orders/createBooking` | ❌ **NOT ENTITLED**: HTTP 200 + `errors[]` `UNAUTHORIZED_ACCESS` ("The service PassengerDetailsRQ returned an authorization failure. Please verify the used credentials with your account manager."). No PNR is created. *(2026-07-14 precision: the marker lives in `type: UNAUTHORIZED_ACCESS`; `category` is `UNAUTHORIZED` — tripwires check both fields.)* |
 | Booking Mgmt cancelBooking | `POST /v1/trip/orders/cancelBooking` | ✅ Authorized (dummy PNR → clean `RESOURCE_NOT_FOUND`, not an auth error) — the wall is create-side only |
 | Booking Mgmt getBooking | `POST /v1/trip/orders/getBooking` | ✅ Authorized (same evidence) |
-| Booking Mgmt modifyBooking | `POST /v1/trip/orders/modifyBooking` | ➖ **Untestable**: needs an existing PNR, and create is entitlement-blocked upstream. **inferred** same authorization as cancel/get. |
+| Booking Mgmt modifyBooking | `POST /v1/trip/orders/modifyBooking` | ➖ *(superseded 2026-07-14 — executed dummy-PNR row in the Phase 26 extension below)* Original 2026-07-13 record: **Untestable**: needs an existing PNR, and create is entitlement-blocked upstream. **inferred** same authorization as cancel/get. |
 | GetHotelAvail v5 | `POST /v5/get/hotelavail` | ⚠️ Entitled, request schema not yet cracked (`VALIDATION_FAILED`, "matched 0 out of 3" oneOf schemas) — shape work, not an entitlement problem |
 | Geo Search | `POST /v1/lists/utilities/geosearch/locations` | ⚠️ Entitled, schema incomplete (`cvc-complex-type` validation error); `POST /v2/geo/search` is 404 |
-| EnhancedSeatMap | `GET /v5/book/flights/seatmaps` | 404 on GET probe (POST-only API; untested further) |
+| EnhancedSeatMap | `GET /v5/book/flights/seatmaps` | *(superseded 2026-07-14 — executed POST row in the Phase 26 extension below)* Original 2026-07-13 record: 404 on GET probe (POST-only API; untested further) |
 
-Rate limits: none hit across ~40 calls in one session (several BFM + InstaFlights calls
-back-to-back). No `429` or rate-limit headers observed. **inferred**: hackathon-tier
-limits exist but are above exploration volume.
+### Phase 26 sweep extension — verified-live 2026-07-14
+
+Executed classifications for the domains the 2026-07-13 sweep left uncovered
+(Phase 26, decisions D1/D2 — these targeted rows *define* sweep completeness;
+no manifest test). Every row below ran live against CERT via the extended
+`probes/sweep.py`.
+
+| API | Endpoint | Result (verified-live 2026-07-14) |
+|---|---|---|
+| Air schedules | `GET /v1/shop/flights/schedules` | ➖ **No REST endpoint**: 404 `WARN.RAF.APPLICATION`; candidates `/v{1,3}/shop/flights/schedules` and `/v{1,2}/air/schedules` all 404. Schedule content (flight numbers, times, equipment) rides in InstaFlights segments — verified-live. The probe stays in the sweep so a later appearance is caught as drift. |
+| Air availability | `POST /v2/air/availability` | ❌ **NOT ENTITLED**: 403 `ERR.2SG.SEC.NOT_AUTHORIZED`. The 2SG gateway flaps between this 403 and an empty-body 404 on back-to-back calls (observed 3× alternating) — both are the same denial, so a sweep line reading NOT-FOUND here is not drift. |
+| Exchange shopping | `POST /v3/exchange/shop` | ❌ **NOT ENTITLED**: 403 `ERR.2SG.SEC.NOT_AUTHORIZED` (same 403/404 gateway flap as air availability). |
+| Flight Reshop | `POST /v1/offers/flightReshop` | ⚠️ **Entitled, schema not cracked**: 400 `BAD_REQUEST` "Validation Failed: must not be null" on `journeys` — the request cleared authorization into payload validation. The reshop half of exchange/reshop is open if ever needed. |
+| Car Availability (ground/car) | `POST /v2.4.0/shop/cars` | ➖ **No REST endpoint**: 404 `ERR.2SG.CLIENT.INVALID_REQUEST` ("not found in rest table"); GET variant and successor version guesses also 404. Car/ground is SOAP-only territory for these credentials — the mock ground leg stays. |
+| EnhancedSeatMap | `POST /v3.0.0/book/flights/seatmaps?mode=seatmaps` | ⚠️ **Entitled, schema not cracked**: 400 `ERR.RAF.VALIDATION` — the REST wrapper lives at v3.0.0 via POST (v4/v5 are 404). Supersedes the 2026-07-13 GET-404 row. |
+| Booking Mgmt modifyBooking | `POST /v1/trip/orders/modifyBooking` (dummy PNR) | ✅ **Authorized** (D2, executed): with the full documented payload (`bookingSignature`, `before: {}`, `after.hotels[]`) field validation clears and CERT answers **HTTP 200 + `errors[]` `APPLICATION_ERROR`/`BOOKING_NOT_FOUND`** — a clean business error on `confirmationId: "ABCDEF"`, proving authorization the same way cancelBooking was proven. Nothing written (the PNR does not exist). Supersedes the 2026-07-13 inferred row; the entitlement wall stays create-side only. |
+
+With these rows, every domain the Phase 25 requirements enumerate — air
+shopping, schedules, availability, exchange/reshop, hotel/lodging, ground/car,
+utility/content, booking management — has an executed, classified entry.
+PNR hygiene (D3): no live run in this phase observed a createBooking success,
+so the set of recorded confirmation IDs is empty — nothing to cancel.
+
+## Rate limits & credential resets
+
+Rate limits: none hit across ~40 calls in one session on 2026-07-13 (several
+BFM + InstaFlights calls back-to-back), and none across the ~35 calls of the
+2026-07-14 extension runs. No `429` or rate-limit headers observed.
+**inferred**: hackathon-tier limits exist but are above exploration volume.
+
+Credential resets: Sabre periodically resets test credentials — run
+`probes/auth_check.py` (or `pytest -m cert`) the morning of the event, and
+re-run `probes/sweep.py` (exit code is nonzero if any endpoint hit
+NETWORK-ERR) to catch entitlement drift. The raw pair lives in `config/.env`
+and is what gets re-entered after a reset.
 
 ## Deltas vs. mock shapes (`backend/api/sabre/shapes.py`) — all Phase 24 work items
 
