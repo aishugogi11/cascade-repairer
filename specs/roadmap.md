@@ -6,12 +6,24 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **State as of 2026-07-12 (late-night replan):** Phase 21 (voice booking page) is merged, deployed, and QA'd, and **Phase 17 is complete** — the full three-act build was submitted to App Review 2026-07-11; per `mission.md` #4 approval is a bonus, the web surfaces are the demo path, and no new binary is uploaded until the in-review one is approved (BACKLOG Phase 20). Details in [changelog.md](changelog.md). **Restoration note:** this replan re-restores the 2026-07-12 evening replan's roadmap (PR #34, commit `4ac1bb0`), which the booking-page branch's merge resolution (PRs #35/#36) had silently reverted — Phase 17's completion and Phases 22–24 below were lost from this file for a few hours; if a roadmap statement conflicts with the changelog, trust the changelog. Open work, in order: the cascade dashboard (Phases 22–23) on the visual frame Phase 21 established, then pre-event readiness (Phase 24 — **time-gated, not order-gated**: pull the Sabre-keys work ahead the moment the keys arrive, expected Monday 2026-07-13).
 
-**Update 2026-07-13 (Phase 25 archived):** the Sabre CERT exploration ran the same day the keys landed and is archived to [changelog.md](changelog.md) with caveats — headline finding: **real shopping, mock booking** (Flight Search API v1 entitled with real priced itineraries; `createBooking` entitlement-blocked at `PassengerDetailsRQ`; full matrix and demo recommendations in `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md`). Its independent validation returned **FAIL** — see Open follow-ups below. The deal-manufacturing upsell engine stays backlogged in [BACKLOG.md](BACKLOG.md) (revisit after Phase 23, minimum slice `extend_stay`); its API-entitlement gate is now answered **go**. Next in execution order is Phase 22, but the notes doc recommends a **replan first**: promote real Sabre *search* into the demo path and re-scope Phase 24's flip to search-only, since real booking is an entitlement wall, not a config flip.
+**Update 2026-07-13 (Phase 25 archived):** the Sabre CERT exploration ran the same day the keys landed and is archived to [changelog.md](changelog.md) with caveats — headline finding: **real shopping, mock booking** (Flight Search API v1 entitled with real priced itineraries; `createBooking` entitlement-blocked at `PassengerDetailsRQ`; full matrix and demo recommendations in `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md`). Its independent validation returned **FAIL** (report in the spec dir); the fixes are **Phase 26 below**. The deal-manufacturing upsell engine stays backlogged in [BACKLOG.md](BACKLOG.md) (revisit after Phase 23, minimum slice `extend_stay`); its API-entitlement gate is now answered **go**.
 
-**Open follow-ups (from Phase 25's validation, 2026-07-13):**
-- Fix the two failing validation criteria — the PNR-cleanup guarantee in `backend/tests/test_sabre_cert.py` and the incomplete Try-it-Out sweep — triaged in [TODO.md](../TODO.md); four `→ DECISION:` lines there block the sweep work. Re-validate after.
-- Different-day / post-credential-reset `pytest -m cert` re-run — event-day morning (2026-07-18) at the latest.
-- Full report: `specs/2026-07-13-sabre-cert-exploration/validation-report.md`.
+**Replan 2026-07-13 (evening, this branch):** the Phase 25 findings reshaped the tail of the roadmap. New order: **26 (validation fixes) → 27 (real search in the demo path) → 22 → 23 → 24**. All four validation-triage decisions were answered at the replan interview (targeted sweep additions, executed dummy-PNR probe for modifyBooking, empty-set PNR hygiene, dated re-run artifact); the frozen-client bug fixes (dead `POS` field, empty-BFM response shapes, BM errors-as-200 masking) are deliberately **conditional Phase 24 work** — they only matter if Sabre grants BFM content / booking entitlement, realistically via the event-day ask.
+
+## Phase 26: Validation fixes — close out Phase 25's FAIL
+
+Small phase, first in line: make the Phase 25 validation report pass on re-validation. All decisions pre-answered (2026-07-13 replan interview) — no open questions. Tests and probes only; `backend/api/sabre/` stays untouched (the client punch list is Phase 24's conditional work).
+
+- Rework `test_create_booking_unauthorized_tripwire` (`backend/tests/test_sabre_cert.py`): extract the raw response dict from the pydantic `ValidationError` (error `input`), cancel any `confirmationId` found there in `finally` regardless of validation outcome, and assert the `UNAUTHORIZED_ACCESS` error category explicitly.
+- Add `test_shape_drift_after_created_pnr_still_cancels` — hermetic (simulated payload, no `cert` marker): a success payload with a `confirmationId` but failing shape validation must still trigger cancel before the test fails.
+- Extend `probes/sweep.py` + the notes matrix with **executed** classifications for the missing domains: air schedules, air availability, exchange/reshop, ground/car, EnhancedSeatMap via POST, and modifyBooking via dummy-PNR probe (D2). Targeted additions define completeness (D1 — no manifest).
+- Add `test_notes_have_required_decision_sections` (hermetic docs-contract test, `test_validator_docs_contract.py` precedent): auth-bridge, deltas, rate/reset, Flight Search v1 answer, and demo-recommendation headings must exist in `sabre-cert-notes.md`.
+- Replace hard-coded `2026-08-13` travel dates with computed future dates; make `probes/sweep.py` exit nonzero on `NETWORK-ERR` and `probes/booking_lifecycle.py` assert `UNAUTHORIZED_ACCESS` (exit nonzero on drift).
+- Close-out: re-run `sdd-validate-feature` against the Phase 25 + 26 criteria; capture the different-day `pytest -m cert` re-run as a dated artifact appended to `sabre-cert-notes.md` (D4 — event-day morning at the latest if the calendar doesn't cooperate sooner).
+
+## Phase 27: Real Sabre search in the demo path
+
+The Phase 25 headline made this the cheapest real-Sabre win: judges hear **real airlines, real fares, real routes** while booking stays mock (entitlement wall). Wire `search_flights_impl` (`backend/api/concierge.py`) to `GET /v1/shop/flights` (InstaFlights) when `SABRE_MODE=real`, keeping the per-call mock fallback and the speakable-options contract (top 2–3, rounded prices, no airline codes spoken). Scope notes: additive InstaFlights response models (new — `shapes.py` doesn't model this API; the Phase 25 freeze is over but BFM shapes stay untouched); always send `onlineitinerariesonly=N` (Y = CERT 500); validate city pairs against the supported-markets list where it helps the agent fail speakably; and **handle InstaFlights' offset-less airport-local times** — `2026-08-13T07:20:00` means 7:20 AM *at the departure airport*, so speaking/storing it as Pacific repeats the Phase 19 bug class; convert via airport → timezone mapping or speak it as "local departure time" explicitly. The Cloud Run flip for search is then `SABRE_MODE=real` + the two bridge env vars (`SABRE_BASE_URL`, `SABRE_CLIENT_SECRET` — recipe in the Phase 25 notes).
 
 ## Phase 22: Cascade dashboard, part 1 — repair surfaces on the Phase 21 frame
 
@@ -25,13 +37,23 @@ The dashboard's live layers on top of Phase 22: the conversation feed (traveler/
 
 ## Phase 24: Pre-event readiness
 
-The residuals that survived Phase 17's completion (2026-07-12 replan). The keys arrived **2026-07-13** and their exploration/certification work was pulled ahead as **Phase 25** (per this phase's time-gate); the flip below stays here and should be trivial once Phase 25 has certified the real client. Everything must land before July 18.
+The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 evening replan now that Phase 25 sized up the credentials: **the full `SABRE_MODE=real` flip is no longer a Phase 24 deliverable** — the search half moved to Phase 27, and the booking half is an entitlement wall, not a config flip. Everything here must land before July 18.
 
-- **Flip `SABRE_MODE=real`** (Josh handles the keys; Phase 25 certifies the client first) — and, with the
-  flip, **convert real Sabre offset-bearing times to Pacific before speaking/storing**
-  (Phase 19 residual, status unconfirmed at the 2026-07-12 replan: `_spoken_clock`/option
-  parsing truncate to `HH:MM`, so a real `06:15:00-05:00` would be mis-declared Pacific —
-  see the Phase 19 validation-report risks).
+- **Event-day ask to Sabre staff** (first thing on the day plan): can hackathon teams get
+  a PCC with BFM air content and `PassengerDetailsRQ` (createBooking) authorization? Both
+  walls name the account manager as the unlock (Phase 25 notes, endpoint matrix).
+- **Conditional — only if that entitlement lands on-site:** the pre-scoped real-booking
+  punch list from `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md` deltas
+  #1–#3: fix the dead `POS` field in `shapes.py` (name-shadowing bug), make the empty-BFM
+  response lists optional, detect Booking Management's errors-as-HTTP-200 payloads and
+  surface a speakable failure instead of a silent mock swap — plus **convert BFM's
+  offset-bearing times to Pacific before speaking/storing** (the Phase 19 residual;
+  `06:15:00-05:00` must not be mis-declared Pacific). Phase 27 handles the InstaFlights
+  offset-less variant separately.
+- **Event-day-morning Sabre smoke** (per replan decision D4): `probes/auth_check.py`,
+  then `pytest -m cert`, then `probes/sweep.py` — detects overnight credential resets and
+  entitlement drift before the first rehearsal; append the dated output to the Phase 25
+  notes (this may also be what closes Phase 26's different-day repeatability item).
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the in-review binary
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
