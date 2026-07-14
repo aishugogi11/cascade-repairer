@@ -1,5 +1,11 @@
 # Sabre API Notes — Phase 6
 
+> **Superseded for live-CERT behavior (2026-07-13):** Phase 25 exercised the real
+> CERT environment with the hackathon credentials — see
+> [`specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md`](../2026-07-13-sabre-cert-exploration/sabre-cert-notes.md)
+> for verified entitlements, request caveats, and shape deltas. This file remains the
+> docs-pull reference the mock layer and `shapes.py` trace to.
+
 Research date: 2026-07-08, against the live portal (developer.sabre.com) and
 Sabre's official Postman collections (SabreDevStudio/postman-collections;
 Booking Management v2026.04, Lodging v2025.09, both with saved CERT

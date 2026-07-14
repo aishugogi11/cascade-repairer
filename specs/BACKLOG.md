@@ -1,6 +1,6 @@
 # BACKLOG 
 
-**Replanned 2026-07-06** around the team's locked demo concept, the **Cascade Repairer** (see `mission.md`): a booked trip takes a live flight cancellation and the agent repairs all five legs in parallel *while still talking*. That decision added the concurrency spike (Phase 5), repair-capable Sabre tools (Phase 6), and the live itinerary UI (Phase 10), and demoted the real-time voice-to-voice port to a stretch goal. **Updated 2026-07-06 post-Phase-3:** promoted the Vocal Bridge live-call test page from `TODO.md` to Phase 4, front of the line per Josh; later phases renumbered (old 4–11 → 5–12). **Updated 2026-07-07 post-Phase-5:** the concurrency question is answered — no rewire needed; the pattern (`backend/api/concurrency_core.py`) is standing infrastructure for Phases 7–9. Two Phase 5 loose ends folded into Phase 6: surfacing failed status writes, and proving real BigQuery rows flip with fresh `updated_at`. **Updated 2026-07-08:** Phase 7 now also carries the L4 "Voice as a Tool" outbound-call pattern, because it is not otherwise covered by an active phase; the stretch L4 item remains only the full real-time voice-to-voice architecture port. **TODO triage 2026-07-08 (post-Phase-6):** the Discord 2026-07-07 "agent reaches out first" demo opening is noted in Phase 12 (mechanics live in Phase 7); the LandingAI email-scanning ideas were dropped per Josh — the thread stays in README as context. **Updated 2026-07-09 post-Phase-10:** the live itinerary UI shipped and is QA-verified on Cloud Run; its residual visual edge cases (backend-restart recovery, cancelled-item rendering, projector readability) are carried into the Phase 12 rehearsal checklist below. **TODO triage 2026-07-09 (post-Phase-10):** the Phase 7 outbound-call persistence idea is promoted to Phase 13, deliberately after the rehearsal. **Updated 2026-07-10 post-Phase-12:** the dress rehearsal is QA-complete — the two-button demo page ran the full cascade on Cloud Run with real outbound calls, all five repairs in ~21 s (see changelog) — so the foundation is done and Phase 13 is unblocked. **TODO triage 2026-07-10 (replan):** the Phase 11 eval triage in `TODO.md` was audited against the code — D1, the openai 2.44.0 pin, the deployed eval re-run, and the "don't archive Phase 11" guard were already done and are dropped; the web-call silent-on-connect incident is irrelevant to the demo (it runs on outbound calls, not the web-call page) and moves to the backlog. Per Josh: **demo polish runs first** (demo-day risk beats plumbing), so Phase 14 below jumps the queue ahead of Phase 13 — phase numbers are historical, the file order is the execution order. **TODO triage 2026-07-11:** the "Talk to My Trip" iOS app is promoted to roadmap Phases 16–17 and jumps ahead of everything here — App Store first-review latency (days) makes an approvable submitted build the immediate goal; Phases 14 → 13 → 15 now wait behind it. The same TODO's web-demo-polish idea is backlogged below. **TODO triage 2026-07-12 (post-Phase-18):** the two validation-pass hotfixes (timezone discipline, iOS voice pin for the displayed trip) are promoted to roadmap **Phase 19**; the `complete_trip` build-out visibility gap is backlogged below — revisit after Phase 17's device QA, and pull it forward if rehearsals keep hitting the "is it done yet?" stall. **TODO triage 2026-07-12 (replan, post-Phase-19):** the TEMP mobile_voice latest-trip bridge removal is backlogged as **Phase 20** below per Josh — it cannot start until App Review approves the in-review binary, and event day runs on the current binary + backend either way.
+**Replanned 2026-07-06** around the team's locked demo concept, the **Cascade Repairer** (see `mission.md`): a booked trip takes a live flight cancellation and the agent repairs all five legs in parallel *while still talking*. That decision added the concurrency spike (Phase 5), repair-capable Sabre tools (Phase 6), and the live itinerary UI (Phase 10), and demoted the real-time voice-to-voice port to a stretch goal. **Updated 2026-07-06 post-Phase-3:** promoted the Vocal Bridge live-call test page from `TODO.md` to Phase 4, front of the line per Josh; later phases renumbered (old 4–11 → 5–12). **Updated 2026-07-07 post-Phase-5:** the concurrency question is answered — no rewire needed; the pattern (`backend/api/concurrency_core.py`) is standing infrastructure for Phases 7–9. Two Phase 5 loose ends folded into Phase 6: surfacing failed status writes, and proving real BigQuery rows flip with fresh `updated_at`. **Updated 2026-07-08:** Phase 7 now also carries the L4 "Voice as a Tool" outbound-call pattern, because it is not otherwise covered by an active phase; the stretch L4 item remains only the full real-time voice-to-voice architecture port. **TODO triage 2026-07-08 (post-Phase-6):** the Discord 2026-07-07 "agent reaches out first" demo opening is noted in Phase 12 (mechanics live in Phase 7); the LandingAI email-scanning ideas were dropped per Josh — the thread stays in README as context. **Updated 2026-07-09 post-Phase-10:** the live itinerary UI shipped and is QA-verified on Cloud Run; its residual visual edge cases (backend-restart recovery, cancelled-item rendering, projector readability) are carried into the Phase 12 rehearsal checklist below. **TODO triage 2026-07-09 (post-Phase-10):** the Phase 7 outbound-call persistence idea is promoted to Phase 13, deliberately after the rehearsal. **Updated 2026-07-10 post-Phase-12:** the dress rehearsal is QA-complete — the two-button demo page ran the full cascade on Cloud Run with real outbound calls, all five repairs in ~21 s (see changelog) — so the foundation is done and Phase 13 is unblocked. **TODO triage 2026-07-10 (replan):** the Phase 11 eval triage in `TODO.md` was audited against the code — D1, the openai 2.44.0 pin, the deployed eval re-run, and the "don't archive Phase 11" guard were already done and are dropped; the web-call silent-on-connect incident is irrelevant to the demo (it runs on outbound calls, not the web-call page) and moves to the backlog. Per Josh: **demo polish runs first** (demo-day risk beats plumbing), so Phase 14 below jumps the queue ahead of Phase 13 — phase numbers are historical, the file order is the execution order. **TODO triage 2026-07-11:** the "Talk to My Trip" iOS app is promoted to roadmap Phases 16–17 and jumps ahead of everything here — App Store first-review latency (days) makes an approvable submitted build the immediate goal; Phases 14 → 13 → 15 now wait behind it. The same TODO's web-demo-polish idea is backlogged below. **TODO triage 2026-07-12 (post-Phase-18):** the two validation-pass hotfixes (timezone discipline, iOS voice pin for the displayed trip) are promoted to roadmap **Phase 19**; the `complete_trip` build-out visibility gap is backlogged below — revisit after Phase 17's device QA, and pull it forward if rehearsals keep hitting the "is it done yet?" stall. **TODO triage 2026-07-12 (replan, post-Phase-19):** the TEMP mobile_voice latest-trip bridge removal is backlogged as **Phase 20** below per Josh — it cannot start until App Review approves the in-review binary, and event day runs on the current binary + backend either way. **TODO triage 2026-07-13:** the Sabre keys arrived — the CERT exploration is promoted to roadmap **Phase 25**, ahead of the dashboard (Phases 22–23) per Phase 24's time-gate; the deal-manufacturing post-booking upsell engine is backlogged below per Josh — revisit after Phase 23, must not put the July 18 core at risk, and the minimum demoable slice if promoted is `extend_stay` only.
 
 ## Phase 14: Demo polish — stage feel and visual edge cases (runs FIRST)
 
@@ -59,6 +59,118 @@ session pins the backend's globally newest trip, not a user-scoped one.
 > `vbSetTrip` ships in v1.0.1 (the first post-approval App Store update) — the block is
 > marked `TEMP bridge` in `backend/api/mobile_voice.py`, with page tests in
 > `tests/test_mobile_voice.py` to drop alongside it.
+
+## Deal manufacturing: post-booking upsell engine (backlogged 2026-07-13 — not yet a phase)
+
+Backlogged at the 2026-07-13 triage per Josh: revisit **after Phase 23** (the dashboard is the
+anchor demo and this must not put the July 18 core at risk); if promoted, the minimum demoable
+slice is **`extend_stay` only** (one kind, one sweep, one offer). Its one external dependency —
+whether the hackathon CERT keys include the Flight Search API v1 — is answered by roadmap
+Phase 25 (Sabre CERT exploration). The full TODO writeup is preserved verbatim below.
+
+> **TODO (verbatim, 2026-07-13):**
+>
+> **Pitch line:** *Sabre gives you inventory; our agent manufactures the deal.* Sabre has no
+> self-serve pre-packaged-deals endpoint (verified 2026-07-13: the inspirational/intelligence
+> suite — Destination Finder, InstaFlights, Top Destinations, Low Fare Forecast, Travel
+> Seasonality — lives under the retired `/docs/rest_apis/...` scheme; the current primitive is
+> the cache-based **Flight Search API v1**, `developer.sabre.com/rest-api/flightsearch-api/v1`,
+> open-destination + open-date cheapest-fare search). So the differentiator is building the
+> package layer ourselves: background agents assemble bundle candidates from raw Sabre
+> inventory, we rank them against the just-booked trip with embeddings, and the voice agent
+> offers the top match at the natural moment. Every other team books what the user asked for;
+> ours notices the trip could be better and says so, unprompted.
+>
+> ### Demo moment
+>
+> Right after `complete_trip`, while the four build-out cards are still materializing on the
+> 1.5 s pollers, the agent volunteers: *"One thing before you go — you land Friday at 10 a.m.
+> and fly out Saturday night. Staying through Sunday actually saves you $102: the hotel drops
+> $40 a night and the Sunday return is $62 cheaper. Want me to extend it?"* A "yes" runs the
+> extension (hotel date change + flight rebook — both already exist as repair tools); the
+> cards flip on screen while the agent confirms.
+>
+> ### How it works — three parts
+>
+> 1. **Background deal-hunter agent (reuse `concurrency_core`).** When `book_flight` /
+>    `complete_trip` lands, fire an un-awaited `asyncio.create_task` (never a sequential
+>    await — the conversation must keep flowing) that sweeps for bundles around the booked
+>    trip: adjacent-date flight prices (±1–2 days on the return via Flight Search API if the
+>    keys are entitled, plain Bargain Finder Max re-searches if not), adjacent-date hotel
+>    rates (`/v5/get/hotelavail` across the extension window), and nearby-experience fills for
+>    free days. In `SABRE_MODE=mock`, the mock client returns deterministic sweep results so
+>    the whole feature works offline and in CI (per-call dispatcher fallback already handles
+>    `real` failures). Completions report into the per-session event log so the session
+>    snapshot can answer "found anything?" by name.
+>
+> 2. **Deals corpus in BigQuery.** New `deal_candidates` table (repository-layer module +
+>    `config.yaml` metadata entry + `create_vocal_bridge_tables.sh`, the donor pattern):
+>    `deal_id, trip_id, kind (extend_stay/cheaper_return/experience_fill/hotel_upgrade),
+>    summary (speakable one-liner), price_delta, currency, components (JSON — the concrete
+>    legs/rates to book if accepted), embedding (ARRAY<FLOAT64>), created_at, expires_at,
+>    status (proposed/offered/accepted/declined/expired)`. Writes are query-job DML like
+>    everything else. `expires_at` is mandatory — this is the `_LATEST_SEARCH` staleness
+>    lesson (Phase 21 validation) applied from day one.
+>
+> 3. **Embedding rank + voice offer.** Embed a textual profile of the booked trip
+>    (route, dates, hotel, stated preferences pulled from the session's turns) and each
+>    candidate's summary with OpenAI embeddings; cosine in-process in Python — **no vector
+>    DB, no pgvector** (3–10 candidates per trip; a helper in `concierge.py` is plenty, and
+>    tests mock the embedding call at the helper boundary to stay hermetic). Top candidate
+>    above a similarity floor becomes (a) a line in the agent's session snapshot marked
+>    authoritative — so the Concierge offers it in its own voice after `complete_trip`
+>    instead of being tool-triggered — and (b) an additive, best-effort `deal_offer` block
+>    on `GET /v1/itinerary/status/{trip_id}` (the `detail` / `pending_options` precedent:
+>    omitted when there's nothing to say, a failed read can never break the poll) so the
+>    booking page / dashboard candidates panel renders it on the "AI Recommended" card
+>    treatment. An `accept_deal(deal_id)` tool books the components via the existing repair
+>    tools and flips the row to `accepted`; every failure path returns a speakable string.
+>
+> ### Existing seams this rides on (no new infra)
+>
+> - `concurrency_core.py` — background task + event log + session snapshot (proven Phase 5/6).
+> - `book_flight_impl` / `complete_trip` in `concierge.py` — the trigger points.
+> - Repair tools (`repair_tools.py`) — hotel date change + flight cancel/create already
+>   compose the "extend it" action.
+> - Status-endpoint additive-payload pattern (`detail`, `pending_options`) — `deal_offer`
+>   is the third instance of the same contract.
+> - Booking page right-column candidates panel (Phase 21) — the visual slot already exists.
+> - BigQuery repository layer + config-driven table ids — one new table, donor pattern.
+>
+> ### Standing rules that apply
+>
+> - DB stores UTC; every spoken/displayed time is Pacific, labeled "PT".
+> - Blocking work (embedding HTTP call, BigQuery DML) inside async paths goes through
+>   `asyncio.to_thread` / stays off the event loop.
+> - Tool and failure-path returns are speakable strings; prices rounded, no airline codes.
+> - Tests hermetic: no `OPENAI_API_KEY`, no GCP creds — mock at helper boundaries.
+> - Additive status-payload blocks are best-effort and can never break the poll.
+>
+> ### Open questions for the triage interview
+>
+> - **Flight Search API entitlement** — ask the Sabre team today (2026-07-13, keys expected)
+>   whether the hackathon CERT keys include it; if not, the BFM + hotelavail sweep is the
+>   plan of record and Flight Search API is a nice-to-have swap.
+> - **Sequencing vs. Phases 22–23 (dashboard):** this is a booking-beat feature; the cascade
+>   dashboard is the anchor demo. Propose slotting after Phase 23 unless the dashboard
+>   finishes early — it must not put the July 18 core at risk. Cutting scope to
+>   `extend_stay` only (one kind, one sweep, one offer) is the minimum demoable slice.
+> - Does the offer also belong in the iOS `RecommendationSheet` (it already reads `detail`),
+>   or is web-only enough for event day?
+> - Embedding model choice + where the trip-profile text is assembled (concierge vs. a
+>   dedicated helper) — implementation detail, decide in the feature spec.
+>
+> ### Chains with (separate, later idea — not part of this item)
+>
+> The same sweep machinery pointed at *pre-disruption* gives **speculative repair**: pre-warm
+> per-leg alternatives at booking time so the cascade's recovery timer collapses from ~35 s
+> to single digits ("Plan B was already booked before the flight canceled"). Park it as its
+> own inbox item once the deal engine exists — shared corpus table, shared sweeps, different
+> trigger.
+
+*(Triage-interview answers, 2026-07-13: sequencing → after Phase 23; scope if promoted →
+`extend_stay` slice only. The remaining open questions — iOS `RecommendationSheet` inclusion,
+embedding model, trip-profile assembly point — stay open for the eventual feature spec.)*
 
 ## Backlog (post-event unless it bites)
 
