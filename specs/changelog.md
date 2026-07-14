@@ -8,8 +8,13 @@ Ordered newest phase first.
 
 ---
 
+## Phase 26 — Validation fixes: close out Phase 25's FAIL
+**Completed:** 2026-07-14 (close-out re-validation **PASS** same day, report in the spec dir; one tracked follow-up — the different-day `pytest -m cert` dated artifact — rides with roadmap Phase 24, D4) · **Spec:** [specs/2026-07-14-validation-fixes/](2026-07-14-validation-fixes/)
+
+Every Phase 25 validator failure is closed with tests-and-probes-only changes (PRs #40/#41): the createBooking tripwire now recovers the raw payload from the pydantic `ValidationError`, cancels any harvested PNR unconditionally in `finally`, and asserts the `UNAUTHORIZED_ACCESS` marker explicitly (found live to sit in `type`, not `category` — notes corrected); a hermetic shape-drift suite proves the cleanup guarantee by construction; the CERT sweep grew six executed domain classifications (schedules and car/ground have no REST endpoints, availability and exchange shopping exist but are not entitled, Flight Reshop and EnhancedSeatMap are entitled, and modifyBooking is authorized via a dummy-PNR business error — D2) with nonzero exit codes on network failure and entitlement drift; hard-coded travel dates became computed; and a docs-contract test pins the notes' five decision headings.
+
 ## Phase 25 — Sabre CERT exploration: size up what the real keys can do
-**Completed:** 2026-07-13 (implementation merged, PR #38; independent validation returned **FAIL** — fixes triaged into TODO.md, re-validation pending) · **Spec:** [specs/2026-07-13-sabre-cert-exploration/](2026-07-13-sabre-cert-exploration/)
+**Completed:** 2026-07-13 (implementation merged, PR #38; independent validation returned **FAIL** — fixed by Phase 26, whose 2026-07-14 close-out re-validation covered the Phase 25 + 26 criteria and returned **PASS**) · **Spec:** [specs/2026-07-13-sabre-cert-exploration/](2026-07-13-sabre-cert-exploration/)
 
 The hackathon credentials were exercised live against Sabre CERT and the verdict is **real shopping, mock booking**: v2 client-credentials auth verified with a documented env bridge for the Phase 24 flip, Flight Search API v1 entitled and returning real priced itineraries (the deal-engine gate answers **go**), BFM v5 empty on this PCC and `createBooking` entitlement-blocked (`PassengerDetailsRQ` unauthorized — the event-day ask to Sabre staff), a latent dead-`POS`-field bug found in the frozen `shapes.py` — all recorded in `sabre-cert-notes.md` with re-runnable probes and a six-test CERT-marked pytest suite that leaves hermetic CI untouched — while the validator's two failing criteria (a PNR-cleanup guarantee hole in the create tripwire, an incomplete Try-it-Out sweep) plus the different-day re-run remain open in TODO.md behind four pending decisions.
 

@@ -1,159 +1,122 @@
-# Validation Report — Validation Fixes (Phase 26)
-
-**Branch:** `vb/feature/validation-fixes`
-
-**Commit:** `11a86bc222f4347f9d2565fd19c9e2f43d89347a`
-
-**Date:** 2026-07-14
+# Validation Report — Validation Fixes (Phase 26 close-out)
+**Branch:** `vb/dev`  **Commit:** `4f83157080b572407e2babd97a2ae558d4e8d573`  **Date:** 2026-07-14
 
 ## Summary
-
-FAIL. The cleanup tripwire, live CERT suite, 17-endpoint sweep, probe exit behavior, notes matrix, PR merge, and Cloud Build all pass. Two explicit acceptance conditions do not: `test_notes_have_required_decision_sections` is skipped rather than passed by the required bare-container suite, and the branch changes `specs/roadmap.md` even though the scope criterion permits spec changes only in the Phase 25 exploration directory and this feature directory. The roadmap is also marked `[x] COMPLETE` before this re-validation has passed.
+PASS. The merged Phase 26 implementation satisfies the amended Phase 25 + 26 criteria: hermetic and credentialed suites pass, cleanup is guaranteed under simulated shape drift and forced success, all 17 sweep targets classify without network errors, probe failure modes return nonzero, notes and scope contracts hold, no PNR or secret was produced, and the merge commit's Cloud Build succeeded. The different-day CERT artifact remains explicitly deferred and non-blocking under Phase 26 validation; this report does not claim that future run has occurred.
 
 ## Criterion-by-criterion results
 
-### 1. Hermetic suite green with zero Sabre environment variables
-
-- **Criterion:** The bare container suite deselects every `cert` test, attempts no network access, and collects and passes both named new hermetic tests.
-- **Status:** FAIL
-- **Evidence:** All four Sabre variables were absent in the running backend container. `docker compose exec -T backend pytest` exited 0 with `335 passed, 5 skipped, 6 deselected` in 5.55 seconds. `tests/test_sabre_cert_cleanup.py` ran four passing tests, including the named cleanup test. `tests/test_validator_docs_contract.py` showed `ssss`; the named notes-contract test was skipped by the module-level `README.exists()` guard at `backend/tests/test_validator_docs_contract.py:19` because repo-root files are absent from the backend image.
-- **Notes:** The criterion requires the notes-contract test to pass in this run, not merely exist or pass in a separately mounted checkout.
-
-### 2. Shape-drift cleanup guarantee
-
-- **Criterion:** A drifted `ORPHAN1` response and a clean `FORCED1` success both reach cancellation, while the drifted flow still fails.
+### 1. Hermetic suite and execution contexts
+- **Criterion:** The default container suite is green with no raw Sabre credentials; six `cert` tests are deselected, the cleanup test runs, and the docs-contract module skips rather than fails in the bare backend image.
 - **Status:** PASS
-- **Evidence:** `backend/tests/test_sabre_cert_cleanup.py::test_shape_drift_after_created_pnr_still_cancels` and `::test_forced_success_still_cancels_via_finally` passed in the bare suite. The tests assert `client.cancelled == ["ORPHAN1"]` and `["FORCED1"]` at `backend/tests/test_sabre_cert_cleanup.py:66` and `:78`. The production-independent tripwire cleanup is in `backend/tests/test_sabre_cert.py:269`–`311`.
-- **Notes:** The hermetic file also passed entitlement-wall and root-payload-recovery cases.
+- **Evidence:** The running backend reported both raw Sabre variables unset. `docker compose exec -T backend pytest` collected 346 tests, deselected 6, and finished `335 passed, 5 skipped, 6 deselected`; `tests/test_sabre_cert_cleanup.py` ran all four tests, while the four repo-root docs tests skipped as specified.
+- **Notes:** Seven unrelated warnings were emitted; none changed the exit code.
 
-### 3. Tripwire asserts the entitlement category
-
-- **Criterion:** `test_create_booking_unauthorized_tripwire` accepts only a raw `errors[]` response containing `UNAUTHORIZED_ACCESS`; other validation-error payloads fail.
+### 2. Full-checkout docs-contract execution
+- **Criterion:** `test_notes_have_required_decision_sections` is collected and passes from a full checkout.
 - **Status:** PASS
-- **Evidence:** The live test passed in the credentialed run. `backend/tests/test_sabre_cert.py:292`–`308` checks both `category` and `type`. An isolated fake-client walkthrough with `type: DIFFERENT_ERROR` raised `pytest.fail.Exception` as required.
-- **Notes:** Checking both fields matches the observed CERT payload, where `category` is `UNAUTHORIZED` and `type` is `UNAUTHORIZED_ACCESS`.
+- **Evidence:** `docker run --rm -v <repo>:/repo -w /repo/backend hackathon-vocal-bridge-backend python -m pytest tests/test_validator_docs_contract.py -v` returned `4 passed`; the required notes test passed.
+- **Notes:** This matches the amended full-checkout convention.
 
-### 4. Docs-contract test bites
-
-- **Criterion:** Each of the five required notes headings is enforced.
+### 3. Shape-drift and forced-success cleanup guarantee
+- **Criterion:** A drifted success carrying `ORPHAN1` and a clean success carrying `FORCED1` both cancel the confirmation and still fail the tripwire flow.
 - **Status:** PASS
-- **Evidence:** With the full repository mounted read-only, `tests/test_validator_docs_contract.py::test_notes_have_required_decision_sections` passed. An in-memory mutation walkthrough renamed each required heading independently; all five mutations raised `AssertionError`.
-- **Notes:** The assertion behavior is correct, but criterion 1 still fails because this test is skipped in the required default container/CI context.
+- **Evidence:** `tests/test_sabre_cert_cleanup.py::test_shape_drift_after_created_pnr_still_cancels` and `::test_forced_success_still_cancels_via_finally` passed. Inspection shows `_attempt_create_harvesting_confirmation` recovers the raw validation input and `_run_create_booking_tripwire` cancels any harvested ID in `finally`.
+- **Notes:** The tests exercise the production-shaped Pydantic validation boundary with a recording fake client; no network is used.
 
-### 5. No hard-coded travel dates
-
-- **Criterion:** The specified grep finds no `2026-08-13`, and all computed dates are at least 14 days ahead.
+### 4. Entitlement-category tripwire
+- **Criterion:** The create-booking tripwire accepts only an `errors[]` payload containing `UNAUTHORIZED_ACCESS` and fails on any other validation payload.
 - **Status:** PASS
-- **Evidence:** `grep -rn "2026-08-13" backend/tests specs/2026-07-13-sabre-cert-exploration/probes` returned no matches (exit 1). Date sites use `timedelta(days=30)` in `backend/tests/test_sabre_cert.py:49`, `probes/sweep.py:77`, and `probes/booking_lifecycle.py:74`; the remaining search probe uses 14 days.
-- **Notes:** The live lifecycle happened to resolve its computed date to 2026-08-13 on 2026-07-14; it is not a source literal.
+- **Evidence:** Hermetic `test_documented_entitlement_wall_passes_and_cancels_nothing` passed. Live `tests/test_sabre_cert.py::test_create_booking_unauthorized_tripwire` passed against CERT. A simulated lifecycle payload with `OTHER`/`DRIFT` returned 1, while `UNAUTHORIZED`/`UNAUTHORIZED_ACCESS` returned 0.
+- **Notes:** Both `category` and `type` are checked because CERT currently puts the marker in `type`.
 
-### 6. Credentialed live test run
-
-- **Criterion:** The documented `pytest -m cert` command passes on the implementation day.
+### 5. Docs-contract test bites
+- **Criterion:** Removing or renaming any required notes heading makes the docs-contract assertion fail.
 - **Status:** PASS
-- **Evidence:** The documented credential-passthrough command ran against Sabre CERT and reported `6 passed in 3.60s`, including the reworked create-booking tripwire.
-- **Notes:** No token or credential value was printed or recorded.
+- **Evidence:** An in-memory mutation walk-through invoked the actual test function after independently removing each of its five anchors; all five cases raised `AssertionError`. The unmodified document passed in the full-checkout run.
+- **Notes:** No spec file was edited during the mutation check.
 
-### 7. Extended sweep executes clean
-
-- **Criterion:** The original ten endpoints plus all Phase 26 additions each print one classification, with no `NETWORK-ERR`, and the probe exits 0.
+### 6. Computed future travel dates
+- **Criterion:** No probe/test source hard-codes `2026-08-13`; generated travel dates are at least 14 days ahead.
 - **Status:** PASS
-- **Evidence:** The documented live sweep printed 17 classified endpoint lines and exited 0. The added results were: schedules `NOT-FOUND 404`, availability `NOT-FOUND 404`, exchange `NOT-ENTITLED 403`, reshop `SHAPE-400`, car `NOT-FOUND 404`, EnhancedSeatMap `SHAPE-400`, and modifyBooking `WORKS 200`. No line was `NETWORK-ERR`.
-- **Notes:** The notes explicitly allow the observed availability 403/404 gateway flap.
+- **Evidence:** `rg -n '2026-08-13' backend/tests specs/2026-07-13-sabre-cert-exploration/probes` returned no matches. `test_sabre_cert.py`, `sweep.py`, and `booking_lifecycle.py` use `date.today() + timedelta(days=30)` (and +32 for checkout); the live lifecycle run generated 2026-08-13 on 2026-07-14.
+- **Notes:** The generated output date is expected; the criterion prohibits a hard-coded source literal.
 
-### 8. Probe exit codes bite
-
-- **Criterion:** `sweep.py` exits nonzero on `NETWORK-ERR`; `booking_lifecycle.py` exits 0 for the expected wall and nonzero when `UNAUTHORIZED_ACCESS` is absent.
+### 7. Credentialed real-client CERT suite
+- **Criterion:** Auth, BFM search findings, create-booking entitlement behavior, and cancel authorization are reproducible through the unmodified real client.
 - **Status:** PASS
-- **Evidence:** An isolated no-network walkthrough exercised `classify()`'s exception branch and then drove all 17 probes to `NETWORK-ERR`; `main()` returned 1. The live lifecycle probe exited 0 with `UNAUTHORIZED / UNAUTHORIZED_ACCESS`. A simulated `APPLICATION_ERROR / OTHER` create response returned 1.
-- **Notes:** These walkthroughs ran from a read-only repository mount and changed no tests or specs.
+- **Evidence:** The documented credential-passthrough command for `pytest -m cert tests/test_sabre_cert.py -v` returned `6 passed in 5.69s`. It minted a token, reproduced the missing-POS 400 and empty-BFM response, confirmed `UNAUTHORIZED_ACCESS` on create, and confirmed cancel-side authorization.
+- **Notes:** The two search outcomes are explicitly accepted documented findings, not unexplained errors.
 
-### 9. modifyBooking executed classification
-
-- **Criterion:** The dummy-PNR modify probe produces a dated, executed clean business error proving authorization.
+### 8. Standalone auth recipe
+- **Criterion:** The documented raw-credential recipe mints a CERT token and records the Phase 24 environment bridge without exposing secrets.
 - **Status:** PASS
-- **Evidence:** The live sweep received HTTP 200 for `POST /v1/trip/orders/modifyBooking` with `APPLICATION_ERROR / BOOKING_NOT_FOUND`. The dated `verified-live 2026-07-14` matrix row is at `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md:101`.
-- **Notes:** The dummy confirmation was nonexistent; the probe performed no successful write.
+- **Evidence:** `probes/auth_check.py` exited 0 with `token_type: bearer` and `expires_in: 604800`; token metadata was redacted. `sabre-cert-notes.md` contains the v2 construction recipe and the `SABRE_BASE_URL` / `SABRE_CLIENT_SECRET` bridge heading required by the docs-contract test.
+- **Notes:** No cached state is used by the probe.
 
-### 10. Notes matrix complete
-
-- **Criterion:** Every enumerated domain has an executed classification, and superseded rows remain visibly marked.
+### 9. Extended live entitlement sweep
+- **Criterion:** The original ten targets plus schedules, availability, exchange/reshop, ground/car, EnhancedSeatMap POST, and modifyBooking each emit one classified line; none is `NETWORK-ERR`; exit code is 0.
 - **Status:** PASS
-- **Evidence:** The base and extension matrices at `sabre-cert-notes.md:69`–`105` cover air shopping, schedules, availability, exchange/reshop, hotel/lodging, ground/car, utility/content, and booking management. The earlier modifyBooking and EnhancedSeatMap rows are marked superseded at lines 81 and 84.
-- **Notes:** No required domain remains labeled inferred or untestable in the active extension rows.
+- **Evidence:** `sweep.py` contains 17 `probe(...)` calls. The live command emitted 17 classified lines and exited 0: the added rows resolved to schedules 404, availability 403, exchange 404, reshop 400, car 404, seat map 400, and modifyBooking HTTP 200 business error; no network error occurred.
+- **Notes:** The 403/404 availability and exchange gateway flap is documented as an equivalent denial.
 
-### 11. PNR hygiene
-
-- **Criterion:** No confirmation ID remains after live runs; any harvested ID is cancelled.
+### 10. Probe exit codes bite
+- **Criterion:** Sweep network failures return nonzero, and lifecycle returns nonzero when the expected entitlement marker is absent.
 - **Status:** PASS
-- **Evidence:** The live cert and lifecycle responses contained no `confirmationId`, so the recorded set was empty. `sabre-cert-notes.md:106`–`107` records that result. Hermetic drift and forced-success cases prove harvested IDs reach cancellation.
-- **Notes:** No live PNR was created during this validation.
+- **Evidence:** With `mint_token` stubbed and the sweep host forced unreachable in memory, all 17 calls classified `NETWORK-ERR` and `main()` returned 1. With a simulated lifecycle response, entitlement drift returned 1 and the documented wall returned 0. The live lifecycle probe exited 0.
+- **Notes:** These checks executed the checked-in probe functions without editing them.
 
-### 12. Scope discipline and credential hygiene
-
-- **Criterion:** No production Sabre-client diff; no spec changes outside the two allowed directories; no credential/token material in the diff.
-- **Status:** FAIL
-- **Evidence:** `git diff vb/dev -- backend/api/sabre/` was empty. Literal-pattern and exact configured-value scans found no Sabre user ID, secret, composed secret, bearer token, or Basic credential. However, `git diff --name-only vb/dev...HEAD -- specs` includes `specs/roadmap.md`, outside `specs/2026-07-13-sabre-cert-exploration/` and `specs/2026-07-14-validation-fixes/`.
-- **Notes:** Requirements clarify that nothing else under `specs/` changes. This failure does not depend on the content of the roadmap edit.
-
-### 13. Notes tone
-
-- **Criterion:** Notes preserve Phase 25's confidence labels, dated rows, trimmed payloads, tables, and credential hygiene.
+### 11. modifyBooking and matrix completeness
+- **Criterion:** modifyBooking has an executed dummy-PNR classification, every enumerated domain has an executed row, and superseded rows remain visibly marked.
 - **Status:** PASS
-- **Evidence:** Confidence labels are defined at `sabre-cert-notes.md:9`; the extension is dated and tabular at lines 86–101; probe output is truncated to 150 characters; both credential scans were clean.
-- **Notes:** No user-facing product copy was added.
+- **Evidence:** The live sweep returned HTTP 200 with `BOOKING_NOT_FOUND` for modifyBooking. `sabre-cert-notes.md` records it as `verified-live 2026-07-14`, covers all eight named domains, and labels the original modifyBooking and EnhancedSeatMap rows as superseded.
+- **Notes:** HTTP 200 plus the clean business error proves request authorization without writing a booking.
 
-### 14. Definition of done item 1 — roadmap items 1–5 implemented
-
-- **Criterion:** All five implementation items exist.
+### 12. Notes completeness and tone
+- **Criterion:** Notes contain the auth bridge, endpoint classifications, mock-shape deltas, rate/reset evidence, a definite Flight Search v1 answer, and demo recommendations using the established confidence-label style.
 - **Status:** PASS
-- **Evidence:** The diff contains the reworked tripwire, hermetic cleanup tests, extended probes and executed notes rows, heading contract, computed dates, and nonzero drift/network exits.
-- **Notes:** Implementation presence passes; execution of the heading contract in the default suite fails separately under criterion 1.
+- **Evidence:** The full-checkout heading contract passed for all five decision anchors. Manual inspection confirmed the endpoint tables, `verified-live` / `docs-only` / `inferred` labels, dated extension rows, trimmed payload descriptions, and the explicit “real shopping, mock booking” recommendation.
+- **Notes:** No user-facing product copy was introduced.
 
-### 15. Definition of done item 2 — all required commands green
-
-- **Criterion:** Bare suite, credentialed cert suite, and extended sweep exit successfully.
+### 13. PNR hygiene
+- **Criterion:** No live run leaves a confirmation ID behind; an empty set is sufficient when createBooking never succeeds.
 - **Status:** PASS
-- **Evidence:** Exit codes were 0 for all three: bare suite `335 passed`, live cert `6 passed`, and sweep 17/17 classified with no network errors.
-- **Notes:** A green bare-suite exit does not cure the explicit skipped-test failure in criterion 1.
+- **Evidence:** The live CERT suite and lifecycle probe returned the expected create-side entitlement error with no confirmation ID. The sweep used only dummy `ABCDEF` reads/modifications and received not-found business errors. Hermetic forced-confirmation cases prove both harvested IDs are cancelled.
+- **Notes:** Recorded live confirmation-ID set: empty; therefore no final cancel/read target existed.
 
-### 16. Definition of done item 3 — Phase 25 risks closed
-
-- **Criterion:** Hard-coded dates, sweep network exit, and lifecycle entitlement assertion are closed.
+### 14. Scope and credential discipline
+- **Criterion:** No production Sabre client changes, only authorized tests/probes/notes/spec/status edits, and no credential or captured token material in the feature diff.
 - **Status:** PASS
-- **Evidence:** Criteria 5 and 8 passed, including live and simulated drift evidence.
-- **Notes:** None.
+- **Evidence:** Diffing pre-Phase-26 `39ab348` to HEAD shows no file under `backend/api/sabre/` or `config/.env`; changed paths are the three test files, two probes, notes, this spec directory, and the single sanctioned roadmap heading line. Raw user ID, raw secret, and captured-token pattern scans all returned clean; `git diff --check 39ab348..HEAD` returned no findings.
+- **Notes:** The same production-client check is empty across Phase 25 + 26 from Phase 25's merge base.
 
-### 17. Definition of done item 4 — merge and CI
-
-- **Criterion:** The feature is merged to `vb/dev` by PR and Cloud Build pytest is green.
+### 15. Merge, CI, and definitions of done
+- **Criterion:** Roadmap items 1–5 are implemented, the branch merged through a PR, containerized CI pytest is green, and this independent session performs close-out validation.
 - **Status:** PASS
-- **Evidence:** GitHub PR 40 merged `11a86bc` into merge commit `281a9dc9ff8fa680e739bfeea2e4dc1a3931b9a1` at 2026-07-14T13:25:49Z. Cloud Build `7c3d0f9b-ebc9-4812-b30f-397975888502` built that merge commit; status was `SUCCESS`, including the `run-pytest` step.
-- **Notes:** The local `vb/dev` ref is stale, so merge/CI evidence came from GitHub and Cloud Build rather than the local ancestry check.
+- **Evidence:** Items 1–5 map to the passing tests, probes, and notes above. GitHub PR #41 merged `vb/feature/validation-fixes` into `vb/dev` as `4f83157`. Cloud Build `f217d0cf-95da-481f-9282-a37961e64ac3` finished `SUCCESS` for that exact revision; its `run-pytest` step and deployment step both succeeded.
+- **Notes:** The roadmap correctly remains at “implementation; manual QA pending” until this report is consumed by the close-out workflow.
 
-### 18. Definition of done item 5 — deferred close-out state
-
-- **Criterion:** Different-day evidence is deferred and tracked; Phase 26 is marked complete only after re-validation passes.
-- **Status:** FAIL
-- **Evidence:** The different-day artifact is explicitly deferred, which is nonblocking. However, `specs/roadmap.md` already marks Phase 26 `[x] COMPLETE (implementation; manual QA pending)`, while this independent re-validation result is FAIL.
-- **Notes:** The `[x]` state also causes criterion 12's out-of-scope spec diff.
+### 16. Different-day repeatability artifact
+- **Criterion:** A different-day `pytest -m cert` artifact is tracked for later capture and is explicitly non-blocking for this branch/re-validation.
+- **Status:** PASS
+- **Evidence:** Phase 26 validation Definition of Done item 5 and `specs/roadmap.md` track the event-day-morning rerun. A fresh current-day credentialed rerun passed all six tests in this session.
+- **Notes:** PASS reflects the amended criterion's explicit deferral. No different-day artifact exists yet, and this report does not represent one.
 
 ## Missing tests
 
-- The default container has no active notes-heading contract. Proposed: `backend/tests/test_sabre_cert_notes_contract.py::test_notes_have_required_decision_sections`, with `sabre-cert-notes.md` made available in the CI test context and no module-wide repo-root skip.
-- Probe failure behavior is covered only by manual walkthroughs. Proposed: `backend/tests/test_sabre_probe_contracts.py::test_sweep_network_error_exits_nonzero` and `::test_booking_lifecycle_rejects_missing_unauthorized_access`, loading the scripts with patched network calls and asserting exit codes.
-- Exact endpoint/domain coverage is manual by deliberate decision D1. If that decision changes, add `backend/tests/test_sabre_probe_contracts.py::test_sweep_classifies_required_endpoints_once` and `backend/tests/test_validator_docs_contract.py::test_notes_matrix_covers_required_domains_and_superseded_rows`.
-- Git scope, credential-diff scanning, PR merge, and Cloud Build state have no automated repository check; this validation gathered them directly.
+- Live sweep coverage, expected classifications, and `NETWORK-ERR` exit behavior have no automated test. Proposed: `backend/tests/test_sabre_probe_contracts_validator.py::test_sweep_network_error_returns_nonzero` and `::test_sweep_required_domains_emit_once`; the latter would require the spec author to reverse D1's explicit no-manifest decision.
+- Lifecycle probe drift handling has only this session's simulated walk-through. Proposed: `backend/tests/test_sabre_probe_contracts_validator.py::test_booking_lifecycle_rejects_non_unauthorized_access`, with `mint_token` and `call` replaced by fakes.
+- Semantic notes-matrix completeness is manual beyond the five heading anchors. Proposed: `backend/tests/test_sabre_notes_matrix_validator.py::test_required_domains_have_executed_classifications`, asserting each named domain has a dated non-inferred row and superseded rows remain labeled.
+- Diff scope, raw-secret scanning, PR/Cloud Build state, live PNR hygiene, and different-day repeatability are process/external-state checks. Proposed full-checkout test: `backend/tests/test_phase26_git_scope_validator.py::test_feature_diff_is_tests_probes_docs_only`, parameterized by an immutable base commit; retain manual/live evidence for the external-state portions.
 
 ## Gaps in validation.md
 
-- Should `specs/roadmap.md` be an allowed scope exception, or should the roadmap remain untouched until the independent report passes? The scope rule forbids the edit while definition-of-done item 5 discusses making it.
-- Is the “bare container” for the notes-contract criterion intended to contain the repository root? The standing backend image cannot see `sabre-cert-notes.md`, and the chosen precedent module skips all tests when `README.md` is absent.
-- Does `[x] COMPLETE (implementation; manual QA pending)` count as complete for the “only when re-validation passes” rule?
-- Should the close-out validator produce one Phase 26 report using the restated criteria, as done here, or separately re-run and report every criterion from both the Phase 25 and Phase 26 `validation.md` files?
+- Should post-merge scope checks name an immutable base commit or merge-base instead of `git diff vb/dev`? On `vb/dev` after merge, the documented command is vacuous; this report used `39ab348` for Phase 26 and Phase 25's first parent for the combined production-client check.
+- When the deferred different-day artifact is appended, should it amend this report, generate a follow-up report, or remain notes-only?
+- Should a live sweep exit nonzero on unexpected entitlement/classification drift, or only on `NETWORK-ERR` as currently specified?
 
 ## Risks not covered by validation.md
 
-- `sweep.py` returns 0 for `SERVER-ERR` and for unexpected classification drift; only `NETWORK-ERR` affects its exit code. A complete but materially changed sweep can therefore look successful to shell automation.
-- The bare suite emitted six unawaited-coroutine `RuntimeWarning`s across concierge/repair tests. They predate this phase but can conceal async cleanup defects.
-- The required different-day `pytest -m cert` artifact is still pending; today's live run proves current behavior, not repeatability on a later date.
+- `sweep.py` labels every HTTP 200 as `WORKS`, including `getBooking` and `modifyBooking` responses whose bodies contain business errors; readers must inspect the body/notes to understand the result.
+- The sweep exits 0 for unexpected HTTP classifications (`SERVER-ERR`, new 401/403, or changed 400/404), so automation catches transport failure but not semantic entitlement drift.
+- The green hermetic suite emitted seven warnings, including unawaited-coroutine warnings in unrelated Concierge/concurrency tests; these could mask future async lifecycle defects.
