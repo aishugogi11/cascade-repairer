@@ -10,9 +10,27 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-13 (evening; updated 2026-07-14):** the Phase 25 findings reshaped the tail of the roadmap. Order: **27 (real search in the demo path) → 22 → 23 → 24** (Phase 26, validation fixes, is complete and archived). All four validation-triage decisions were answered at the replan interview (targeted sweep additions, executed dummy-PNR probe for modifyBooking, empty-set PNR hygiene, dated re-run artifact); the frozen-client bug fixes (dead `POS` field, empty-BFM response shapes, BM errors-as-200 masking) are deliberately **conditional Phase 24 work** — they only matter if Sabre grants BFM content / booking entitlement, realistically via the event-day ask. One Phase 26 item remains open and rides with Phase 24: the **different-day `pytest -m cert` dated artifact** appended to `sabre-cert-notes.md` (D4 — event-day morning at the latest).
 
+**Replan 2026-07-14 (evening — real data everywhere reachable):** Phase 27 shipped, deployed, and spoke real CERT fares on Cloud Run the same day, but its independent validation returned **FAIL** with two code defects (unmapped *connection* airports pass the parser; the mock's Pacific-fiction clocks are re-read as airport-local, so mock west-to-east arrivals precede departures) — those are now **Phase 28**. Two strategic facts landed the same evening (tech-stack § entitlement addendum): InstaFlights content is **per-pair** (113 of 731 supported pairs had +2-day content, so near-term real repair shopping is possible today), and **the Sabre entitlement-ask route is closed** (decision 2026-07-14) — Sabre's newer flightShop/flightShopLite are entitled-but-empty on this PCC and the MCP Server pilot can't bypass entitlements, so no unlock is coming. The cascade's credibility therefore rides on **Phase 29**: the flight-repair leg re-shops real InstaFlights data. New order: **28 → 29 → 22 → 23 → 24**. Phase 24's "event-day ask" bullet and its conditional BFM/booking punch list are deleted with the decision (the punch-list items remain documented in the Phase 25 notes if circumstances ever change).
+
 ## [x] COMPLETE (implementation; manual QA pending) Phase 27: Real Sabre search in the demo path
 
 The Phase 25 headline made this the cheapest real-Sabre win: judges hear **real airlines, real fares, real routes** while booking stays mock (entitlement wall). Wire `search_flights_impl` (`backend/api/concierge.py`) to `GET /v1/shop/flights` (InstaFlights) when `SABRE_MODE=real`, keeping the per-call mock fallback and the speakable-options contract (top 2–3, rounded prices, no airline codes spoken). Scope notes: additive InstaFlights response models (new — `shapes.py` doesn't model this API; the Phase 25 freeze is over but BFM shapes stay untouched); always send `onlineitinerariesonly=N` (Y = CERT 500); validate city pairs against the supported-markets list where it helps the agent fail speakably; and **handle InstaFlights' offset-less airport-local times** — `2026-08-13T07:20:00` means 7:20 AM *at the departure airport*, so speaking/storing it as Pacific repeats the Phase 19 bug class; convert via airport → timezone mapping or speak it as "local departure time" explicitly. The Cloud Run flip for search is then `SABRE_MODE=real` + the two bridge env vars (`SABRE_BASE_URL`, `SABRE_CLIENT_SECRET` — recipe in the Phase 25 notes).
+
+## Phase 28: Search hardening — Phase 27 validation fixes and honest empties
+
+The Phase 27 validation report's two behavior defects, plus the live-rehearsal findings from the same evening, all in the guided-search path (`backend/api/concierge.py`, `backend/api/sabre/`):
+
+- **Unmapped connection airports must skip the itinerary** (validation report, criterion 5): `_parse_instaflights_options` checks only `segments[0]` departure and `segments[-1]` arrival; requirements decision 2 says an itinerary *touching* any unmapped airport is skipped. Check every segment's both ends.
+- **Mock times must survive the airport-local parse** (criterion 14 — deterministic regression): the mock emits fixed Pacific-fiction wall clocks that the parser re-reads as airport-local, so a mock SFO→JFK search arrives "before" it departs and `_booking_writes` can produce `end_ts < start_ts`. Make `MockSabreClient.instaflights_search` emit times *expressed in each airport's local zone* (derived from the Pacific fiction via `airport_tz`) so the parsed PT output is the classic 8 AM / 11:30 AM / 6:15 AM spread for any mapped pair; add the west-to-east ordering test the report specifies.
+- **Documented empties speak honestly** (live finding, Sabre docs): InstaFlights signals "no results" as HTTP 404 `WARN.RAF.APPLICATION` "No results were found" — a documented response, not a failure. Detect it in the real client and return an empty `InstaFlightsResponse` so the agent speaks the existing "couldn't find any flights for that day" line; the silent per-call mock swap stays **only** for genuine failures (timeouts, 5xx, credential resets) as event-day insurance. With mock options banned from the demo (decision 2026-07-14), a silent swap on a merely-empty date would betray the realness posture.
+- **City-name → airport-code discipline** (live finding): the model resolved "New York" to the metro code `NYC`, which the markets list (airport codes only) rejects — the agent redirected the traveler to the very route it was refusing. Instruction fix in `BASE_INSTRUCTIONS` (never metro codes; New York → JFK) plus a small metro-alias map (`NYC→JFK`, `WAS→IAD`, `CHI→ORD`) in `search_flights_impl` as belt-and-suspenders.
+- **Duplicate-option dedupe** (live finding): CERT returned two identical itineraries and the agent said "Option 3 is the same as option 2" aloud — dedupe parsed options by (flight number, times, price) before numbering.
+- **Token-refresh truth** (validation report, risks): `_get_token`'s docstring claims refetch-on-401 but no code clears the cached token — after the 7-day expiry (or a credential reset), real mode silently mock-swaps until restart. Clear and refetch once on 401 in `_get`/`_post`.
+- **Timezone-table parity** (validation report, risks): a `cert`-marked test asserting every airport code in the live supported-markets list resolves via `airport_zone` — so supported routes can't be silently unmappable.
+
+## Phase 29: Real repair data — the cascade re-shops InstaFlights
+
+The demo's credibility pivot (decision 2026-07-14: no mock data in the demo path; no Sabre unlock coming): when the flight breaks, the repair must speak **real replacement flights**. Swap `repair_tools.py`'s flight-repair search from `sabre_client.flight_search` (BFM — content-empty, always mock-swaps) to the Phase 27 `instaflights_search` dispatcher op: re-shop the broken flight's route and date, pick a real alternative (different flight number/time than the cancelled one where possible), and carry it + the alternatives into the booking row's `raw_response` so the booking page's `detail` panel (why chosen / price delta) shows real data. PNR writes stay mock (entitlement wall — permanent posture). Scope riders: **demo scripting** — the demo trip books a pair from the verified near-term menu (2026-07-14 sweep: SFO→MIA, SEA→BOS, JFK→LAX, …) departing event day +2, documented in the demo runbook; **morning-smoke extension** — probe the scripted pair at the scripted date (per-pair cache windows can shift on refresh; +30d green does not imply the demo date is green). Hotel/ground/dining/experience repairs stay category mocks (unchanged scope — the flight is the beat judges hear).
 
 ## Phase 22: Cascade dashboard, part 1 — repair surfaces on the Phase 21 frame
 
@@ -26,23 +44,15 @@ The dashboard's live layers on top of Phase 22: the conversation feed (traveler/
 
 ## Phase 24: Pre-event readiness
 
-The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 evening replan now that Phase 25 sized up the credentials: **the full `SABRE_MODE=real` flip is no longer a Phase 24 deliverable** — the search half moved to Phase 27, and the booking half is an entitlement wall, not a config flip. Everything here must land before July 18.
+The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 evening replan and again 2026-07-14 (evening): **the full `SABRE_MODE=real` flip shipped with Phase 27** (search real on Cloud Run since 2026-07-14), and **the event-day entitlement ask is deleted** — decision 2026-07-14: no extra permissions are coming, so the former "conditional punch list" (dead `POS` field, empty-BFM shapes, BM errors-as-200, BFM offset-bearing time conversion) is retired from this roadmap; it stays documented in the Phase 25 notes' deltas if circumstances ever change. Everything here must land before July 18.
 
-- **Event-day ask to Sabre staff** (first thing on the day plan): can hackathon teams get
-  a PCC with BFM air content and `PassengerDetailsRQ` (createBooking) authorization? Both
-  walls name the account manager as the unlock (Phase 25 notes, endpoint matrix).
-- **Conditional — only if that entitlement lands on-site:** the pre-scoped real-booking
-  punch list from `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md` deltas
-  #1–#3: fix the dead `POS` field in `shapes.py` (name-shadowing bug), make the empty-BFM
-  response lists optional, detect Booking Management's errors-as-HTTP-200 payloads and
-  surface a speakable failure instead of a silent mock swap — plus **convert BFM's
-  offset-bearing times to Pacific before speaking/storing** (the Phase 19 residual;
-  `06:15:00-05:00` must not be mis-declared Pacific). Phase 27 handles the InstaFlights
-  offset-less variant separately.
-- **Event-day-morning Sabre smoke** (per replan decision D4): `probes/auth_check.py`,
-  then `pytest -m cert`, then `probes/sweep.py` — detects overnight credential resets and
-  entitlement drift before the first rehearsal; append the dated output to the Phase 25
-  notes (this may also be what closes Phase 26's different-day repeatability item).
+- **Event-day-morning Sabre smoke** (per replan decision D4; extended by the 2026-07-14
+  evening replan): `probes/auth_check.py`, then `pytest -m cert`, then `probes/sweep.py`,
+  then **probe InstaFlights for the scripted demo pair at the scripted date** (Phase 29 —
+  per-pair cache windows shift on refresh; a green +30d sweep does not prove the demo
+  date). Detects overnight credential resets and entitlement drift before the first
+  rehearsal; append the dated output to the Phase 25 notes (this may also be what closes
+  Phase 26's different-day repeatability item).
 - **Sweep drift detection** (2026-07-14 replan, from the Phase 26 close-out report): the
   sweep's exit code trips only on `NETWORK-ERR` — `SERVER-ERR` or a changed classification
   (e.g. InstaFlights flipping to 403 after a credential reset) still exits 0, so the

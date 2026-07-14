@@ -106,6 +106,58 @@ utility/content, booking management — has an executed, classified entry.
 PNR hygiene (D3): no live run in this phase observed a createBooking success,
 so the set of recorded confirmation IDs is empty — nothing to cancel.
 
+## Phase 27 evening addendum — verified-live 2026-07-14 (post-ship live probes)
+
+Recorded at the 2026-07-14 evening replan (sanctioned amendment, the Phase 26-extension
+precedent). Everything below ran live against CERT with the hackathon credentials.
+
+### InstaFlights cache windows are per-pair
+
+InstaFlights is **cache-based** (Travel Insight; docs: refreshed for "pre-configured
+city pairs, advance purchase windows, and lengths of stay"), and the CERT cache's
+advance-purchase window is configured **per city pair**:
+
+- A +2-day full sweep of all **731** supported pairs (`destinationcountry=US`) found
+  **113 pairs with real priced itineraries at +2 days** (2026-07-16). Demo-relevant
+  hits: SFO→MIA, SEA→BOS, BOS→SEA, JFK→LAX, JFK→ORD, ATL→SEA, LAX→MSP, DFW→EWR,
+  MCO→JFK, SAN→JFK, SEA→PDX. (Full 113-pair list reproducible: loop
+  `GET /v1/shop/flights?origin&destination&departuredate=+2d&onlineitinerariesonly=N&limit=1`
+  over the supported-markets list — the Phase 29 morning-smoke extension scripts this.)
+- Pairs outside their window (e.g. SFO→JFK below +30d on 2026-07-14) return the
+  **documented empty**: HTTP **404**, `errorCode: WARN.RAF.APPLICATION`,
+  `message: "No results were found"` — an empty result, not a failure. The Phase 27
+  client treats any non-200 as failure → silent mock swap; Phase 28 reclassifies this
+  404 as an honest empty.
+- **Windows can shift when the cache refreshes** — a pair green at +2d today is not
+  guaranteed tomorrow. The demo's scripted pair must be probed at its scripted date in
+  the event-day-morning smoke (roadmap Phases 24/29).
+- Lead Price Calendar (`/v2/shop/flights/fares`) carries fares from **today** through
+  ~6 months out (193 dates for DFW→LAX on 2026-07-14) — near-term fare *context* exists
+  even where itineraries don't.
+
+### Agentic `/v1/offers/*` family — entitled, content-empty
+
+| API | Endpoint | Result (verified-live 2026-07-14) |
+|---|---|---|
+| Sabre Flight Shop (BFM replacement) | `POST /v1/offers/flightShop` | ⚠️ **Entitled but empty**: HTTP 200, zero `offers[]` on every route/date tried (+2d and +30d), sub-second responses — no content sources configured for this PCC (the BFM wall, inherited by the successor API) |
+| Sabre Flight Shop Lite | `POST /v1/offers/flightShopLite` | ⚠️ Same: HTTP 200, zero offers — the "organic cache" needs PCC-level activation ("contact your Sabre representative") |
+
+### Sabre MCP Server (official) — not a route around entitlements
+
+`developer.sabre.com/product-collection/mcp-server/1.0`: managed MCP server, **private
+pilot, CERT-only**, access via request form requiring an existing CERT PCC/EPR,
+"expect around 7 days for activation", and explicitly **permission-aware** — "inherits
+and respects the exact permissions of the authenticated principal". An MCP wrapper
+therefore carries our walls with it; it is an integration surface, not an unlock.
+
+### Decision (2026-07-14): the entitlement-ask route is closed
+
+No ask to Sabre staff — the demo is designed entirely within current credentials:
+real InstaFlights shopping (guided booking + Phase 29 flight-repair re-shop) on
+near-term-cached pairs; every PNR write stays mock. The Phase 24 conditional punch
+list (deltas #1–#3 + BFM offset-bearing conversion) is retired from the roadmap and
+survives only here, in the deltas section above, should circumstances ever change.
+
 ## Rate limits & credential resets
 
 Rate limits: none hit across ~40 calls in one session on 2026-07-13 (several

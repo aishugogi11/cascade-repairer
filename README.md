@@ -179,3 +179,11 @@ The backend runs on **Cloud Run** (GCP project `vocal-bridge-hackathon`, `us-wes
 - Health check: `GET /v1/hello/gcp_check` — verifies BigQuery and GCS reachability independently.
 
 CI/CD is Cloud Build, driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml`: validate config → ensure BigQuery dataset → build image → **pytest inside the built image** (failure blocks the deploy) → deploy. The pipeline fires on a **GitHub PR from a `vb/feature/*` branch into `vb/dev`** — direct pushes do not build. Provisioning and console-only setup steps: [`backend/devops/README.md`](backend/devops/README.md).
+
+## Create Sabre secret 
+set -a && . ./config/.env && set +a
+python3 - <<'PY'
+import base64, os
+b64 = lambda s: base64.b64encode(s.encode()).decode()
+print(b64(f"{b64(os.environ['SABRE_API_USER_ID'])}:{b64(os.environ['SABRE_API_SECRET'])}"))
+PY
