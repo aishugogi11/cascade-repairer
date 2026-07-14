@@ -11,7 +11,7 @@ judging. The judges see the cascade either way.
 """
 import logging
 import os
-from typing import Any
+from typing import Any, Optional, Set, Tuple
 
 from api.sabre import shapes
 from api.sabre.mock_client import MockSabreClient
@@ -45,6 +45,41 @@ async def flight_search(
     request: shapes.FlightSearchRequest,
 ) -> shapes.FlightSearchResponse:
     return await _dispatch("flight_search", request)
+
+
+async def instaflights_search(
+    request: shapes.InstaFlightsRequest,
+) -> shapes.InstaFlightsResponse:
+    return await _dispatch("instaflights_search", request)
+
+
+async def supported_markets() -> Optional[Set[Tuple[str, str]]]:
+    """The city pairs InstaFlights carries, as (origin, destination) — a
+    best-effort helper, not a _dispatch operation: None in mock mode and on
+    any failure, and callers skip market validation on None (requirements,
+    decision 4). Never falls back to a mock list — an invented market list
+    would turn the honest speakable redirect into a wrong answer."""
+    if sabre_mode() != "real":
+        return None
+    try:
+        response = await _real.supported_markets()
+        pairs = {
+            (
+                pair.OriginLocation.AirportCode.upper(),
+                pair.DestinationLocation.AirportCode.upper(),
+            )
+            for pair in response.OriginDestinationLocations
+        }
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract
+        logger.warning(
+            "Sabre supported-markets fetch failed (%s: %s) — skipping "
+            "market validation for this call",
+            type(exc).__name__, exc,
+        )
+        return None
+    # An empty list can't be a real market map — treat it as no answer
+    # rather than redirecting every route.
+    return pairs or None
 
 
 async def create_booking(

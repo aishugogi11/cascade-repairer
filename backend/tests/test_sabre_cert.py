@@ -324,6 +324,55 @@ def test_create_booking_unauthorized_tripwire(client):
     _run_create_booking_tripwire(client, _booking_request())
 
 
+def test_instaflights_supported_markets_live(client):
+    """Phase 27: the supported-markets list the concierge's best-effort
+    market check rides on — the live shape validates and carries the
+    verified-live DFW→LAX pair. If this fails, the market check silently
+    degrades to no-validation (by design), but the drift should be known."""
+    markets = asyncio.run(client.supported_markets())
+    pairs = {
+        (p.OriginLocation.AirportCode, p.DestinationLocation.AirportCode)
+        for p in markets.OriginDestinationLocations
+    }
+    assert pairs, "supported-markets list came back empty"
+    assert ("DFW", "LAX") in pairs, (
+        "DFW→LAX left the supported-markets list — update sabre-cert-notes.md"
+    )
+
+
+def test_instaflights_search_returns_real_priced_itineraries(client):
+    """Phase 27: the demo path's search — ≥1 real priced itinerary for a
+    supported pair on a computed future date, and the concierge parser
+    yields speakable PT-converted options from it (every parsed option
+    carries a mappable airport pair by construction — unmappable ones are
+    skipped, and all-skipped would fail the non-empty assertion)."""
+    from api.concierge import _parse_instaflights_options
+
+    response = asyncio.run(
+        client.instaflights_search(
+            shapes.InstaFlightsRequest(
+                origin="DFW",
+                destination="LAX",
+                departuredate=_future_travel_date(),
+                limit=10,
+            )
+        )
+    )
+    assert response.PricedItineraries, (
+        "InstaFlights returned no priced itineraries for DFW→LAX — "
+        "entitlement or content drift; update sabre-cert-notes.md"
+    )
+
+    options = _parse_instaflights_options(response, "DFW", "LAX")
+    assert options, "no itinerary had a mappable airport pair"
+    for option in options:
+        assert option.depart_date and option.arrive_date  # PT-converted dates
+        assert len(option.depart_time) == 5 and ":" in option.depart_time
+        assert option.price > 0
+        assert option.airline  # real carrier code in the structured field
+        assert option.airline not in option.spoken  # never spoken
+
+
 def test_cancel_booking_is_authorized(client):
     """Cancel-side certification: unlike create, cancelBooking is entitled —
     a dummy PNR gets a clean RESOURCE_NOT_FOUND business error (HTTP 200),

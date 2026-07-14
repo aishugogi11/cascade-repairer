@@ -433,3 +433,96 @@ class ModifyBookingResponse(BaseModel):
     timestamp: str
     confirmationId: str
     booking: BookingDetails  # updated state, new checkIn/checkOut dates
+
+
+# --- flight search: InstaFlights (GET /v1/shop/flights) -------------------------
+# Source of truth: specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md
+# (verified-live 2026-07-13, delta #5). The entitled search API on the
+# hackathon PCC — BFM v5 above stays untouched (Phase 24 punch list). Request
+# is a query-param bag, not a JSON body; the response models only the fields
+# the concierge parser needs (Sabre sends far more — extras are tolerated by
+# pydantic's default ignore). DepartureDateTime/ArrivalDateTime carry NO UTC
+# offset: they are airport-local wall clock ("2026-08-13T07:20:00" = 7:20 AM
+# at that airport) and must be converted before speaking/storing.
+
+
+class InstaFlightsRequest(BaseModel):
+    """Query params for GET /v1/shop/flights. onlineitinerariesonly must
+    reach CERT as N — Y triggers a server-side 500 (verified-live); the real
+    client enforces N regardless of this field's value."""
+
+    origin: str  # IATA, e.g. "SFO"
+    destination: str
+    departuredate: str  # YYYY-MM-DD
+    onlineitinerariesonly: str = "N"
+    limit: int = 10
+
+
+class MarketingAirline(BaseModel):
+    Code: str  # "DL"
+
+
+class SegmentAirport(BaseModel):
+    LocationCode: str  # IATA code
+
+
+class FlightSegment(BaseModel):
+    DepartureAirport: SegmentAirport
+    ArrivalAirport: SegmentAirport
+    DepartureDateTime: str  # "2026-08-13T07:20:00" — airport-local, no offset
+    ArrivalDateTime: str  # same convention
+    FlightNumber: int
+    MarketingAirline: MarketingAirline
+    StopQuantity: int = 0
+
+
+class OriginDestinationOption(BaseModel):
+    FlightSegment: List[FlightSegment]
+
+
+class OriginDestinationOptions(BaseModel):
+    OriginDestinationOption: List[OriginDestinationOption]
+
+
+class AirItinerary(BaseModel):
+    OriginDestinationOptions: OriginDestinationOptions
+
+
+class InstaTotalFare(BaseModel):
+    Amount: float  # Sabre sends money as strings ("260.60"); pydantic coerces
+    CurrencyCode: str
+
+
+class ItinTotalFare(BaseModel):
+    TotalFare: InstaTotalFare
+
+
+class AirItineraryPricingInfo(BaseModel):
+    ItinTotalFare: ItinTotalFare
+
+
+class PricedItinerary(BaseModel):
+    AirItinerary: AirItinerary
+    AirItineraryPricingInfo: AirItineraryPricingInfo
+
+
+class InstaFlightsResponse(BaseModel):
+    PricedItineraries: List[PricedItinerary]
+
+
+# --- supported markets (GET /v1/lists/supported/shop/flights/origins-destinations)
+# The city-pair list InstaFlights carries — minimal fields for a membership
+# check (verified-live 2026-07-13; the sweep probed with ?destinationcountry=US).
+
+
+class MarketLocation(BaseModel):
+    AirportCode: str
+
+
+class OriginDestinationLocation(BaseModel):
+    OriginLocation: MarketLocation
+    DestinationLocation: MarketLocation
+
+
+class SupportedMarketsResponse(BaseModel):
+    OriginDestinationLocations: List[OriginDestinationLocation] = []

@@ -416,7 +416,10 @@ def test_search_flights_failure_is_speakable_never_raises(monkeypatch, bq):
     async def broken_search(request):
         raise RuntimeError("sabre down")
 
-    monkeypatch.setattr(concierge.sabre_client, "flight_search", broken_search)
+    # Phase 27: the guided flow searches InstaFlights, not BFM.
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", broken_search
+    )
 
     msg = _search()
 
@@ -456,7 +459,9 @@ def test_search_failure_leaves_the_latest_search_slot_empty(monkeypatch, bq):
     async def broken_search(request):
         raise RuntimeError("sabre down")
 
-    monkeypatch.setattr(concierge.sabre_client, "flight_search", broken_search)
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", broken_search
+    )
     _search()
 
     assert concierge._LATEST_SEARCH is None
