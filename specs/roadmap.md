@@ -43,6 +43,18 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   then `pytest -m cert`, then `probes/sweep.py` — detects overnight credential resets and
   entitlement drift before the first rehearsal; append the dated output to the Phase 25
   notes (this may also be what closes Phase 26's different-day repeatability item).
+- **Sweep drift detection** (2026-07-14 replan, from the Phase 26 close-out report): the
+  sweep's exit code trips only on `NETWORK-ERR` — `SERVER-ERR` or a changed classification
+  (e.g. InstaFlights flipping to 403 after a credential reset) still exits 0, so the
+  morning smoke could look green while entitlements regressed. Teach `sweep.py` an
+  expected-classification check against the notes matrix (exit nonzero on deviation,
+  with the availability/exchange 403↔404 gateway flap treated as one class) so the D4
+  smoke is a real drift alarm, not just a network check.
+- **Async test hygiene** (2026-07-14 replan, same report): the bare suite emits six
+  unawaited-coroutine `RuntimeWarning`s across the concierge/repair tests (pre-Phase-26
+  debt). Chase them to their fixtures/mocks and fix or properly close the coroutines —
+  they can mask async cleanup defects in the exact code that keeps the agent talking
+  during repairs.
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the in-review binary
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
