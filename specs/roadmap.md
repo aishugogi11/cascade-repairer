@@ -6,25 +6,12 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **State as of 2026-07-12 (late-night replan):** Phase 21 (voice booking page) is merged, deployed, and QA'd, and **Phase 17 is complete** — the full three-act build was submitted to App Review 2026-07-11; per `mission.md` #4 approval is a bonus, the web surfaces are the demo path, and no new binary is uploaded until the in-review one is approved (BACKLOG Phase 20). Details in [changelog.md](changelog.md). **Restoration note:** this replan re-restores the 2026-07-12 evening replan's roadmap (PR #34, commit `4ac1bb0`), which the booking-page branch's merge resolution (PRs #35/#36) had silently reverted — Phase 17's completion and Phases 22–24 below were lost from this file for a few hours; if a roadmap statement conflicts with the changelog, trust the changelog. Open work, in order: the cascade dashboard (Phases 22–23) on the visual frame Phase 21 established, then pre-event readiness (Phase 24 — **time-gated, not order-gated**: pull the Sabre-keys work ahead the moment the keys arrive, expected Monday 2026-07-13).
 
-**Update 2026-07-13 (TODO triage):** the Sabre developer user + API key landed in `config/.env`, so per Phase 24's time-gate the Sabre work jumps the queue — **Phase 25 below (CERT exploration, explore-only) is now first in line, ahead of the dashboard (Phases 22–23)**; the `SABRE_MODE=real` flip and Pacific-time conversion deliberately stay in Phase 24. The other inbox item, the deal-manufacturing post-booking upsell engine (2026-07-13), is **backlogged, not promoted** — it lives verbatim in [BACKLOG.md](BACKLOG.md); revisit after Phase 23, and if promoted, the minimum demoable slice is `extend_stay` only.
+**Update 2026-07-13 (Phase 25 archived):** the Sabre CERT exploration ran the same day the keys landed and is archived to [changelog.md](changelog.md) with caveats — headline finding: **real shopping, mock booking** (Flight Search API v1 entitled with real priced itineraries; `createBooking` entitlement-blocked at `PassengerDetailsRQ`; full matrix and demo recommendations in `specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md`). Its independent validation returned **FAIL** — see Open follow-ups below. The deal-manufacturing upsell engine stays backlogged in [BACKLOG.md](BACKLOG.md) (revisit after Phase 23, minimum slice `extend_stay`); its API-entitlement gate is now answered **go**. Next in execution order is Phase 22, but the notes doc recommends a **replan first**: promote real Sabre *search* into the demo path and re-scope Phase 24's flip to search-only, since real booking is an entitlement wall, not a config flip.
 
-## Phase 25: Sabre CERT exploration — size up what the real keys can do [x] COMPLETE (implementation; manual QA pending)
-
-**Explore-only** — the `SABRE_MODE=real` flip and the real-offset-times-to-Pacific conversion stay in Phase 24. With the developer user + API key now in `config/.env`, authenticate against the Sabre CERT environment and probe every API those credentials are entitled to: start from the endpoints the client layer already models (Bargain Finder Max v5 search; Booking Management create/cancel/modify — `backend/api/sabre/`), then sweep the "Try it Out"-flagged REST set the kickoff instructions describe. Deliverables: (a) an updated API-notes doc (successor to `specs/2026-07-08-sabre-tools/sabre-api-notes.md`) recording what's reachable, request/response deltas against the mock shapes, and entitlement/rate limits; (b) the real client exercised against CERT for at least search + create + cancel so the Phase 24 flip is a config change, not a debugging session; (c) an answer to the Flight Search API v1 entitlement question that gates the backlogged deal engine (see BACKLOG.md). Mind the kickoff caveat that test credentials are periodically reset.
-
-> **TODO (verbatim, 2026-07-13 triage):** I now have the developer user and API key and created an app within Saber. Your job is to explore all the APIs that you have access to in the config.env and figure out which of these could work in sizing up what's possible with this hackathon. This is the most important piece of the entire project to get right. We already got the vocal bridge part right. Now we have to incorporate Saber.
->  sabre api key and user now in ./config/.env
-> ./about/Kickoff _ Instructions for Hackathon.pdf
-> ```
-> using Application Credentials with REST APIs
-> Application credentials allow you to use a test user ID and password with certain REST APIs—specifically those marked with the Try it Out flag at the top of the page.
-> The Try it Out functionality is available in the Reference documentation. When authenticating, you can select your application credentials.
-> The token is generated automatically and is not linked to any production account.
-> You can also use your own application credentials.
-> A maximum of two applications can be stored per account, including the automated test credentials.
-> You may need to create new test credentials as they are periodically reset.
-> Further information on Authentication can be found here Authentication for Sabre APIs | Developer Hub
-> ```
+**Open follow-ups (from Phase 25's validation, 2026-07-13):**
+- Fix the two failing validation criteria — the PNR-cleanup guarantee in `backend/tests/test_sabre_cert.py` and the incomplete Try-it-Out sweep — triaged in [TODO.md](../TODO.md); four `→ DECISION:` lines there block the sweep work. Re-validate after.
+- Different-day / post-credential-reset `pytest -m cert` re-run — event-day morning (2026-07-18) at the latest.
+- Full report: `specs/2026-07-13-sabre-cert-exploration/validation-report.md`.
 
 ## Phase 22: Cascade dashboard, part 1 — repair surfaces on the Phase 21 frame
 
