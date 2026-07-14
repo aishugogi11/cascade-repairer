@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 25 — Sabre CERT exploration: size up what the real keys can do
+**Completed:** 2026-07-13 (implementation merged, PR #38; independent validation returned **FAIL** — fixes triaged into TODO.md, re-validation pending) · **Spec:** [specs/2026-07-13-sabre-cert-exploration/](2026-07-13-sabre-cert-exploration/)
+
+The hackathon credentials were exercised live against Sabre CERT and the verdict is **real shopping, mock booking**: v2 client-credentials auth verified with a documented env bridge for the Phase 24 flip, Flight Search API v1 entitled and returning real priced itineraries (the deal-engine gate answers **go**), BFM v5 empty on this PCC and `createBooking` entitlement-blocked (`PassengerDetailsRQ` unauthorized — the event-day ask to Sabre staff), a latent dead-`POS`-field bug found in the frozen `shapes.py` — all recorded in `sabre-cert-notes.md` with re-runnable probes and a six-test CERT-marked pytest suite that leaves hermetic CI untouched — while the validator's two failing criteria (a PNR-cleanup guarantee hole in the create tripwire, an incomplete Try-it-Out sweep) plus the different-day re-run remain open in TODO.md behind four pending decisions.
+
 ## Phase 21 — Voice booking page: the pre-disruption beat on screen
 **Completed:** 2026-07-12 (manual QA passed) · **Spec:** [specs/2026-07-12-voice-booking-page/](2026-07-12-voice-booking-page/)
 
