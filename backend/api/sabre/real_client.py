@@ -28,6 +28,10 @@ class RealSabreClient:
         self.base_url = os.environ.get("SABRE_BASE_URL")
         self.client_secret = os.environ.get("SABRE_CLIENT_SECRET")
         self._token: Optional[str] = None
+        # Lazy in-process cache (single Cloud Run instance, the standing
+        # scope decision) — the supported-markets list changes on CERT's
+        # timescale, not the demo's.
+        self._markets: Optional[shapes.SupportedMarketsResponse] = None
 
     def _require_config(self) -> None:
         if not self.base_url or not self.client_secret:
@@ -67,6 +71,43 @@ class RealSabreClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def _get(self, path: str, params: dict) -> dict:
+        """The _post posture for query-param APIs: same token handling
+        (per-instance cache, minted lazily), same raise_for_status."""
+        token = await self._get_token()
+        async with httpx.AsyncClient(base_url=self.base_url) as http:
+            resp = await http.get(
+                path,
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def instaflights_search(
+        self, request: shapes.InstaFlightsRequest
+    ) -> shapes.InstaFlightsResponse:
+        """GET /v1/shop/flights — the entitled search API on this PCC.
+        onlineitinerariesonly=Y triggers a CERT-side 500 (verified-live,
+        Phase 25), so N is merged in unconditionally — never overridable."""
+        params = request.model_dump()
+        params["onlineitinerariesonly"] = "N"
+        data = await self._get("/v1/shop/flights", params)
+        return shapes.InstaFlightsResponse.model_validate(data)
+
+    async def supported_markets(self) -> shapes.SupportedMarketsResponse:
+        """GET /v1/lists/supported/shop/flights/origins-destinations —
+        the city pairs InstaFlights carries, fetched lazily and cached on
+        the instance. destinationcountry=US is the verified-live probe form
+        (the demo's routes are domestic)."""
+        if self._markets is None:
+            data = await self._get(
+                "/v1/lists/supported/shop/flights/origins-destinations",
+                {"destinationcountry": "US"},
+            )
+            self._markets = shapes.SupportedMarketsResponse.model_validate(data)
+        return self._markets
 
     async def flight_search(
         self, request: shapes.FlightSearchRequest

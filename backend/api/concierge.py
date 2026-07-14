@@ -38,7 +38,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from agents import Agent, Runner, function_tool
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from api import concurrency_core as core
 from api.concurrency_agent import session_snapshot
@@ -46,6 +46,7 @@ from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
 from api.sabre import client as sabre_client
 from api.sabre import shapes
+from api.sabre.airport_tz import airport_zone
 from api.sabre_tools import launch_trip_repairs
 
 logger = logging.getLogger(__name__)
@@ -228,9 +229,12 @@ def _spoken_date(d) -> str:
 
 
 class FlightOption(BaseModel):
-    """One speakable flight choice, parsed from a Bargain Finder Max
-    itinerary. `spoken` is the clause the agent reads aloud; the structured
-    fields feed the booking rows (and the status endpoint's detail payload)."""
+    """One speakable flight choice, parsed from an InstaFlights itinerary
+    (Phase 27; the mock serves the same shape). `spoken` is the clause the
+    agent reads aloud; the structured fields feed the booking rows (and the
+    status endpoint's detail payload). All dates and times are Pacific —
+    converted from airport-local upstream in real mode, declared-Pacific
+    fiction in mock mode (the Phase 19 discipline)."""
 
     option_number: int
     airline: str
@@ -240,10 +244,20 @@ class FlightOption(BaseModel):
     depart_date: str  # YYYY-MM-DD
     depart_time: str  # HH:MM
     arrive_time: str  # HH:MM
+    # PT arrival date — a converted red-eye can land the next PT day.
+    # Defaults to depart_date so pre-Phase-27 construction sites and stored
+    # payloads stay valid (additive change).
+    arrive_date: str = ""
     stops: int
     price: float
     currency: str
     spoken: str
+
+    @model_validator(mode="after")
+    def _arrive_date_defaults_to_depart_date(self):
+        if not self.arrive_date:
+            self.arrive_date = self.depart_date
+        return self
 
 
 # session_name -> the options the agent just offered (the _SESSION_TRIPS
@@ -287,6 +301,14 @@ _SEARCH_ERROR_LINE = (
     "ask me again."
 )
 
+# The speakable redirect for a city pair the demo system's search doesn't
+# carry (requirements, decision 4) — an honest answer, not an error, so no
+# silent mock swap and no apology for anything technical.
+_UNSUPPORTED_MARKET_LINE = (
+    "I can't search that route in the demo system — want to try another "
+    "one, something like San Francisco to New York?"
+)
+
 
 def _spoken_clock(time_str: str) -> str:
     """'08:00:00-05:00' (or '08:00') -> '8 AM' / '11:30 AM' — times are read
@@ -309,37 +331,63 @@ def _spoken_option(option_number: int, stops: int, depart: str, arrive: str,
     )
 
 
-def _parse_flight_options(
-    search: shapes.FlightSearchResponse, origin: str, destination: str,
-    depart_date: str,
+def _parse_instaflights_options(
+    search: shapes.InstaFlightsResponse, origin: str, destination: str,
 ) -> List[FlightOption]:
-    """Resolve the GIR reference chain (itinerary -> leg -> schedule) into at
-    most _MAX_SPOKEN_OPTIONS speakable options."""
-    gir = search.groupedItineraryResponse
-    schedules = {s.id: s for s in gir.scheduleDescs}
-    legs = {l.id: l for l in gir.legDescs}
-    options = []
-    itineraries = gir.itineraryGroups[0].itineraries if gir.itineraryGroups else []
-    for itinerary in itineraries[:_MAX_SPOKEN_OPTIONS]:
-        schedule = schedules[legs[itinerary.legs[0].ref].schedules[0].ref]
-        fare = itinerary.pricingInformation[0].fare.totalFare
+    """Walk PricedItineraries in response order into at most
+    _MAX_SPOKEN_OPTIONS speakable options.
+
+    InstaFlights times are offset-less airport-local, so each end is
+    localized to its own airport's zone and converted to Pacific before
+    anything is spoken or stored (the Phase 19 discipline — speaking
+    '2026-XX-XXT07:20:00' at JFK as Pacific would be the old bug class).
+    An airport missing from the timezone table skips that itinerary in
+    favor of the next (requirements, decision 2) — never a mangled time."""
+    options: List[FlightOption] = []
+    for itinerary in search.PricedItineraries:
+        if len(options) >= _MAX_SPOKEN_OPTIONS:
+            break
+        segments = (
+            itinerary.AirItinerary.OriginDestinationOptions
+            .OriginDestinationOption[0].FlightSegment
+        )
+        if not segments:
+            continue
+        first, last = segments[0], segments[-1]
+        depart_zone = airport_zone(first.DepartureAirport.LocationCode)
+        arrive_zone = airport_zone(last.ArrivalAirport.LocationCode)
+        if depart_zone is None or arrive_zone is None:
+            continue
+        depart_pt = (
+            datetime.fromisoformat(first.DepartureDateTime)
+            .replace(tzinfo=depart_zone).astimezone(_PACIFIC)
+        )
+        arrive_pt = (
+            datetime.fromisoformat(last.ArrivalDateTime)
+            .replace(tzinfo=arrive_zone).astimezone(_PACIFIC)
+        )
+        # Connections count as stops too: segment-internal StopQuantity
+        # plus one per plane change.
+        stops = sum(seg.StopQuantity for seg in segments) + len(segments) - 1
+        fare = itinerary.AirItineraryPricingInfo.ItinTotalFare.TotalFare
         number = len(options) + 1
         options.append(
             FlightOption(
                 option_number=number,
-                airline=schedule.carrier.marketing,
-                flight_number=schedule.carrier.marketingFlightNumber,
+                airline=first.MarketingAirline.Code,
+                flight_number=first.FlightNumber,
                 origin=origin,
                 destination=destination,
-                depart_date=depart_date,
-                depart_time=schedule.departure.time[:5],
-                arrive_time=schedule.arrival.time[:5],
-                stops=schedule.stopCount,
-                price=fare.totalPrice,
-                currency=fare.currency,
+                depart_date=depart_pt.strftime("%Y-%m-%d"),
+                depart_time=depart_pt.strftime("%H:%M"),
+                arrive_time=arrive_pt.strftime("%H:%M"),
+                arrive_date=arrive_pt.strftime("%Y-%m-%d"),
+                stops=stops,
+                price=fare.Amount,
+                currency=fare.CurrencyCode,
                 spoken=_spoken_option(
-                    number, schedule.stopCount, schedule.departure.time,
-                    schedule.arrival.time, fare.totalPrice,
+                    number, stops, depart_pt.strftime("%H:%M"),
+                    arrive_pt.strftime("%H:%M"), fare.Amount,
                 ),
             )
         )
@@ -362,36 +410,21 @@ async def search_flights_impl(
             "are you headed, and when?"
         )
     try:
-        search = await sabre_client.flight_search(
-            shapes.FlightSearchRequest(
-                OTA_AirLowFareSearchRQ=shapes.OTAAirLowFareSearchRQ(
-                    OriginDestinationInformation=[
-                        shapes.OriginDestinationInformation(
-                            RPH="1",
-                            DepartureDateTime=f"{depart_date}T08:00:00",
-                            OriginLocation=shapes.AirportLocation(
-                                LocationCode=origin
-                            ),
-                            DestinationLocation=shapes.AirportLocation(
-                                LocationCode=destination
-                            ),
-                        )
-                    ],
-                    TravelerInfoSummary=shapes.TravelerInfoSummary(
-                        AirTravelerAvail=[
-                            shapes.AirTravelerAvail(
-                                PassengerTypeQuantity=[
-                                    shapes.PassengerTypeQuantity(
-                                        Code="ADT", Quantity=1
-                                    )
-                                ]
-                            )
-                        ]
-                    ),
-                )
+        # Best-effort market check (requirements, decision 4): a pair the
+        # sandbox doesn't carry gets the honest redirect instead of a search
+        # that can only mock-swap. None (mock mode, or the fetch failed)
+        # means skip validation and search anyway.
+        markets = await sabre_client.supported_markets()
+        if markets and (origin, destination) not in markets:
+            return _UNSUPPORTED_MARKET_LINE
+        search = await sabre_client.instaflights_search(
+            shapes.InstaFlightsRequest(
+                origin=origin,
+                destination=destination,
+                departuredate=depart_date,
             )
         )
-        options = _parse_flight_options(search, origin, destination, depart_date)
+        options = _parse_instaflights_options(search, origin, destination)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         return _SEARCH_ERROR_LINE
     if not options:
@@ -442,6 +475,9 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
 
     dep_h, dep_m = int(option.depart_time[:2]), int(option.depart_time[3:5])
     arr_h, arr_m = int(option.arrive_time[:2]), int(option.arrive_time[3:5])
+    # The arrival's own PT date, not the departure's: a converted red-eye
+    # lands the next PT day, and end_ts must never precede start_ts.
+    arrive = date.fromisoformat(option.arrive_date or option.depart_date)
     item = ItineraryItem(
         trip_id=trip.trip_id,
         type="flight",
@@ -450,7 +486,7 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
         provider_ref=f"VOICE-FLIGHT-{uuid.uuid4().hex[:6].upper()}",
         start_ts=datetime(depart.year, depart.month, depart.day, dep_h, dep_m,
                           tzinfo=_PACIFIC),
-        end_ts=datetime(depart.year, depart.month, depart.day, arr_h, arr_m,
+        end_ts=datetime(arrive.year, arrive.month, arrive.day, arr_h, arr_m,
                         tzinfo=_PACIFIC),
         location=f"{option.origin}-{option.destination}",
         price=option.price,

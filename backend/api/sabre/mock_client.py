@@ -125,6 +125,66 @@ class MockSabreClient:
             )
         )
 
+    # Same semantic spread as the BFM variants above — nonstop/one-stop,
+    # morning/midday, matching price points — so the guided-booking flow in
+    # SABRE_MODE=mock behaves as before in spirit. Times keep the mock's
+    # Pacific wall-clock fiction, expressed in the InstaFlights offset-less
+    # airport-local convention: (depart, arrive, stops, price).
+    _INSTA_VARIANTS = [
+        ("08:00:00", "10:05:00", 0, 187.6),
+        ("11:30:00", "13:40:00", 0, 242.0),
+        ("06:15:00", "11:20:00", 1, 155.0),
+    ]
+
+    async def instaflights_search(
+        self, request: shapes.InstaFlightsRequest
+    ) -> shapes.InstaFlightsResponse:
+        """InstaFlights — three deterministic priced itineraries."""
+        await self._lag()
+        origin = request.origin.upper()
+        dest = request.destination.upper()
+        day = request.departuredate
+        flight_number = int(hashlib.sha256(f"{origin}{dest}".encode()).hexdigest(), 16) % 900 + 100
+        itineraries = []
+        for i, (depart, arrive, stops, price) in enumerate(self._INSTA_VARIANTS):
+            itineraries.append(
+                shapes.PricedItinerary(
+                    AirItinerary=shapes.AirItinerary(
+                        OriginDestinationOptions=shapes.OriginDestinationOptions(
+                            OriginDestinationOption=[
+                                shapes.OriginDestinationOption(
+                                    FlightSegment=[
+                                        shapes.FlightSegment(
+                                            DepartureAirport=shapes.SegmentAirport(
+                                                LocationCode=origin
+                                            ),
+                                            ArrivalAirport=shapes.SegmentAirport(
+                                                LocationCode=dest
+                                            ),
+                                            DepartureDateTime=f"{day}T{depart}",
+                                            ArrivalDateTime=f"{day}T{arrive}",
+                                            FlightNumber=flight_number + i * 7,
+                                            MarketingAirline=shapes.MarketingAirline(
+                                                Code="AA"
+                                            ),
+                                            StopQuantity=stops,
+                                        )
+                                    ]
+                                )
+                            ]
+                        )
+                    ),
+                    AirItineraryPricingInfo=shapes.AirItineraryPricingInfo(
+                        ItinTotalFare=shapes.ItinTotalFare(
+                            TotalFare=shapes.InstaTotalFare(
+                                Amount=price, CurrencyCode="USD"
+                            )
+                        )
+                    ),
+                )
+            )
+        return shapes.InstaFlightsResponse(PricedItineraries=itineraries)
+
     async def create_booking(
         self, request: shapes.CreateBookingRequest
     ) -> shapes.CreateBookingResponse:
