@@ -180,6 +180,39 @@ The backend runs on **Cloud Run** (GCP project `vocal-bridge-hackathon`, `us-wes
 
 CI/CD is Cloud Build, driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml`: validate config → ensure BigQuery dataset → build image → **pytest inside the built image** (failure blocks the deploy) → deploy. The pipeline fires on a **GitHub PR from a `vb/feature/*` branch into `vb/dev`** — direct pushes do not build. Provisioning and console-only setup steps: [`backend/devops/README.md`](backend/devops/README.md).
 
+## The one-page demo: `/v1/cascade/` (Phase 23)
+
+The complete book → break → consent → repair → callback experience runs from the
+cascade dashboard, with Josh as both operator and traveler:
+
+1. **Book by voice, free of quota** — tap the center-column orb (the
+   `/v1/web_call/` wiring on-page) and book through the guided Concierge flow;
+   real InstaFlights fares on live pairs, mock PNR writes. The booked trip
+   auto-appears on the page within ~4 s.
+2. **Cancel flight → cascade** does two things only: breaks the flight (screen
+   turns red) and places **Call 1**, which describes the real trip and asks the
+   traveler for consent to repair. **No repairs launch at click time** — the
+   page shows "waiting for the traveler's go-ahead" with no running clock.
+3. **The spoken "yes" launches the repairs**: a backend watcher polls the VB
+   session log for Call 1's transcript, LLM-classifies the answer, and only an
+   unambiguous yes fires the cascade — the 60-second recovery timer starts
+   here, at the go-ahead. No/ambiguous/timeout stands down on-page and re-arms
+   the Cancel trigger.
+4. **Call 2 — the results callback** — fires when the backend's repair tasks
+   land (~35 s), its script composed from the actual repair results (rebooked
+   flight, price delta, re-checked legs).
+
+Quota: **2 calls per full run** (booking is web-voice, free). Mid-repair, ask
+the orb "how's my trip?" — the Concierge's `trip_status` tool reads the live
+statuses across sessions. The right column's **Sabre Live Search** panel shows
+the shopping layer's recent operations (route, real/mock/fallback, outcome).
+
+Local mock walkthrough (zero quota, `SABRE_MODE=mock`, VB env unset): the page
+serves at `/v1/cascade/`, booking works through the orb only with VB env set —
+without it, drive the Concierge via the `/v1/web_call/query` curl seam and
+watch the page adopt the trip; the disrupt endpoints 503 cleanly without the
+VB env.
+
 ## Demo-day: check which flight pairs are live
 
 The guided-booking and repair flows shop **real** Sabre fares (`SABRE_MODE=real`

@@ -79,7 +79,11 @@ BASE_INSTRUCTIONS = (
     "for repairs to finish and never refuse other questions while they run; "
     "keep helping. You cannot send notifications or follow up on your own — "
     "never promise to 'let them know' when something finishes; instead "
-    "invite the traveler to ask again in a moment. When there is no booked "
+    "invite the traveler to ask again in a moment. When the traveler asks "
+    "how their trip or its repairs are going ('how's my trip?'), call the "
+    "trip_status tool and answer from its result — it is the authoritative "
+    "live read, even when your live status section shows nothing (repairs "
+    "may have run under another session). When there is no booked "
     "trip and the traveler wants to plan or book one, follow the guided "
     "flow: confirm the destination and departure date in one short turn, "
     "then call search_flights — origin airport code (assume MSP unless the "
@@ -620,6 +624,77 @@ async def complete_trip_impl(session_id: str) -> str:
     )
 
 
+# --- trip_status (Phase 23) — the honest "how's my trip?" read ----------------
+
+# Statuses and item types in the traveler's words — the reply is spoken.
+_STATUS_SPOKEN = {
+    "planned": "planned",
+    "booked": "booked and confirmed",
+    "broken": "disrupted",
+    "repairing": "being repaired right now",
+    "fixed": "repaired and confirmed",
+    "cancelled": "cancelled",
+}
+_TYPE_SPOKEN = {
+    "flight": "flight",
+    "hotel": "hotel",
+    "ground": "ride",
+    "dining": "dinner reservation",
+    "experience": "tour",
+}
+
+# Severity order: problems first, then progress, then the quiet statuses.
+_STATUS_ORDER = ("broken", "repairing", "fixed", "booked", "planned", "cancelled")
+
+
+def _spoken_list(names: List[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+async def trip_status_impl(session_id: str) -> str:
+    """One fresh read of the pinned trip's item statuses — the tool body,
+    kept a plain function for tests. The pinned TripContext caches static
+    facts; statuses move underneath it (and repairs may run under another
+    session id entirely — the page-triggered disrupt flow), so this reads
+    the repository every call instead of the cache or the snapshot.
+    Failures return speakable strings — a raising tool kills the turn."""
+    context = _SESSION_TRIPS.get(session_id)
+    if context is None:
+        return _NO_TRIP_SPOKEN
+    try:
+        success, items, _error = await asyncio.to_thread(
+            itinerary_items.list_items_for_trip, context.trip.trip_id
+        )
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        success, items = False, None
+    if not success or not items:
+        return (
+            "I can't read your trip's live status right now — give me a "
+            "second and ask me again."
+        )
+
+    groups: Dict[str, List[str]] = {}
+    for item in items:
+        groups.setdefault(item.status, []).append(
+            _TYPE_SPOKEN.get(item.type, item.type)
+        )
+    clauses = []
+    for status in _STATUS_ORDER:
+        names = groups.get(status)
+        if not names:
+            continue
+        verb = "is" if len(names) == 1 else "are"
+        clauses.append(
+            f"your {_spoken_list(names)} {verb} {_STATUS_SPOKEN[status]}"
+        )
+    summary = "; ".join(clauses)
+    if any(item.status in ("broken", "repairing") for item in items):
+        return f"Here's your trip right now: {summary}."
+    return f"Here's your trip right now: {summary}. Everything is on track."
+
+
 def _today_line() -> str:
     """Today's date for the instructions — without it the model cannot turn
     'leaving on Monday' into YYYY-MM-DD. Rendered fresh per build_agent call
@@ -664,6 +739,12 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         the traveler agrees; it returns immediately."""
         return await complete_trip_impl(session_id)
 
+    async def _trip_status() -> str:
+        """The live status of every part of the traveler's booked trip,
+        read fresh from the bookings. Use whenever the traveler asks how
+        their trip or its repairs are going."""
+        return await trip_status_impl(session_id)
+
     trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
@@ -677,6 +758,7 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
             function_tool(_search_flights, name_override="search_flights"),
             function_tool(_book_flight, name_override="book_flight"),
             function_tool(_complete_trip, name_override="complete_trip"),
+            function_tool(_trip_status, name_override="trip_status"),
         ],
     )
 

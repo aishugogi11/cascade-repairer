@@ -11,7 +11,9 @@ judging. The judges see the cascade either way.
 """
 import logging
 import os
-from typing import Any, Optional, Set, Tuple
+from collections import deque
+from datetime import datetime, timezone
+from typing import Any, List, Optional, Set, Tuple
 
 from api.sabre import shapes
 from api.sabre.mock_client import MockSabreClient
@@ -22,6 +24,74 @@ logger = logging.getLogger(__name__)
 _mock = MockSabreClient()
 _real = RealSabreClient()
 
+# --- live-search log (Phase 23) — the dashboard's search panel feed ------------
+# A bounded in-process ring of the most recent *search* operations (shopping
+# only — booking ops are writes, not searches), recorded at the dispatch
+# boundary so it reflects what actually ran: real, mock, or a real-mode
+# fallback. Best-effort by contract — recording can never break a search.
+
+_SEARCH_OPS = {"flight_search", "instaflights_search"}
+_SEARCH_LOG: deque = deque(maxlen=25)
+
+
+def _search_route(request: Any) -> Tuple[Optional[str], Optional[str]]:
+    """(route, date) summaries, best-effort across the two search request
+    shapes: InstaFlights carries flat origin/destination/departuredate; BFM
+    nests them under OTA_AirLowFareSearchRQ.OriginDestinationInformation."""
+    origin = getattr(request, "origin", None)
+    destination = getattr(request, "destination", None)
+    depart = getattr(request, "departuredate", None)
+    if origin and destination:
+        return f"{origin} → {destination}", depart
+    try:
+        legs = request.OTA_AirLowFareSearchRQ.OriginDestinationInformation
+        first = legs[0]
+        return (
+            f"{first.OriginLocation.LocationCode} → "
+            f"{first.DestinationLocation.LocationCode}",
+            getattr(first, "DepartureDateTime", None),
+        )
+    except Exception:  # noqa: BLE001 — summary only, never load-bearing
+        return None, None
+
+
+def _search_outcome(response: Any) -> str:
+    """A short outcome label from either search response shape — the
+    itinerary count when it's readable, 'ok' when it isn't."""
+    try:
+        if isinstance(response, shapes.InstaFlightsResponse):
+            count = len(response.PricedItineraries)
+        else:
+            count = response.groupedItineraryResponse.statistics.itineraryCount
+    except Exception:  # noqa: BLE001
+        return "ok"
+    return "no fares" if count == 0 else f"{count} fares"
+
+
+def _note_search(operation: str, request: Any, mode: str, response: Any) -> None:
+    """Record one search into the ring — newest first. Any failure logs at
+    debug and drops the entry; the search result is already on its way."""
+    if operation not in _SEARCH_OPS:
+        return
+    try:
+        route, depart = _search_route(request)
+        _SEARCH_LOG.appendleft({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "op": operation,
+            "mode": mode,
+            "route": route,
+            "date": depart,
+            "outcome": _search_outcome(response),
+        })
+    except Exception:  # noqa: BLE001 — never load-bearing
+        logger.debug("search-log recording failed", exc_info=True)
+
+
+def search_log() -> List[dict]:
+    """The recent searches, newest first — the /v1/sabre_tools/search_log
+    payload."""
+    return list(_SEARCH_LOG)
+
 
 def sabre_mode() -> str:
     """The runtime flag, read per call. Anything but 'real' means mock."""
@@ -29,16 +99,22 @@ def sabre_mode() -> str:
 
 
 async def _dispatch(operation: str, request: Any) -> Any:
+    mode = "mock"
     if sabre_mode() == "real":
         try:
-            return await getattr(_real, operation)(request)
+            response = await getattr(_real, operation)(request)
+            _note_search(operation, request, "real", response)
+            return response
         except Exception as exc:  # noqa: BLE001 — any real-mode failure falls back
             logger.warning(
                 "Sabre real-mode call %s failed (%s: %s) — falling back to "
                 "the mock for this call",
                 operation, type(exc).__name__, exc,
             )
-    return await getattr(_mock, operation)(request)
+            mode = "fallback"
+    response = await getattr(_mock, operation)(request)
+    _note_search(operation, request, mode, response)
+    return response
 
 
 async def flight_search(

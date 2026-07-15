@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api import concurrency_core as core
 from api import repair_tools
 from api.concurrency_core import RepairSpec
+from api.sabre import client as sabre_client
 from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
 
@@ -296,6 +297,15 @@ async def repair_trip(req: RepairTripRequest):
         "pending_tasks": session.pending(),
         "completed_events": [e.model_dump() for e in session.events],
     }
+
+@sabre_tools.get("/search_log")
+def search_log():
+    """The cascade dashboard's live-search panel feed (Phase 23): the most
+    recent Sabre search operations — op, route, mode (real / mock /
+    fallback), outcome — from the dispatcher's in-process ring buffer,
+    newest first. Gated like every JSON endpoint; in-memory only."""
+    return {"searches": sabre_client.search_log()}
+
 
 @sabre_tools.get("/latest_trip_id")
 def latest_trip_id():
