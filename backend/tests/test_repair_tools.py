@@ -9,14 +9,20 @@ flips its item (to `booked`).
 """
 import asyncio
 import json
+import logging
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from api import repair_tools
+from api import flight_options, repair_tools
 from api.helpers.bigquery_helper import bq_helper
 from api.sabre import client as sabre_client
+from api.sabre import shapes
+
+# Computed travel date (the Phase 26 rule) — never a literal.
+_DAY = (date.today() + timedelta(days=21)).isoformat()
 
 
 @pytest.fixture
@@ -96,30 +102,160 @@ def test_search_and_book_flight_books_and_flips_to_booked(bq):
     assert raw["booking"]["flights"][0]["flightStatusName"] == "Confirmed"
 
 
-def test_rebook_flight_cancels_old_ref_and_writes_booking_only(bq):
+def _mock_options(origin, dest, day):
+    """The parsed mock InstaFlights options for a route/date — the same three
+    the re-shop sees in SABRE_MODE=mock."""
+    request = shapes.InstaFlightsRequest(
+        origin=origin, destination=dest, departuredate=day
+    )
+    response = asyncio.run(sabre_client._mock.instaflights_search(request))
+    return flight_options._parse_instaflights_options(response, origin, dest)
+
+
+def test_rebook_flight_reshops_real_instaflights_and_writes_flight_repair(bq):
+    """Phase 29: the re-shop parses real InstaFlights (the mock serves the
+    same shape in SABRE_MODE=mock), stores the chosen option + the
+    alternatives it beat + the original fare, and the PNR write stays mock —
+    still a single bookings insert (the cascade unit owns the status flip)."""
     bq.select.return_value = (True, [booking_row()], None)
 
     payload = asyncio.run(repair_tools._rebook_flight(
-        "t-1", "i-flight", "MSP", "SFO", "2026-07-18"
+        "t-1", "i-flight", "MSP", "SFO", _DAY,
+        original_price=500.0, original_currency="USD",
+        original_arrive_time="10:05",
     ))
 
     assert_booking_insert_only(bq.dml, "i-flight")  # single writer: no status DML
     assert payload["cancelled_ref"] == "GLEBNY"  # from the existing booking row
     assert payload["confirmation_ref"] != "GLEBNY"  # a new PNR
     assert "item_status" not in payload
-    assert payload["departure_date"] == "2026-07-18"
+    assert payload["from_mock_fallback"] is False  # real parse succeeded
+    assert payload["price_delta"] == payload["price"] - 500.0
 
     raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
-    assert raw["cancelled"]["booking"]["bookingId"] == "GLEBNY"
-    assert raw["created"]["confirmationId"] == payload["confirmation_ref"]
+    assert raw["source"] == "flight_repair"
+    assert raw["option"]["flight_number"] > 0  # a parsed itinerary
+    assert raw["option"]["origin"] == "MSP" and raw["option"]["destination"] == "SFO"
+    assert raw["option"]["price"] == payload["price"]
+    assert len(raw["alternatives"]) >= 1  # it beat at least one other
+    assert raw["option"] not in raw["alternatives"]  # the chosen isn't its own alt
+    assert raw["original_price"] == 500.0 and raw["original_currency"] == "USD"
+    assert raw["from_mock_fallback"] is False
+    # The mock PNR write is carried unchanged under `rebooked`.
+    assert raw["rebooked"]["cancelled"]["booking"]["bookingId"] == "GLEBNY"
+    assert raw["rebooked"]["created"]["confirmationId"] == payload["confirmation_ref"]
+
+
+def test_rebook_flight_chooses_a_different_flight_than_the_cancelled_one(bq):
+    """Selection excludes the cancelled (airline, flight_number) when the
+    alternatives allow — the rebooked flight is a genuinely different one."""
+    bq.select.return_value = (True, [booking_row()], None)
+    options = _mock_options("MSP", "SFO", _DAY)
+    cancelled = (options[0].airline, options[0].flight_number)
+
+    payload = asyncio.run(repair_tools._rebook_flight(
+        "t-1", "i-flight", "MSP", "SFO", _DAY,
+        original_price=200.0, original_arrive_time=options[0].arrive_time,
+        cancelled_flight=cancelled,
+    ))
+
+    assert payload["flight_number"] != cancelled[1]
+    raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
+    assert (raw["option"]["airline"], raw["option"]["flight_number"]) != cancelled
 
 
 def test_rebook_flight_without_existing_booking_uses_placeholder_ref(bq):
     payload = asyncio.run(repair_tools._rebook_flight(
-        "t-1", "i-flight", "MSP", "SFO", "2026-07-18"
+        "t-1", "i-flight", "MSP", "SFO", _DAY
     ))
     assert payload["cancelled_ref"] == "UNKNWN"
     assert payload["confirmation_ref"]
+
+
+# --- selection: closest arrival, exclude cancelled, tolerate the edges ----------
+
+def _opt(number, flight, arrive, airline="AA", price=200.0):
+    return flight_options.FlightOption(
+        option_number=number, airline=airline, flight_number=flight,
+        origin="JFK", destination="LAX", depart_date=_DAY, depart_time="08:00",
+        arrive_time=arrive, stops=0, price=price, currency="USD",
+        spoken=f"Option {number}.",
+    )
+
+
+def test_pick_replacement_returns_closest_arrival():
+    options = [_opt(1, 100, "15:00"), _opt(2, 200, "10:10"), _opt(3, 300, "12:00")]
+    chosen = repair_tools._pick_replacement(options, None, "10:00")
+    assert chosen.flight_number == 200  # 10:10 is nearest 10:00
+
+
+def test_pick_replacement_excludes_the_cancelled_flight():
+    options = [_opt(1, 100, "10:05"), _opt(2, 200, "10:40")]
+    chosen = repair_tools._pick_replacement(options, ("AA", 100), "10:00")
+    assert chosen.flight_number == 200  # 100 is closer but is the cancelled one
+
+
+def test_pick_replacement_none_cancelled_and_none_arrival_takes_first():
+    options = [_opt(1, 100, "09:00"), _opt(2, 200, "23:30")]
+    assert repair_tools._pick_replacement(options, None, None).flight_number == 100
+
+
+def test_pick_replacement_all_same_number_falls_back_to_closest_over_all():
+    """Excluding the cancelled number would empty the list — keep them all and
+    pick closest-arrival (the best-effort 'where possible')."""
+    options = [_opt(1, 500, "15:00"), _opt(2, 500, "10:10")]
+    chosen = repair_tools._pick_replacement(options, ("AA", 500), "10:00")
+    assert chosen.arrive_time == "10:10"
+
+
+def test_pick_replacement_arrival_distance_wraps_the_clock():
+    options = [_opt(1, 100, "00:10"), _opt(2, 200, "22:00")]
+    chosen = repair_tools._pick_replacement(options, None, "23:55")
+    assert chosen.flight_number == 100  # 00:10 is 15 min from 23:55, not 1425
+
+
+# --- empty re-shop -> mock fallback, never a stall ------------------------------
+
+def test_empty_reshop_falls_back_to_mock_and_still_writes(bq, monkeypatch, caplog):
+    """decision 3: the dispatcher returns an honest empty on the documented
+    no-results 404 (it does not mock-swap), so the re-shop can reach here with
+    zero options. It calls the mock directly, flags from_mock_fallback, logs
+    the route, and still writes a booking row — the cascade never stalls."""
+    monkeypatch.setenv("SABRE_MODE", "real")
+    bq.select.return_value = (True, [booking_row()], None)
+
+    async def empty(request):
+        return shapes.InstaFlightsResponse(PricedItineraries=[])
+
+    monkeypatch.setattr(sabre_client._real, "instaflights_search", empty)
+
+    with caplog.at_level(logging.WARNING):
+        payload = asyncio.run(repair_tools._rebook_flight(
+            "t-1", "i-flight", "MSP", "SFO", _DAY, original_price=300.0,
+        ))
+
+    assert payload["from_mock_fallback"] is True
+    assert_booking_insert_only(bq.dml, "i-flight")  # a real booking row still lands
+    raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
+    assert raw["from_mock_fallback"] is True
+    assert raw["option"]["flight_number"] > 0  # the mock's option, parsed
+    assert f"MSP-SFO {_DAY}" in caplog.text and "using mock" in caplog.text
+
+
+def test_empty_reshop_failed_write_still_raises(bq, monkeypatch):
+    """The standing rule survives the fallback: a 0-row/failed booking write
+    raises even when the mock served the options."""
+    monkeypatch.setenv("SABRE_MODE", "real")
+
+    async def empty(request):
+        return shapes.InstaFlightsResponse(PricedItineraries=[])
+
+    monkeypatch.setattr(sabre_client._real, "instaflights_search", empty)
+    bq.dml.return_value = (False, 0, "quota exceeded")
+    with pytest.raises(RuntimeError, match="booking insert failed"):
+        asyncio.run(repair_tools._rebook_flight(
+            "t-1", "i-flight", "MSP", "SFO", _DAY,
+        ))
 
 
 def test_shift_hotel_dates_moves_stay_and_writes_booking_only(bq):

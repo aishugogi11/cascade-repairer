@@ -10,8 +10,8 @@ Two endpoints:
 """
 import asyncio
 import uuid
-from datetime import date, datetime
-from typing import Optional
+from datetime import date, datetime, timezone
+from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
@@ -158,6 +158,34 @@ def _iso_date(ts: Optional[datetime], fallback: str) -> str:
     return ts.date().isoformat() if ts else fallback
 
 
+def _pt_hhmm(ts: Optional[datetime]) -> Optional[str]:
+    """The item's arrival time as HH:MM Pacific — the database stores UTC, the
+    edges speak Pacific (Phase 19). Feeds the re-shop's closest-arrival
+    selection; None when the item has no end time."""
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(_PACIFIC).strftime("%H:%M")
+
+
+def _cancelled_flight(item: ItineraryItem) -> Optional[Tuple[str, int]]:
+    """Best-effort (airline, flight_number) of the broken flight for the
+    re-shop's exclusion filter — read from the item's details when it carries
+    a flight identity, else None. The seed/voice-booked demo items carry none,
+    so this is typically None; the selection filter tolerates that ("where
+    possible" per the roadmap)."""
+    details = item.details or {}
+    airline = details.get("airline")
+    number = details.get("flight_number")
+    if airline and number is not None:
+        try:
+            return (str(airline), int(number))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _repair_call(item: ItineraryItem):
     """The repair tool coroutine for one itinerary item, args derived from
     the item's own data. One entry per required category; the tool writes
@@ -168,6 +196,10 @@ def _repair_call(item: ItineraryItem):
         return repair_tools._rebook_flight(
             trip_id, item_id, origin or "MSP", dest or "SFO",
             _iso_date(item.start_ts, "2026-07-17"),
+            original_price=item.price or 0.0,
+            original_currency=item.currency or "USD",
+            original_arrive_time=_pt_hhmm(item.end_ts),
+            cancelled_flight=_cancelled_flight(item),
         )
     if item.type == "hotel":
         return repair_tools._shift_hotel_dates(

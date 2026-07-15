@@ -18,7 +18,7 @@ from typing import Optional, get_args
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
-from api import concierge
+from api import concierge, flight_options
 from api.repositories import bookings as bookings_repo
 from api.repositories import trips
 from api.repositories.models import Booking, ItemStatus, ItineraryItem
@@ -103,6 +103,52 @@ def _voice_booking_detail(raw: dict) -> dict:
     }
 
 
+# Airline codes → warm names for the repair why-chosen (the standing spoken/
+# displayed-copy rule: a traveler-facing name, not a bare code). Unknown codes
+# fall back to the code itself.
+_AIRLINE_NAMES = {
+    "AA": "American", "DL": "Delta", "UA": "United", "B6": "JetBlue",
+    "WN": "Southwest", "AS": "Alaska", "NK": "Spirit", "F9": "Frontier",
+    "HA": "Hawaiian", "G4": "Allegiant",
+}
+
+
+def _signed_delta(delta: float) -> str:
+    """`+$NN` / `$0` / `-$NN`, ±$0.50 threshold — a repair can legitimately
+    drop the fare (a cheaper rebooking), so the delta is signed both ways."""
+    if delta >= 0.5:
+        return f"+${delta:,.0f}"
+    if delta <= -0.5:
+        return f"-${abs(delta):,.0f}"
+    return "$0"
+
+
+def _flight_repair_detail(raw: dict) -> dict:
+    """The Phase 29 case: the flight repair re-shopped real InstaFlights data
+    and stored the chosen option, the alternatives it beat, and the original
+    fare — so why-chosen names the real flight and arrival, and price-delta is
+    the real difference against the cancelled flight's fare."""
+    option = raw.get("option", {})
+    airline_code = option.get("airline", "")
+    airline = _AIRLINE_NAMES.get(airline_code, airline_code or "your carrier")
+    flight_no = option.get("flight_number", "")
+    stops = option.get("stops", 0)
+    legs = "nonstop" if stops == 0 else (
+        "one stop" if stops == 1 else f"{stops} stops"
+    )
+    arrive = option.get("arrive_time")
+    landing = flight_options._spoken_clock(arrive) if arrive else "the planned time"
+    delta = (option.get("price") or 0) - (raw.get("original_price") or 0)
+    return {
+        "why_chosen": (
+            f"Rebooked on {airline} {flight_no}, {legs}, landing {landing} — "
+            "the closest available arrival to your original flight."
+        ),
+        "price_delta": _signed_delta(delta),
+        "impact": _REPAIR_IMPACT["flight"],
+    }
+
+
 def _item_detail(item: ItineraryItem, booking: Optional[Booking]) -> Optional[dict]:
     """Why this item is what it is, derived from its latest booking's
     raw_response — None (key omitted) when there is no booking to speak from."""
@@ -111,6 +157,8 @@ def _item_detail(item: ItineraryItem, booking: Optional[Booking]) -> Optional[di
     raw = booking.raw_response or {}
     if raw.get("source") == "voice_guided_booking":
         return _voice_booking_detail(raw)
+    if raw.get("source") == "flight_repair":
+        return _flight_repair_detail(raw)
     if raw.get("seeded"):
         return {
             "why_chosen": "Booked as part of the original trip plan.",

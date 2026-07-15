@@ -35,28 +35,37 @@ import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
-from zoneinfo import ZoneInfo
 
 from agents import Agent, Runner, function_tool
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 from api import concurrency_core as core
 from api.concurrency_agent import session_snapshot
+# Re-exported so concierge.FlightOption / concierge._parse_instaflights_options
+# (and every existing caller and test) keep resolving after the Phase 29
+# extract into the shared, cycle-free flight_options module (decision 1).
+from api.flight_options import (  # noqa: F401 — re-export surface
+    _MAX_SPOKEN_OPTIONS,
+    _NUMBER_WORDS,
+    _PACIFIC,
+    _parse_instaflights_options,
+    _spoken_clock,
+    _spoken_option,
+    FlightOption,
+)
 from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
 from api.sabre import client as sabre_client
 from api.sabre import shapes
-from api.sabre.airport_tz import airport_zone
 from api.sabre_tools import launch_trip_repairs
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 
-# Everything displayed or spoken to a user is Pacific time (decision
-# 2026-07-12): mock wall-clock times are *declared* Pacific here, and
-# BigQuery TIMESTAMP stores the honest UTC instant on write.
-_PACIFIC = ZoneInfo("America/Los_Angeles")
+# _PACIFIC is imported from flight_options (the Phase 29 extract) — the same
+# America/Los_Angeles zone concierge's booking/completion timestamps and the
+# _today_line all still declare (decision 2026-07-12).
 
 # The self-identification is the live proof answers come from this backend
 # (the Phase 8 manual check); the disruption/launch rules are the Concierge.
@@ -228,38 +237,8 @@ def _spoken_date(d) -> str:
 
 
 # --- guided booking (Phase 17) — search → options → book → complete -----------
-
-
-class FlightOption(BaseModel):
-    """One speakable flight choice, parsed from an InstaFlights itinerary
-    (Phase 27; the mock serves the same shape). `spoken` is the clause the
-    agent reads aloud; the structured fields feed the booking rows (and the
-    status endpoint's detail payload). All dates and times are Pacific —
-    converted from airport-local upstream in real mode, declared-Pacific
-    fiction in mock mode (the Phase 19 discipline)."""
-
-    option_number: int
-    airline: str
-    flight_number: int
-    origin: str
-    destination: str
-    depart_date: str  # YYYY-MM-DD
-    depart_time: str  # HH:MM
-    arrive_time: str  # HH:MM
-    # PT arrival date — a converted red-eye can land the next PT day.
-    # Defaults to depart_date so pre-Phase-27 construction sites and stored
-    # payloads stay valid (additive change).
-    arrive_date: str = ""
-    stops: int
-    price: float
-    currency: str
-    spoken: str
-
-    @model_validator(mode="after")
-    def _arrive_date_defaults_to_depart_date(self):
-        if not self.arrive_date:
-            self.arrive_date = self.depart_date
-        return self
+# FlightOption + the InstaFlights parser now live in flight_options (Phase 29,
+# decision 1) and are re-exported at the top of this module.
 
 
 # session_name -> the options the agent just offered (the _SESSION_TRIPS
@@ -293,10 +272,10 @@ _BUILD_TASKS: Set[asyncio.Task] = set()
 # Seam for tests to observe the item spacing without waiting wall-clock time.
 _sleep = asyncio.sleep
 
-# Speakable option numbers — spoken copy never uses digits-as-labels.
-_NUMBER_WORDS = {1: "one", 2: "two", 3: "three"}
-
-_MAX_SPOKEN_OPTIONS = 3
+# _NUMBER_WORDS, _MAX_SPOKEN_OPTIONS, _spoken_clock, _spoken_option, and
+# _parse_instaflights_options are imported from flight_options (Phase 29
+# extract) and re-exported above — book_flight_impl and pending_options_for_trip
+# still call _spoken_clock/_NUMBER_WORDS from this module's namespace.
 
 # Metro/city codes the model sometimes produces despite the instructions
 # ("New York" → NYC); the supported-markets list is airport codes only, so
@@ -317,106 +296,6 @@ _UNSUPPORTED_MARKET_LINE = (
     "I can't search that route in the demo system — want to try another "
     "one, something like San Francisco to New York?"
 )
-
-
-def _spoken_clock(time_str: str) -> str:
-    """'08:00:00-05:00' (or '08:00') -> '8 AM' / '11:30 AM' — times are read
-    aloud, never 24-hour."""
-    hour, minute = int(time_str[:2]), int(time_str[3:5])
-    ampm = "AM" if hour < 12 else "PM"
-    hour12 = hour % 12 or 12
-    return f"{hour12}:{minute:02d} {ampm}" if minute else f"{hour12} {ampm}"
-
-
-def _spoken_option(option_number: int, stops: int, depart: str, arrive: str,
-                   price: float) -> str:
-    """One listenable clause: short, price rounded, no airline or fare codes
-    (the standing spoken-copy rule)."""
-    word = _NUMBER_WORDS.get(option_number, str(option_number))
-    legs = "nonstop" if stops == 0 else ("one stop" if stops == 1 else f"{stops} stops")
-    return (
-        f"Option {word}: {legs}, leaves at {_spoken_clock(depart)} and lands "
-        f"at {_spoken_clock(arrive)}, about {round(price)} dollars."
-    )
-
-
-def _parse_instaflights_options(
-    search: shapes.InstaFlightsResponse, origin: str, destination: str,
-) -> List[FlightOption]:
-    """Walk PricedItineraries in response order into at most
-    _MAX_SPOKEN_OPTIONS speakable options.
-
-    InstaFlights times are offset-less airport-local, so each end is
-    localized to its own airport's zone and converted to Pacific before
-    anything is spoken or stored (the Phase 19 discipline — speaking
-    '2026-XX-XXT07:20:00' at JFK as Pacific would be the old bug class).
-    An itinerary touching ANY airport missing from the timezone table —
-    connections included, not just the endpoints — is skipped in favor of
-    the next (requirements, decision 2 of Phase 27; the Phase 28 fix) —
-    never a mangled time. Byte-identical itineraries are offered once:
-    CERT has returned duplicates, and the agent read 'option three is the
-    same as option two' aloud (Phase 28, decision 5)."""
-    options: List[FlightOption] = []
-    offered: Set[Tuple] = set()
-    for itinerary in search.PricedItineraries:
-        if len(options) >= _MAX_SPOKEN_OPTIONS:
-            break
-        segments = (
-            itinerary.AirItinerary.OriginDestinationOptions
-            .OriginDestinationOption[0].FlightSegment
-        )
-        if not segments:
-            continue
-        if any(
-            airport_zone(seg.DepartureAirport.LocationCode) is None
-            or airport_zone(seg.ArrivalAirport.LocationCode) is None
-            for seg in segments
-        ):
-            continue
-        first, last = segments[0], segments[-1]
-        depart_zone = airport_zone(first.DepartureAirport.LocationCode)
-        arrive_zone = airport_zone(last.ArrivalAirport.LocationCode)
-        fare = itinerary.AirItineraryPricingInfo.ItinTotalFare.TotalFare
-        key = (
-            first.FlightNumber, first.DepartureDateTime,
-            last.ArrivalDateTime, fare.Amount,
-        )
-        if key in offered:
-            continue
-        offered.add(key)
-        depart_pt = (
-            datetime.fromisoformat(first.DepartureDateTime)
-            .replace(tzinfo=depart_zone).astimezone(_PACIFIC)
-        )
-        arrive_pt = (
-            datetime.fromisoformat(last.ArrivalDateTime)
-            .replace(tzinfo=arrive_zone).astimezone(_PACIFIC)
-        )
-        # Connections count as stops too: segment-internal StopQuantity
-        # plus one per plane change.
-        stops = sum(seg.StopQuantity for seg in segments) + len(segments) - 1
-        number = len(options) + 1
-        options.append(
-            FlightOption(
-                option_number=number,
-                airline=first.MarketingAirline.Code,
-                flight_number=first.FlightNumber,
-                origin=origin,
-                destination=destination,
-                depart_date=depart_pt.strftime("%Y-%m-%d"),
-                depart_time=depart_pt.strftime("%H:%M"),
-                arrive_time=arrive_pt.strftime("%H:%M"),
-                arrive_date=arrive_pt.strftime("%Y-%m-%d"),
-                stops=stops,
-                price=fare.Amount,
-                currency=fare.CurrencyCode,
-                spoken=_spoken_option(
-                    number, stops, depart_pt.strftime("%H:%M"),
-                    arrive_pt.strftime("%H:%M"), fare.Amount,
-                ),
-            )
-        )
-    return options
 
 
 async def search_flights_impl(
