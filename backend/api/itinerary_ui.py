@@ -18,7 +18,7 @@ from typing import Optional, get_args
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
-from api import concierge, flight_options
+from api import concierge, consent, flight_options
 from api.repositories import bookings as bookings_repo
 from api.repositories import trips
 from api.repositories.models import Booking, ItemStatus, ItineraryItem
@@ -207,6 +207,16 @@ def _pending_options(trip_id: str) -> Optional[dict]:
         return None
 
 
+def _consent_block(trip_id: str) -> Optional[dict]:
+    """The consent-gated repair flow's state for this trip (Phase 23) —
+    the dashboard's waiting / stand-down treatments key off it. Additive
+    and best-effort like `detail`: any failure omits the block."""
+    try:
+        return consent.consent_block(trip_id)
+    except Exception:  # noqa: BLE001 — additive, never load-bearing
+        return None
+
+
 @itinerary_ui.get("/status/{trip_id}")
 async def trip_status(trip_id: str):
     """The poll target: trip header + items (sorted by start_ts) + summary.
@@ -242,6 +252,9 @@ async def trip_status(trip_id: str):
     pending = _pending_options(trip_id)
     if pending:
         body["pending_options"] = pending
+    consent_state = _consent_block(trip_id)
+    if consent_state:
+        body["consent"] = consent_state
     return body
 
 

@@ -128,6 +128,7 @@ def test_other_gated_routes_401_without_code(monkeypatch):
         ("post", "/v1/web_call/token"),
         ("get", "/v1/itinerary/trips"),
         ("get", "/v1/itinerary/status/some-trip"),
+        ("get", "/v1/sabre_tools/search_log"),
         ("post", "/v1/demo/disrupt"),
     ):
         resp = getattr(client, method)(path)

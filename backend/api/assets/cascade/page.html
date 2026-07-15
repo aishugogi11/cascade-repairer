@@ -238,30 +238,72 @@
   /* ---- center column: voice placeholder + the trip ---- */
   .content { display: grid; gap: 20px; align-content: start; min-width: 0; }
 
-  /* The reserved Phase 23 slot — static, clearly labeled, sized to hold the
-     eventual orb + conversation feed so the voice surfaces drop in without
-     a relayout. No wiring, no handlers, no network. */
+  /* The live voice column (Phase 23): the orb is the booking surface —
+     the web_call wiring (server-minted token, useAIAgent → /query),
+     rendered by the module script into #voice-root. Tap to connect;
+     the conversation feed grows underneath. */
   .voice-card {
-    background: var(--card); border: 1px dashed var(--line);
+    background: var(--card); border: 1px solid var(--line);
     border-radius: 16px; padding: 26px 24px;
     text-align: center; min-height: 230px;
-    display: grid; place-content: center; gap: 8px;
   }
   .voice-orb {
     width: 74px; height: 74px; border-radius: 50%;
-    margin: 0 auto 4px;
+    margin: 0 auto 8px;
     background: var(--brand-soft); color: var(--brand);
     display: grid; place-items: center; font-size: 30px;
-    border: 2px dashed var(--brand);
+    border: 2px solid var(--brand);
+    cursor: pointer;
+    transition: background 0.3s, border-color 0.3s, color 0.3s;
   }
-  .voice-title { font-size: 16px; font-weight: 700; }
-  .voice-phase {
+  .voice-orb.is-connecting { border-style: dashed; animation: pulse 1.2s ease-in-out infinite; }
+  .voice-orb.is-live {
+    background: var(--fixed-bg); color: var(--fixed);
+    border-color: var(--fixed);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .voice-orb.is-error {
+    background: var(--broken-bg); color: var(--broken);
+    border-color: var(--broken);
+  }
+  .voice-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .voice-state {
     display: inline-block; margin: 0 auto;
     font-size: 12px; font-weight: 700;
     padding: 3px 12px; border-radius: 999px;
     background: var(--brand-soft); color: var(--brand);
   }
-  .voice-sub { font-size: 14px; color: var(--ink-soft); max-width: 420px; margin: 0 auto; }
+  .voice-latency { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+  .voice-error { font-size: 13px; color: var(--broken); margin-top: 8px; }
+  .voice-sub { font-size: 14px; color: var(--ink-soft); max-width: 420px; margin: 8px auto 0; }
+  .convo {
+    list-style: none; padding: 0; display: grid; gap: 8px;
+    margin-top: 14px; text-align: left;
+    max-height: 240px; overflow-y: auto;
+  }
+  .convo li { font-size: 14px; line-height: 1.45; }
+  .convo .who {
+    font-weight: 700; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; margin-right: 6px;
+  }
+  .convo .who.is-traveler { color: var(--brand); }
+  .convo .who.is-cascade { color: var(--fixed); }
+  .convo-empty { font-size: 13px; color: var(--ink-faint); margin-top: 12px; }
+
+  /* ---- Sabre live-search log (right column) ---- */
+  .search-log { list-style: none; padding: 0; display: grid; gap: 10px; }
+  .search-log li { font-size: 13px; line-height: 1.4; display: grid; gap: 2px; }
+  .search-log .s-route { font-weight: 700; font-size: 14px; }
+  .search-log .s-meta { color: var(--ink-soft); }
+  .search-log .s-mode {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 1px 8px; border-radius: 999px; margin-left: 6px;
+    background: var(--fixed-bg); color: var(--fixed);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .search-log .s-mode.is-mock { background: var(--cancelled-bg); color: var(--ink-soft); }
+  .search-log .s-mode.is-fallback { background: var(--repairing-bg); color: var(--repairing); }
+  .search-empty { font-size: 13px; color: var(--ink-faint); }
 
   /* current flight card — the prominent one */
   .flight-card {
@@ -536,21 +578,24 @@
   </aside>
 
   <main class="content">
-    <div class="voice-card" id="voice-placeholder">
-      <div class="voice-orb">🎤</div>
-      <div class="voice-title">Voice</div>
-      <span class="voice-phase">Coming in Phase 23</span>
-      <div class="voice-sub">
-        The live voice orb and conversation feed land here. Today, Cascade's
-        voice is the phone call it places to the traveler.
+    <div class="voice-card" id="voice-card">
+      <div id="voice-root">
+        <div class="voice-orb">🎤</div>
+        <div class="voice-title">Talk to Cascade</div>
+        <span class="voice-state">Loading the voice client…</span>
+        <div class="voice-sub">
+          Book a trip, ask how it's going, or just say hello — the
+          conversation appears here as you talk.
+        </div>
       </div>
     </div>
 
     <div class="awaiting" id="awaiting">
       <div class="big">Ready when you are</div>
       <div class="sub">
-        Press Book to run the demo from this page — the traveler gets a
-        call and the trip appears here as it books.
+        Book by voice with the orb above — real flights, no call quota —
+        or press Book for the phone beat. The trip appears here as it
+        books.
       </div>
     </div>
 
@@ -614,6 +659,14 @@
       <h2>Downstream Impact</h2>
       <ul class="impact-list" id="impact-list"></ul>
     </div>
+
+    <div class="rail-card" id="search-log-card">
+      <h2>Sabre Live Search</h2>
+      <ul class="search-log" id="search-log"></ul>
+      <div class="search-empty" id="search-log-empty">
+        No searches yet — book by voice and the live shopping shows up here.
+      </div>
+    </div>
   </aside>
 </div>
 
@@ -634,6 +687,7 @@
 (() => {
   const POLL_MS = 1500;
   const LATEST_MS = 4000;
+  const SEARCH_MS = 4000;
   const TARGET_S = 60;
   const API = "/v1/itinerary";
   const TOOLS = "/v1/sabre_tools";
@@ -705,7 +759,9 @@
     lastStatuses: null, // item_id -> status from the previous poll
     timerStart: null,   // recovery timer (client-side, no server event state)
     timerFrozen: null,
-    disruptedTrip: null, // the trip already cascaded — Disrupt is one-shot per trip
+    disruptedTrip: null, // the trip already cascaded — Disrupt is one-shot per
+                         // trip, re-armed when the consent wait stands down
+    consent: null,       // the status payload's consent block (Phase 23)
   };
 
   // ---- formatting ----
@@ -754,15 +810,29 @@
 
   // ---- header + recovery banner ----
 
-  function renderMood(items, pendingOptions) {
+  function renderMood(items, pendingOptions, consentInfo) {
     let mode, text, message;
     const counts = { broken: 0, repairing: 0, fixed: 0 };
     for (const item of items) {
       if (item.status in counts) counts[item.status] += 1;
     }
     if (counts.broken > 0) {
-      mode = "broken"; text = "Disruption detected";
-      message = "We found a problem with your trip — repairs are starting now.";
+      // Phase 23: between the break and the traveler's spoken yes, the
+      // page is red with the waiting treatment — never "repairs are
+      // starting" before consent, and no running clock.
+      if (consentInfo && consentInfo.state === "awaiting_consent") {
+        mode = "broken"; text = "Awaiting go-ahead";
+        message = "Flight disrupted — waiting for the traveler's go-ahead " +
+          "on the phone. Repairs start at their yes.";
+      } else if (consentInfo && ["declined", "timed_out", "error"]
+                   .includes(consentInfo.state)) {
+        mode = "broken"; text = "Standing by";
+        message = consentInfo.message ||
+          "No go-ahead — repairs are standing by.";
+      } else {
+        mode = "broken"; text = "Disruption detected";
+        message = "We found a problem with your trip.";
+      }
     } else if (counts.repairing > 0) {
       mode = "repairing"; text = "AI Repairing Trip";
       message = "Cascade is actively repairing your itinerary — searching " +
@@ -803,12 +873,18 @@
   //      the 60-second target, settles on all-clear) ----
 
   function updateTimer(items) {
-    let active = false;
+    let repairing = false, active = false;
     for (const item of items) {
+      if (item.status === "repairing") repairing = true;
       if (item.status === "broken" || item.status === "repairing") active = true;
     }
-    if (active && (state.timerStart === null || state.timerFrozen !== null)) {
-      state.timerStart = performance.now();  // new incident (or a fresh one)
+    // Phase 23 (settled UI decision): the recovery clock starts at repair
+    // launch — the first `repairing` observed, which only happens after
+    // the traveler's spoken yes — never at `broken`. Between the break and
+    // consent the page is red with no running clock; the timer settles on
+    // all-clear as before.
+    if (repairing && (state.timerStart === null || state.timerFrozen !== null)) {
+      state.timerStart = performance.now();  // the go-ahead moment
       state.timerFrozen = null;
     } else if (!active && state.timerStart !== null && state.timerFrozen === null) {
       state.timerFrozen = performance.now();
@@ -1135,8 +1211,9 @@
     }
     const body = await resp.json();
     el("awaiting").hidden = true;
+    state.consent = body.consent || null;
     updateTimer(body.items);
-    renderMood(body.items, body.pending_options);
+    renderMood(body.items, body.pending_options, state.consent);
     renderTraveler(body.trip, body.items);
     renderTimeline(body.trip, body.items);
     renderFlight(body.items);
@@ -1145,6 +1222,7 @@
     renderScore(body.items);
     renderCandidates(body.pending_options);
     renderImpact(body.items);
+    updateControls();  // a consent stand-down re-arms the Cancel trigger
   }
 
   // ---- trip pinning (the web_call/iOS contract) ----
@@ -1155,6 +1233,7 @@
     state.lastStatuses = null;
     state.timerStart = null;
     state.timerFrozen = null;
+    state.consent = null;
     el("reservations").replaceChildren();
     feed.replaceChildren();
     feedEmpty.hidden = false;
@@ -1171,6 +1250,14 @@
   // The same contract as the web_call/mobile_voice pages: external control
   // (a wrapping shell, the console) can repoint the displayed trip.
   window.vbSetTrip = (id) => { if (id) resetForTrip(id); };
+
+  // The voice module (the orb, a separate module scope) rides this page's
+  // access code and displayed trip — one window bridge so its /query POSTs
+  // carry the header and pin the trip on screen.
+  window.cascadeVoice = {
+    headers: (extra) => codeHeaders(extra),
+    tripId: () => state.tripId || "",
+  };
 
   // A trip booked mid-conversation appears without a reload (the iOS
   // TripManager pattern): when the latest trip *changes*, adopt it.
@@ -1233,6 +1320,39 @@
     }
   }
 
+  // ---- Sabre live-search panel (Phase 23): what the shopping layer just
+  //      did — op, route, real/mock/fallback, outcome — newest first ----
+
+  async function refreshSearchLog() {
+    let searches = [];
+    try {
+      const resp = await fetch(`${TOOLS}/search_log`, { headers: codeHeaders() });
+      if (!resp.ok) return;
+      searches = (await resp.json()).searches || [];
+    } catch { return; }
+    el("search-log-empty").hidden = searches.length > 0;
+    el("search-log").replaceChildren(...searches.map((s) => {
+      const li = document.createElement("li");
+      const route = document.createElement("div");
+      route.className = "s-route";
+      route.textContent = s.route || s.op || "search";
+      const mode = document.createElement("span");
+      mode.className = `s-mode is-${s.mode || "mock"}`;
+      mode.textContent = s.mode || "";
+      route.appendChild(mode);
+      const meta = document.createElement("div");
+      meta.className = "s-meta";
+      const when = s.at
+        ? new Date(s.at).toLocaleTimeString([], {
+            hour12: false, timeZone: "America/Los_Angeles",
+          }) + " PT"
+        : "";
+      meta.textContent = [s.date, s.outcome, when].filter(Boolean).join(" · ");
+      li.append(route, meta);
+      return li;
+    }));
+  }
+
   // ---- on-page trigger controls (both beats, the real-call /v1/demo path;
   //      locally the env is unset and these surface a clean 503) ----
 
@@ -1258,8 +1378,13 @@
 
   function updateControls() {
     // Disrupt targets the pinned trip: armed once one is pinned, one-shot
-    // per trip (a newly pinned trip re-arms it for the next run).
-    btnCancel.disabled = !state.tripId || state.disruptedTrip === state.tripId;
+    // per trip (a newly pinned trip re-arms it for the next run) — and
+    // re-armed when the consent wait stood down (declined / timed out /
+    // error), so the operator can trigger the cascade again.
+    const standDown = state.consent &&
+      ["declined", "timed_out", "error"].includes(state.consent.state);
+    btnCancel.disabled = !state.tripId ||
+      (state.disruptedTrip === state.tripId && !standDown);
   }
 
   btnBook.addEventListener("click", async () => {
@@ -1294,7 +1419,7 @@
     clearStatus();
     const tripId = state.tripId;
     btnCancel.disabled = true;
-    showStatus("📞", "Dialing the traveler — breaking the news, and already fixing it…", "live");
+    showStatus("📞", "Dialing the traveler — breaking the news and asking for the go-ahead…", "live");
     let resp;
     try {
       resp = await fetch("/v1/demo/disrupt", {
@@ -1314,7 +1439,7 @@
     }
     const body = await resp.json();
     state.disruptedTrip = tripId;
-    showStatus("📞", `Calling the traveler — repairs running (call ${body.call_status}).`, "live");
+    showStatus("📞", `Calling the traveler — repairs wait for their go-ahead (call ${body.call_status}).`, "live");
     updateControls();
   });
 
@@ -1333,12 +1458,144 @@
     // leaves the awaiting state up and both intervals keep trying.
     await checkLatest();
     updateControls();
+    refreshSearchLog();
     setInterval(poll, POLL_MS);
     setInterval(checkLatest, LATEST_MS);
+    setInterval(refreshSearchLog, SEARCH_MS);
   }
 
   init();
 })();
+</script>
+
+<script type="module">
+// Phase 23: the live voice orb — the web_call page's VB wiring (server-
+// minted token via POST /v1/web_call/token, useAIAgent delegating every
+// spoken query to POST /v1/web_call/query) rendered into the center
+// column. The CDN versions are injected at serve time from web_call.py
+// ($vb_react_ver / $vb_sdk_ver / $react_ver — the no-drift rule); the
+// access code and displayed trip ride window.cascadeVoice from the page.
+import React, { useState, useCallback, useMemo, useRef } from 'https://esm.sh/react@$react_ver';
+import ReactDOM from 'https://esm.sh/react-dom@$react_ver/client';
+import {
+  VocalBridgeProvider, useVocalBridge, useTranscript, useAIAgent,
+} from 'https://esm.sh/@vocalbridgeai/react@$vb_react_ver?deps=react@$react_ver,react-dom@$react_ver';
+import { ConnectionState } from 'https://esm.sh/@vocalbridgeai/sdk@$vb_sdk_ver';
+
+const e = React.createElement;
+const bridge = window.cascadeVoice;
+
+function Orb({ tokenError, sessionRef }) {
+  const { state, connect, disconnect, error } = useVocalBridge();
+  const { transcript } = useTranscript();
+  const [latencyMs, setLatencyMs] = useState(null);
+  const [queryError, setQueryError] = useState(null);
+
+  // The AI Agent hook (the L3 pattern): every delegated spoken question
+  // lands here; whatever string we return, VB speaks. The displayed trip
+  // rides along so the session pins what's on screen (the server ignores
+  // it once pinned); the round trip is the latency readout.
+  useAIAgent({
+    onQuery: async (query) => {
+      setQueryError(null);
+      const started = performance.now();
+      try {
+        const body = { query, session_name: sessionRef.current || 'cascade-page' };
+        const tripId = bridge.tripId();
+        if (tripId) body.trip_id = tripId;
+        const res = await fetch('/v1/web_call/query', {
+          method: 'POST',
+          headers: bridge.headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        setLatencyMs(Math.round(performance.now() - started));
+        return data.response;
+      } catch (err) {
+        setQueryError('query failed: ' + err.message);
+        return "Sorry — I couldn't reach my backend brain. Try that again in a moment.";
+      }
+    },
+  });
+
+  const disconnected = state === ConnectionState.Disconnected;
+  const busy = state === ConnectionState.Connecting ||
+    state === ConnectionState.WaitingForAgent;
+  const broken = Boolean(error || tokenError);
+  const orbClass = 'voice-orb' + (
+    busy ? ' is-connecting' : broken ? ' is-error' : disconnected ? '' : ' is-live');
+  const stateLabel = busy ? 'Connecting…'
+    : broken ? 'Connection error'
+    : disconnected ? 'Tap the orb to talk' : 'Live — listening';
+
+  // The conversation feed: the traveler's words and Cascade's replies,
+  // straight from the live session's transcript.
+  const lines = transcript.map((t) => ({
+    role: t.role === 'user' ? 'traveler' : 'cascade',
+    text: t.text,
+  }));
+
+  return e('div', null,
+    e('div', {
+      className: orbClass,
+      onClick: disconnected ? connect : disconnect,
+      title: disconnected ? 'Connect' : 'Disconnect',
+    }, '🎤'),
+    e('div', { className: 'voice-title' }, 'Talk to Cascade'),
+    e('span', { className: 'voice-state' }, stateLabel),
+    latencyMs !== null &&
+      e('div', { className: 'voice-latency' }, `last reply ${latencyMs} ms`),
+    (broken || queryError) && e('div', { className: 'voice-error' },
+      String((error && error.message) || tokenError || queryError)),
+    lines.length === 0
+      ? e('div', { className: 'convo-empty' },
+          'Say hello — the conversation appears here.')
+      : e('ul', { className: 'convo' },
+          lines.map((t, i) => e('li', { key: i },
+            e('span', { className: 'who is-' + t.role },
+              t.role === 'traveler' ? 'Traveler' : 'Cascade'),
+            t.text,
+          ))),
+  );
+}
+
+function VoiceApp() {
+  const [tokenError, setTokenError] = useState(null);
+  // The VB session name from the token response — /query calls tie to the
+  // same session for memory, the snapshot, and turn logging.
+  const sessionRef = useRef(null);
+
+  const tokenProvider = useCallback(async () => {
+    setTokenError(null);
+    const res = await fetch('/v1/web_call/token', {
+      method: 'POST', headers: bridge.headers({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = 'token mint failed (HTTP ' + res.status + ')';
+      setTokenError(msg);
+      throw new Error(msg);
+    }
+    sessionRef.current = data.session_name;
+    return {
+      url: data.connection_url,
+      token: data.token,
+      room_name: data.session_name,
+      participant_identity: 'cascade-page',
+      expires_in: 3600,
+      agent_mode: data.agent_mode,
+    };
+  }, []);
+
+  const options = useMemo(
+    () => ({ auth: { tokenProvider }, debug: false }), [tokenProvider]);
+  return e(VocalBridgeProvider, { options }, e(Orb, { tokenError, sessionRef }));
+}
+
+const voiceRoot = document.getElementById('voice-root');
+voiceRoot.innerHTML = '';
+ReactDOM.createRoot(voiceRoot).render(e(VoiceApp));
 </script>
 
 </body>

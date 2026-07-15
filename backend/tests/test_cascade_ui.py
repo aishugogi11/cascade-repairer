@@ -10,6 +10,7 @@ and need env, and the orchestrator itself is covered by test_demo.py.
 from fastapi.testclient import TestClient
 
 import main
+from api import web_call
 
 client = TestClient(main.app)
 
@@ -36,8 +37,11 @@ def test_gated_json_endpoints_still_401_without_code(monkeypatch):
         ("get", "/v1/itinerary/status/some-trip"),
         ("get", "/v1/itinerary/trips"),
         ("get", "/v1/sabre_tools/latest_trip_id"),
+        ("get", "/v1/sabre_tools/search_log"),
         ("post", "/v1/demo/book"),
         ("post", "/v1/demo/disrupt"),
+        ("post", "/v1/web_call/token"),
+        ("post", "/v1/web_call/query"),
     ):
         resp = getattr(client, method)(path)
         assert resp.status_code == 401, path
@@ -50,10 +54,14 @@ def page_text():
     return client.get("/v1/cascade/").text
 
 
-def test_page_is_self_contained():
-    """No external requests — inline CSS/JS only, per the no-dependency rule."""
+def test_page_is_self_contained_except_the_pinned_vb_cdn():
+    """No external src/href resources. The one sanctioned exception (Phase
+    23) is the voice module's CDN imports — the same esm.sh modules the
+    web_call surface uses, pinned and injected at serve time."""
     text = page_text()
     assert 'src="http' not in text and 'href="http' not in text
+    for host in ("esm.sh",):
+        assert host in text  # the voice module — and nothing else external
 
 
 def test_page_contains_all_status_visual_hooks():
@@ -125,15 +133,67 @@ def test_page_has_the_trigger_controls_wired_to_the_demo_orchestrator():
     assert "body.error || body.detail" in text
 
 
-def test_page_center_column_is_the_phase_23_voice_placeholder():
-    """The center slot is reserved and clearly labeled — no VB CDN imports,
-    no token fetch, no voice wiring of any kind."""
+def test_page_center_column_is_the_live_voice_orb():
+    """Phase 23: the placeholder is gone — the center slot carries the live
+    orb on the web_call wiring (server-minted token, useAIAgent → /query),
+    with connection state, a latency readout, and the conversation feed."""
     text = page_text()
-    assert 'id="voice-placeholder"' in text
-    assert "Phase 23" in text
-    for absent in ("vbConnect", "useAIAgent", "/v1/web_call", "token",
-                   "cdn", "webrtc", "getUserMedia"):
-        assert absent not in text, absent
+    assert "voice-placeholder" not in text and "Coming in Phase 23" not in text
+    assert 'id="voice-root"' in text
+    assert "/v1/web_call/token" in text
+    assert "/v1/web_call/query" in text
+    assert "useAIAgent" in text and "useVocalBridge" in text
+    assert "ConnectionState" in text  # connect/connecting/live/error states
+    assert "is-connecting" in text and "is-live" in text and "is-error" in text
+    assert "latencyMs" in text  # per-turn round-trip readout
+    # The displayed trip pins the voice session (the Phase 19 contract).
+    assert "bridge.tripId()" in text
+    # The conversation feed labels the two speakers.
+    assert "Traveler" in text and "Cascade" in text
+
+
+def test_page_voice_module_uses_the_pinned_web_call_cdn_versions():
+    """The no-drift rule: the orb runs the exact SDK versions web_call.py
+    pins — injected at serve time, never a copy-pasted literal. The raw
+    asset keeps the placeholders; the served page carries the versions."""
+    text = page_text()
+    assert "$vb_react_ver" not in text and "$vb_sdk_ver" not in text
+    assert f"@vocalbridgeai/react@{web_call.VB_REACT_VER}" in text
+    assert f"@vocalbridgeai/sdk@{web_call.VB_SDK_VER}" in text
+    assert f"react@{web_call.REACT_VER}" in text
+
+
+def test_page_timer_anchors_on_repairing_never_on_broken():
+    """The settled Phase 23 UI decision: the 60-second recovery clock
+    starts at repair launch (first `repairing` observed — after the
+    traveler's go-ahead), never at `broken`."""
+    text = page_text()
+    assert "if (repairing && (state.timerStart === null" in text
+    assert "if (active && (state.timerStart === null" not in text
+
+
+def test_page_renders_the_consent_treatments():
+    """Between break and consent: red, 'waiting for the traveler's
+    go-ahead', no clock. A stand-down (declined / timed out / error)
+    surfaces its message and re-arms the Cancel trigger."""
+    text = page_text()
+    assert "body.consent" in text
+    assert "awaiting_consent" in text
+    assert "waiting for the traveler's go-ahead" in text
+    assert "Repairs start at their yes." in text
+    assert '"declined", "timed_out", "error"' in text
+    assert "standDown" in text
+    # The pre-consent broken state never claims repairs are running.
+    assert "repairs are starting now" not in text
+
+
+def test_page_has_the_sabre_live_search_panel():
+    text = page_text()
+    assert "Sabre Live Search" in text
+    assert "/search_log" in text or "search_log" in text
+    assert "SEARCH_MS = 4000" in text
+    for field in ("s.route", "s.mode", "s.outcome"):
+        assert field in text, field
 
 
 def test_page_renders_times_pacific_labeled_pt():

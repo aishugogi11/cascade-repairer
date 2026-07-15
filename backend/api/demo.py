@@ -1,4 +1,5 @@
-"""Demo orchestrator — Phase 12's "one button, one beat" surface.
+"""Demo orchestrator — Phase 12's "one button, one beat" surface, reworked
+by Phase 23 into the consent-gated flow.
 
 Two endpoints compose the Cascade Repairer demo from seams built in earlier
 phases; a third serves the operator-facing demo page:
@@ -8,35 +9,44 @@ phases; a third serves the operator-facing demo page:
   narrative; the trip itself is seeded server-side (create_seed_trip,
   Phase 6). The hosted Vocal Bridge caller agent cannot invoke our tools
   mid-call, so the call is the narrative and the backend does the booking —
-  accepted stagecraft; the purpose carries the trip details so voice and
-  screen tell the same story.
-- POST /disrupt — Beat 2: the flight cancels and the agent reaches out
-  first ("your flight was just cancelled; I'm already rebooking"). Places
-  the call, breaks the flight (break_trip_flight), and launches all-item
-  repairs in the background without waiting (launch_trip_repairs, the
-  Phase 5 pattern) so the page timer and the phone call run while repairs
-  land.
+  accepted stagecraft; the purpose derives from the same seed data so voice
+  and screen tell the same story.
+- POST /disrupt — Beat 2 (Phase 23): does exactly two things — places
+  Call 1, which tells the traveler their flight was cancelled and asks for
+  their consent to repair, and breaks the flight (break_trip_flight). No
+  repairs launch at click time: a background consent watcher polls the VB
+  session log for that call, reads the traveler's answer from
+  transcript_text, and launches the repair cascade only on an unambiguous
+  yes — then awaits the repairs and places Call 2, the results callback,
+  composed from the actual post-repair state. Everything else stands down
+  and surfaces on the page via the consent registry (api.consent).
 - GET / — the demo page (assets/demo/page.html), the projector surface.
 
 In each beat the call fires before the data writes — the phone should ring
-while the screen changes, not after. Failure of any leg is an error status,
+while the screen changes, not after (reads may precede the call: the script
+is composed from the trip's data). Failure of any leg is an error status,
 never a silent partial success. Same invariants as outbound_call.py: nothing
 returned ever contains the callee phone number or the API key; blocking work
 runs via asyncio.to_thread.
 """
 import asyncio
+import logging
 import uuid
 from pathlib import Path
+from typing import Optional, Set
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from api import vb_cli
+from api import call_purposes, consent, vb_cli
 from api.disruption import break_trip_flight
+from api.itinerary_ui import _details_for
 from api.outbound_call import _missing_env, _scrub
-from api.repositories import itinerary_items
-from api.sabre_tools import create_seed_trip, launch_trip_repairs
+from api.repositories import itinerary_items, trips
+from api.sabre_tools import _SEED_ITEMS, create_seed_trip, launch_trip_repairs
+
+logger = logging.getLogger(__name__)
 
 demo = APIRouter()
 
@@ -50,34 +60,127 @@ _REQUIRED_ENV = (
     "VOCAL_BRIDGE_CALLEE_PHONE",
 )
 
+# Consent-watcher tuning (Phase 23). place_call blocks ~10–16 s before the
+# phone even rings and the consent conversation takes tens of seconds, so
+# the watcher polls gently and gives the whole call three minutes before
+# standing down as timed_out. Module constants so tests can shrink them.
+_CONSENT_POLL_SECONDS = 4.0
+_CONSENT_TIMEOUT_SECONDS = 180.0
 
-def _book_purpose(title: str) -> str:
-    """Beat 1 call script — agent-voiced, matching what the seeded trip puts
-    on screen (sabre_tools._SEED_ITEMS): what's booked, where to see it."""
-    return (
-        "You are the traveler's AI travel agent calling with good news about "
-        f'their trip "{title}". Their complete trip is now booked: a flight '
-        "from Minneapolis to San Francisco on the morning of July 17, a hotel "
-        "in Mountain View through July 19, a ride from the airport, dinner on "
-        "Castro Street that evening, and a Computer History Museum tour on "
-        "July 19. Walk them through it briefly and warmly, tell them every "
-        "detail is on their live itinerary screen, and wish them a great trip. "
-        "Keep the call short."
+# Strong refs so the fire-and-forget watcher tasks aren't garbage-collected
+# mid-flight (the web_call._LOG_TASKS pattern).
+_WATCHER_TASKS: Set[asyncio.Task] = set()
+
+
+async def _await_call_transcript(call_id: Optional[str]) -> Optional[str]:
+    """Poll the VB session log until Call 1 reads completed AND carries a
+    transcript, or the timeout lapses (None). transcript_text can land a
+    beat after the completed status (post_processing lag — the resolved
+    2026-07-15 spike), so both conditions gate together and the poll
+    cadence absorbs the lag. find_session matches both id shapes."""
+    if not call_id:
+        return None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _CONSENT_TIMEOUT_SECONDS
+    while loop.time() < deadline:
+        ok, session, _error = await asyncio.to_thread(vb_cli.find_session, call_id)
+        if ok and isinstance(session, dict):
+            status = session.get("call_status") or session.get("status")
+            transcript = session.get("transcript_text") or ""
+            if status == "completed" and transcript.strip():
+                return transcript
+        await asyncio.sleep(_CONSENT_POLL_SECONDS)
+    return None
+
+
+async def _call_back_with_results(trip_id: str, tasks) -> None:
+    """The completion watcher → Call 2: wait for the repair tasks this
+    backend launched, then place the results callback with a purpose
+    composed from the actual post-repair state — the phone agent speaks
+    the true fixed state because its script *is* the live data. Best-effort
+    end to end: a failed read degrades the script, a failed call logs — a
+    background task must never take down the loop holding the conversation."""
+    if tasks:
+        # Repair tasks capture their own failures into completion events
+        # (concurrency_core._record); return_exceptions is belt and braces.
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    success, trip, error = await asyncio.to_thread(trips.get_trip, trip_id)
+    if not success or trip is None:
+        logger.warning(
+            "results callback skipped: could not load trip %s: %s", trip_id, error
+        )
+        return
+    success, items, error = await asyncio.to_thread(
+        itinerary_items.list_items_for_trip, trip_id
     )
+    if not success:
+        items = []
+    details = await _details_for(trip_id, items)
+    purpose = call_purposes.build_results_purpose(trip, items, details)
+    ok, _call, error = await asyncio.to_thread(
+        vb_cli.place_call, purpose, "demo-beat3-results"
+    )
+    if not ok:
+        logger.warning("results callback call failed: %s", _scrub(error))
 
 
-# Beat 2 call script — calm and concrete: what happened, what's being done,
-# a time promise.
-_DISRUPT_PURPOSE = (
-    "You are the traveler's AI travel agent, calling them proactively — they "
-    "do not know yet. Their flight from Minneapolis to San Francisco was just "
-    "cancelled by the airline. Tell them right away, then reassure them: you "
-    "are already rebooking the flight and rechecking every other part of the "
-    "trip — the hotel, the airport ride, the dinner reservation, and the "
-    "museum tour. Ask them to give you about thirty seconds while the repairs "
-    "finish, and tell them they can watch each piece flip to fixed on their "
-    "live itinerary screen. Stay calm, concrete, and brief."
-)
+async def _watch_consent_then_repair(
+    trip_id: str, call_id: Optional[str], token: int
+) -> None:
+    """The Phase 23 consent watcher, one background task per disrupt: wait
+    for Call 1's transcript, classify the traveler's answer, launch the
+    repair cascade only on an unambiguous yes — then hand off to the
+    completion watcher for Call 2. Every other outcome (no, ambiguous,
+    timeout, failure) stands down and resolves the registry so the page
+    always learns how the wait ended. Never raises — background task."""
+    try:
+        transcript = await _await_call_transcript(call_id)
+        if not consent.is_current(trip_id, token):
+            return  # superseded by a re-triggered cascade — stand down
+        if transcript is None:
+            consent.resolve(trip_id, token, consent.TIMED_OUT)
+            return
+
+        verdict = await consent.classify_consent(transcript)
+        if verdict == "no":
+            consent.resolve(trip_id, token, consent.DECLINED)
+            return
+        if verdict != "yes":
+            consent.resolve(
+                trip_id, token, consent.DECLINED,
+                message="The traveler's answer wasn't a clear yes — "
+                        "repairs are standing by. Trigger the cascade "
+                        "again to retry.",
+            )
+            return
+
+        success, items, error = await asyncio.to_thread(
+            itinerary_items.list_items_for_trip, trip_id
+        )
+        if not success or not items:
+            logger.warning(
+                "consent granted but items unreadable for trip %s: %s",
+                trip_id, error,
+            )
+            consent.resolve(trip_id, token, consent.ERROR)
+            return
+
+        # The go-ahead moment: repairs launch now, and the page's recovery
+        # timer anchors on the first `repairing` status these flips produce.
+        repair_session_id = f"demo-{uuid.uuid4().hex[:12]}"
+        _launched, tasks = launch_trip_repairs(repair_session_id, items)
+        consent.resolve(trip_id, token, consent.GRANTED)
+
+        await _call_back_with_results(trip_id, tasks)
+    except Exception:  # noqa: BLE001 — background task must never propagate
+        logger.warning("consent watcher failed for trip %s", trip_id, exc_info=True)
+        consent.resolve(trip_id, token, consent.ERROR)
+
+
+# Both call scripts are composed from real trip data at placement time
+# (call_purposes, Phase 23) — the Phase 12 hardcoded narratives described
+# the wrong trip the moment booking went voice-first.
 
 
 class BookRequest(BaseModel):
@@ -104,9 +207,13 @@ async def book(request: BookRequest):
         return JSONResponse(status_code=503, content={"error": f"{missing} not set"})
 
     # Call first: place_call returns as soon as the call is queued, so the
-    # phone rings while the trip writes land.
+    # phone rings while the trip writes land. The purpose derives from the
+    # same seed data the writes are about to use — voice and screen agree
+    # by construction.
     ok, call, error = await asyncio.to_thread(
-        vb_cli.place_call, _book_purpose(request.title), "demo-beat1-booking"
+        vb_cli.place_call,
+        call_purposes.build_book_purpose(request.title, _SEED_ITEMS),
+        "demo-beat1-booking",
     )
     if not ok:
         return JSONResponse(status_code=502, content={"error": _scrub(error)})
@@ -123,16 +230,38 @@ async def book(request: BookRequest):
 
 @demo.post(
     "/disrupt",
-    summary="[Phase 12] Beat 2 — cancellation call, broken flight, "
-    "background repairs",
+    summary="[Phase 23] Beat 2 — cancellation call asking consent, broken "
+    "flight; repairs wait for the traveler's spoken yes",
 )
 async def disrupt(request: DisruptRequest):
     missing = _missing_env(*_REQUIRED_ENV)
     if missing:
         return JSONResponse(status_code=503, content={"error": f"{missing} not set"})
 
+    # Read the real trip first (reads, not writes — the call-before-write
+    # invariant is untouched) so the call script describes the trip that is
+    # actually breaking, and a trip that can't break (unknown, or no flight
+    # item) 404s before any quota is spent on a call.
+    success, trip, error = await asyncio.to_thread(trips.get_trip, request.trip_id)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"could not load trip: {error}")
+    if trip is None:
+        raise HTTPException(status_code=404, detail=f"trip {request.trip_id} not found")
+    success, items, error = await asyncio.to_thread(
+        itinerary_items.list_items_for_trip, request.trip_id
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=f"could not list items: {error}")
+    if not any(item.type == "flight" for item in items):
+        raise HTTPException(
+            status_code=404,
+            detail=f"trip {request.trip_id} has no flight item to break",
+        )
+
     ok, call, error = await asyncio.to_thread(
-        vb_cli.place_call, _DISRUPT_PURPOSE, "demo-beat2-disruption"
+        vb_cli.place_call,
+        call_purposes.build_disrupt_purpose(trip, items),
+        "demo-beat2-disruption",
     )
     if not ok:
         return JSONResponse(status_code=502, content={"error": _scrub(error)})
@@ -141,22 +270,22 @@ async def disrupt(request: DisruptRequest):
     # (failed or 0-row write) pass through untouched.
     broken = await asyncio.to_thread(break_trip_flight, request.trip_id)
 
-    success, items, error = await asyncio.to_thread(
-        itinerary_items.list_items_for_trip, request.trip_id
+    # No repairs at click time (Phase 23): register the consent wait and
+    # hand off to the watcher, which launches the cascade only on the
+    # traveler's spoken yes. A re-clicked Cancel supersedes the previous
+    # wait — register_awaiting mints a fresh token and the old watcher
+    # stands down on its next resolution attempt.
+    token = consent.register_awaiting(request.trip_id, call["call_id"])
+    task = asyncio.create_task(
+        _watch_consent_then_repair(request.trip_id, call["call_id"], token)
     )
-    if not success:
-        raise HTTPException(status_code=500, detail=f"could not list items: {error}")
-
-    # Launched, not awaited: /disrupt returns immediately so the page timer
-    # and the live phone call run while repairs land.
-    repair_session_id = f"demo-{uuid.uuid4().hex[:12]}"
-    launched, _tasks = launch_trip_repairs(repair_session_id, items)
+    _WATCHER_TASKS.add(task)
+    task.add_done_callback(_WATCHER_TASKS.discard)
 
     return {
         "trip_id": request.trip_id,
         "item_id": broken["item_id"],
         "call_id": call["call_id"],
         "call_status": call["status"],
-        "repair_session_id": repair_session_id,
-        "launched": launched,
+        "consent": consent.AWAITING,
     }
