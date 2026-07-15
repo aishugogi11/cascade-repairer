@@ -180,6 +180,61 @@ The backend runs on **Cloud Run** (GCP project `vocal-bridge-hackathon`, `us-wes
 
 CI/CD is Cloud Build, driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml`: validate config → ensure BigQuery dataset → build image → **pytest inside the built image** (failure blocks the deploy) → deploy. The pipeline fires on a **GitHub PR from a `vb/feature/*` branch into `vb/dev`** — direct pushes do not build. Provisioning and console-only setup steps: [`backend/devops/README.md`](backend/devops/README.md).
 
+## Demo-day: check which flight pairs are live
+
+The guided-booking and repair flows shop **real** Sabre fares (`SABRE_MODE=real`
+on the deployed service) via InstaFlights. InstaFlights is a **per-pair cache**
+with a **per-pair advance-purchase window**, so at any given moment only *some*
+origin→destination pairs have priced content — the rest honestly return "no
+flights." That live set **drifts**: it changes as the cache refreshes and **as
+the UTC day rolls** (00:00 UTC = 5 PM PDT). A pair that returns options in the
+morning can be empty an hour later, and a pair that was live yesterday is not
+guaranteed today. **A green result yesterday proves nothing about the demo.**
+
+So before every rehearsal — and again right before the live demo — probe the
+current set and pick a pair (and date) that comes back with options. This runs
+entirely against the **deployed Cloud Run service** through the same voice path
+the demo uses; no local setup, just the shared access code. Adjust `DEMO_DATE`
+to the departure date you'll speak in the demo (near-term dates — a couple of
+days out — are the most likely to be cached):
+
+```bash
+BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
+CODE="cascade2026"                 # the DEMO_ACCESS_CODE on the service
+DEMO_DATE="July 20 2026"           # the date you'll actually say in the demo
+
+# Curated demo shortlist (from specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md).
+for PAIR in "SFO to MIA" "SEA to BOS" "BOS to SEA" "JFK to LAX" "JFK to ORD" \
+            "ATL to SEA" "LAX to MSP" "DFW to EWR" "MCO to JFK" "SEA to PDX"; do
+  REPLY=$(curl -s -X POST "$BASE/v1/web_call/query" \
+    -H "Content-Type: application/json" -H "X-Access-Code: $CODE" \
+    -d "{\"query\": \"Search flights from $PAIR on $DEMO_DATE\", \"session_name\": \"probe-$RANDOM\"}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('response',''))")
+  case "$REPLY" in
+    *"I found"*)          echo "✅ LIVE     $PAIR — $REPLY" ;;
+    *"couldn't find"*|*"couldn’t find"*) echo "⚪ empty    $PAIR" ;;
+    *"can't search"*|*"can’t search"*)   echo "🚫 unsupported route  $PAIR" ;;
+    *)                    echo "❓ other    $PAIR — $REPLY" ;;
+  esac
+done
+```
+
+Reading the output:
+- **✅ LIVE** — the agent said "I found N options"; this pair+date is bookable
+  right now. Use one of these in the demo.
+- **⚪ empty** — supported pair, but no cached content for that date (the honest
+  no-flights line). Try a different date or pair.
+- **🚫 unsupported route** — the pair isn't in the sandbox's supported markets at
+  all (e.g. MSP→MCI); don't script it.
+
+Pick a **LIVE** pair and speak that exact route and date in the demo (`/v1/web_call/`
+or the phone flow). Because the set drifts, **re-run this within the hour before
+you present**, not the night before.
+
+> Note: this is the manual form of the "event-day-morning Sabre smoke" on the
+> roadmap (Phases 24/29). A turnkey endpoint that sweeps this automatically is
+> planned but not yet built — until then, this curl loop is the day-of check.
+
 ## Create Sabre secret 
 set -a && . ./config/.env && set +a
 python3 - <<'PY'
