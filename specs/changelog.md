@@ -8,6 +8,16 @@ Ordered newest phase first.
 
 ---
 
+## Phase 28 — Search hardening: Phase 27 validation fixes and honest empties
+**Completed:** 2026-07-14 (implementation + deployed real-mode spot checks the same evening; one open QA item — the interactive mock-mode walkthrough — is hermetically covered by the new regression tests) · **Spec:** [specs/2026-07-14-search-hardening/](2026-07-14-search-hardening/)
+
+All seven hardening items shipped on one branch (PR #45, Cloud Build `f56451bd`, evidence in the PR body) and the guided-search path came out honest, deduplicated, and drift-resistant ahead of Phase 29: the parser skips any itinerary touching an unmapped airport (connections included) and dedupes identical options before numbering, the mock speaks airport-local times so mock west-to-east arrivals follow their departures (`end_ts > start_ts` restored), the documented InstaFlights no-results 404 (`WARN.RAF.APPLICATION`, live-probed) returns an honest "couldn't find any flights" instead of a mock swap — verified against the deployed service with zero fallback warnings — 401s clear and refetch the token exactly once, metro codes alias server-side (`NYC→JFK`, `WAS→IAD`, `CHI→ORD`) with a matching instructions clause, and a new cert-fenced parity test surfaced 29 unmapped supported-market codes (the live list carries metro and non-US codes) now added to `AIRPORT_TZ`.
+
+## Phase 27 — Real Sabre search in the demo path
+**Completed:** 2026-07-14 (merged PR #43 and verified live on Cloud Run the same day; independent validation returned **FAIL** — both defects fixed by Phase 28 the same evening) · **Spec:** [specs/2026-07-14-real-sabre-search/](2026-07-14-real-sabre-search/)
+
+Judges now hear real airlines, fares, and routes while booking stays mock: `search_flights_impl` shops InstaFlights (`GET /v1/shop/flights`) through the dispatcher with additive response shapes, a static `airport_tz.py` table converting the API's offset-less airport-local times to PT (with an `arrive_date` red-eye guard on booking writes), best-effort supported-markets validation behind a speakable redirect, and `onlineitinerariesonly=N` forced unconditionally — real CERT fares spoken on Cloud Run with `SABRE_MODE=real` the day it merged, while the validator's two behavior defects (endpoint-only unmapped-airport check, mock Pacific-fiction clocks re-read as airport-local) became Phase 28.
+
 ## Phase 26 — Validation fixes: close out Phase 25's FAIL
 **Completed:** 2026-07-14 (close-out re-validation **PASS** same day, report in the spec dir; one tracked follow-up — the different-day `pytest -m cert` dated artifact — rides with roadmap Phase 24, D4) · **Spec:** [specs/2026-07-14-validation-fixes/](2026-07-14-validation-fixes/)
 
