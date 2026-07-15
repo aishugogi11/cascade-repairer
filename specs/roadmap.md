@@ -16,7 +16,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 The Phase 25 headline made this the cheapest real-Sabre win: judges hear **real airlines, real fares, real routes** while booking stays mock (entitlement wall). Wire `search_flights_impl` (`backend/api/concierge.py`) to `GET /v1/shop/flights` (InstaFlights) when `SABRE_MODE=real`, keeping the per-call mock fallback and the speakable-options contract (top 2–3, rounded prices, no airline codes spoken). Scope notes: additive InstaFlights response models (new — `shapes.py` doesn't model this API; the Phase 25 freeze is over but BFM shapes stay untouched); always send `onlineitinerariesonly=N` (Y = CERT 500); validate city pairs against the supported-markets list where it helps the agent fail speakably; and **handle InstaFlights' offset-less airport-local times** — `2026-08-13T07:20:00` means 7:20 AM *at the departure airport*, so speaking/storing it as Pacific repeats the Phase 19 bug class; convert via airport → timezone mapping or speak it as "local departure time" explicitly. The Cloud Run flip for search is then `SABRE_MODE=real` + the two bridge env vars (`SABRE_BASE_URL`, `SABRE_CLIENT_SECRET` — recipe in the Phase 25 notes).
 
-## Phase 28: Search hardening — Phase 27 validation fixes and honest empties
+## Phase 28: Search hardening — Phase 27 validation fixes and honest empties [x] COMPLETE (implementation; manual QA pending)
 
 The Phase 27 validation report's two behavior defects, plus the live-rehearsal findings from the same evening, all in the guided-search path (`backend/api/concierge.py`, `backend/api/sabre/`):
 

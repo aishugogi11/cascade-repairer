@@ -21,6 +21,31 @@ class SabreNotConfiguredError(RuntimeError):
     """Raised when real mode is invoked without Sabre credentials."""
 
 
+# The documented InstaFlights "no results" answer (verified live 2026-07-14,
+# re-probed 2026-07-14 for Phase 28): HTTP 404 whose JSON body carries
+# errorCode WARN.RAF.APPLICATION and message "No results were found" — an
+# empty result, not a failure. Strict match (Phase 28, decision 2): the
+# error-code marker first, the message as fallback; any other 404 stays a
+# genuine failure so the dispatcher's mock swap keeps covering real outages.
+_NO_RESULTS_ERROR_CODE = "WARN.RAF.APPLICATION"
+_NO_RESULTS_MESSAGE = "no results were found"
+
+
+def _is_documented_no_results(response: httpx.Response) -> bool:
+    """True only for the documented InstaFlights empty-cache 404 body."""
+    if response.status_code != 404:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    if not isinstance(body, dict):
+        return False
+    if body.get("errorCode") == _NO_RESULTS_ERROR_CODE:
+        return True
+    return _NO_RESULTS_MESSAGE in str(body.get("message", "")).lower()
+
+
 class RealSabreClient:
     """Same interface as MockSabreClient; constructs the documented calls."""
 
@@ -58,42 +83,66 @@ class RealSabreClient:
         self._token = token.access_token
         return self._token
 
+    async def _send_with_refresh(self, send) -> dict:
+        """Send once with the cached token; on a 401 (the ~7-day expiry or a
+        credential reset — _get_token's docstring promised this and Phase 28
+        delivers it), clear the cache, mint a fresh token, and retry exactly
+        once. A second 401 raises to the dispatcher's per-call mock swap —
+        no retry loops on the voice turn path."""
+        resp = await send(await self._get_token())
+        if resp.status_code == 401:
+            self._token = None
+            resp = await send(await self._get_token())
+        resp.raise_for_status()
+        return resp.json()
+
     async def _post(self, path: str, payload: dict) -> dict:
-        token = await self._get_token()
-        async with httpx.AsyncClient(base_url=self.base_url) as http:
-            resp = await http.post(
-                path,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        async def send(token: str) -> httpx.Response:
+            async with httpx.AsyncClient(base_url=self.base_url) as http:
+                return await http.post(
+                    path,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+
+        return await self._send_with_refresh(send)
 
     async def _get(self, path: str, params: dict) -> dict:
         """The _post posture for query-param APIs: same token handling
-        (per-instance cache, minted lazily), same raise_for_status."""
-        token = await self._get_token()
-        async with httpx.AsyncClient(base_url=self.base_url) as http:
-            resp = await http.get(
-                path,
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        (per-instance cache, minted lazily, refreshed once on 401), same
+        raise_for_status."""
+        async def send(token: str) -> httpx.Response:
+            async with httpx.AsyncClient(base_url=self.base_url) as http:
+                return await http.get(
+                    path,
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+
+        return await self._send_with_refresh(send)
 
     async def instaflights_search(
         self, request: shapes.InstaFlightsRequest
     ) -> shapes.InstaFlightsResponse:
         """GET /v1/shop/flights — the entitled search API on this PCC.
         onlineitinerariesonly=Y triggers a CERT-side 500 (verified-live,
-        Phase 25), so N is merged in unconditionally — never overridable."""
+        Phase 25), so N is merged in unconditionally — never overridable.
+
+        InstaFlights signals an empty cache date as a documented 404
+        (Phase 28): that one body becomes an empty response — the agent
+        speaks the honest no-flights line instead of mock-swapped options.
+        Every other status error re-raises to the dispatcher's insurance."""
         params = request.model_dump()
         params["onlineitinerariesonly"] = "N"
-        data = await self._get("/v1/shop/flights", params)
+        try:
+            data = await self._get("/v1/shop/flights", params)
+        except httpx.HTTPStatusError as exc:
+            if _is_documented_no_results(exc.response):
+                return shapes.InstaFlightsResponse(PricedItineraries=[])
+            raise
         return shapes.InstaFlightsResponse.model_validate(data)
 
     async def supported_markets(self) -> shapes.SupportedMarketsResponse:

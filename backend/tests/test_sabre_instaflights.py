@@ -15,7 +15,7 @@ tests (the test_sabre_client.py convention).
 """
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -199,6 +199,87 @@ def test_parser_all_unmappable_yields_no_options():
     assert concierge._parse_instaflights_options(response, "XXQ", "ZZQ") == []
 
 
+def test_parser_skips_itinerary_with_unmapped_connection_airport():
+    """Phase 28 (validation criterion 5): mapped endpoints are not enough —
+    a JFK→XXQ→LAX itinerary connects through an airport absent from the
+    timezone table and must be skipped, with the next fully mapped
+    itinerary renumbering into slot one."""
+    payload = {
+        "PricedItineraries": [
+            _itinerary(
+                [
+                    _segment("JFK", "XXQ", f"{_DAY}T07:00:00",
+                             f"{_DAY}T08:30:00", flight="501"),
+                    _segment("XXQ", "LAX", f"{_DAY}T09:30:00",
+                             f"{_DAY}T11:45:00", flight="502"),
+                ],
+                "150.00",
+            ),
+            _itinerary(
+                [_segment("JFK", "LAX", f"{_DAY}T07:20:00",
+                          f"{_DAY}T10:35:00", flight="439")],
+                "260.60",
+            ),
+        ]
+    }
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    options = concierge._parse_instaflights_options(response, "JFK", "LAX")
+
+    assert [o.flight_number for o in options] == [439]
+    assert options[0].option_number == 1
+    assert "Option one" in options[0].spoken
+
+
+def test_parser_mapped_multi_segment_still_parses():
+    """The over-skipping guard: an itinerary whose every segment end is
+    mapped survives the all-segment check, with stops counted as the
+    segment StopQuantity sum plus one per plane change."""
+    payload = {
+        "PricedItineraries": [
+            _itinerary(
+                [
+                    _segment("JFK", "ORD", f"{_DAY}T08:00:00",
+                             f"{_DAY}T09:40:00", flight="212", stops=1),
+                    _segment("ORD", "LAX", f"{_DAY}T10:45:00",
+                             f"{_DAY}T13:05:00", flight="213"),
+                ],
+                "205.40",
+            ),
+        ]
+    }
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    options = concierge._parse_instaflights_options(response, "JFK", "LAX")
+
+    assert len(options) == 1
+    assert options[0].stops == 2  # one in-segment stop + one plane change
+    assert options[0].depart_time == "05:00"  # 08:00 at JFK is 05:00 PT
+
+
+def test_parser_dedupes_identical_itineraries():
+    """Phase 28 (live finding): CERT returned byte-identical itineraries and
+    the agent said 'option three is the same as option two' aloud. The
+    duplicate is offered once; numbering stays contiguous and no spoken
+    clause repeats another."""
+    duplicate = _itinerary(
+        [_segment("JFK", "LAX", f"{_DAY}T07:20:00",
+                  f"{_DAY}T10:35:00", flight="439")],
+        "260.60",
+    )
+    distinct = _itinerary(
+        [_segment("JFK", "LAX", f"{_DAY}T11:00:00",
+                  f"{_DAY}T14:15:00", flight="777")],
+        "199.00",
+    )
+    payload = {"PricedItineraries": [duplicate, duplicate, distinct]}
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    options = concierge._parse_instaflights_options(response, "JFK", "LAX")
+
+    assert len(options) == 2
+    assert [o.option_number for o in options] == [1, 2]
+    assert [o.flight_number for o in options] == [439, 777]
+    assert options[0].spoken != options[1].spoken
+
+
 def test_parser_spoken_contract_no_codes_rounded_prices():
     options = _parsed_options()
     spoken = " ".join(o.spoken for o in options)
@@ -248,6 +329,95 @@ def test_flight_option_arrive_date_defaults_to_depart_date():
         spoken="Option one.",
     )
     assert option.arrive_date == _DAY
+
+
+# --- mock times are airport-local (Phase 28, validation criterion 14) -----------
+
+
+def _pt_instant(day: str, clock: str) -> datetime:
+    return datetime.fromisoformat(f"{day}T{clock}").replace(
+        tzinfo=ZoneInfo("America/Los_Angeles")
+    )
+
+
+def _searched_options(origin, destination):
+    asyncio.run(
+        concierge.search_flights_impl("room-1", origin, destination, _DAY)
+    )
+    return concierge._SESSION_FLIGHT_OPTIONS.get("room-1", [])
+
+
+def test_mock_west_to_east_preserves_pacific_wall_clock_order():
+    """The criterion-14 regression: mock-mode SFO→JFK used to emit Pacific
+    fiction clocks that the parser re-read as JFK-local, so arrivals landed
+    'before' departures. The mock now speaks airport-local; the parsed PT
+    round trip is the classic spread, arrivals strictly after departures."""
+    options = _searched_options("SFO", "JFK")
+
+    assert len(options) == 3
+    for option in options:
+        depart = _pt_instant(option.depart_date, option.depart_time)
+        arrive = _pt_instant(option.arrive_date, option.arrive_time)
+        assert arrive > depart
+    assert options[0].depart_time == "08:00"
+    assert options[0].arrive_time == "10:05"
+    assert "leaves at 8 AM and lands at 10:05 AM" in options[0].spoken
+
+
+def test_mock_east_to_west_parses_to_the_same_pt_spread():
+    """Direction independence: the reverse pair round-trips to the identical
+    classic PT spread — the fiction is the instant, not the string."""
+    east_west = _searched_options("JFK", "SFO")
+    concierge._SESSION_FLIGHT_OPTIONS.pop("room-1", None)
+    west_east = _searched_options("MSP", "SFO")
+
+    for options in (east_west, west_east):
+        assert [(o.depart_time, o.arrive_time) for o in options] == [
+            ("08:00", "10:05"), ("11:30", "13:40"), ("06:15", "11:20"),
+        ]
+        assert all(o.depart_date == _DAY for o in options)
+        assert all(o.arrive_date == _DAY for o in options)
+
+
+def test_mock_west_to_east_booking_write_keeps_end_after_start(monkeypatch):
+    """The _booking_writes regression from criterion 14: booking a mock
+    SFO→JFK option must produce end_ts > start_ts."""
+    writes = {}
+    monkeypatch.setattr(concierge.trips, "create_trip",
+                        lambda trip: (True, trip, None))
+    monkeypatch.setattr(concierge.bookings, "create_booking",
+                        lambda booking: (True, booking, None))
+    monkeypatch.setattr(concierge.itinerary_items, "update_status",
+                        lambda item_id, status: (True, 1, None))
+
+    def create_item(item):
+        writes["item"] = item
+        return True, item, None
+
+    monkeypatch.setattr(concierge.itinerary_items, "create_item", create_item)
+
+    option = _searched_options("SFO", "JFK")[0]
+    concierge._booking_writes(option, [option])
+
+    item = writes["item"]
+    assert item.end_ts > item.start_ts
+
+
+def test_mock_unmapped_airport_emits_the_fiction_unchanged():
+    """An airport code missing from the timezone table gets the fiction
+    clock as-is — no crash, no fabricated zone; the parser then skips the
+    itinerary and the search speaks the honest no-flights line."""
+    from api.sabre.mock_client import MockSabreClient
+
+    assert MockSabreClient._airport_local(_DAY, "08:00:00", "XXQ") == (
+        f"{_DAY}T08:00:00"
+    )
+
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-1", "XXQ", "ZZQ", _DAY)
+    )
+    assert "couldn't find any flights" in msg
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
 
 
 # --- real client contract: mocked transport, no network -------------------------
@@ -332,6 +502,208 @@ def test_real_client_supported_markets_fetches_once_and_caches(monkeypatch):
     first, second = asyncio.run(twice())
     assert first is second  # instance cache — one fetch for the process
     assert calls["markets"] == 1
+
+
+# --- honest empties: the documented no-results 404 (Phase 28) -------------------
+
+
+def _token_response():
+    return httpx.Response(200, json={
+        "access_token": "T1RLtoken", "token_type": "bearer",
+        "expires_in": 604800,
+    })
+
+
+def _no_results_body():
+    """The live-captured InstaFlights empty-cache body (probed 2026-07-14,
+    Phase 28): a documented empty, not a failure."""
+    return {
+        "status": "Complete",
+        "reportingSystem": "raf",
+        "type": "Application",
+        "errorCode": "WARN.RAF.APPLICATION",
+        "message": "No results were found",
+    }
+
+
+def test_real_client_documented_404_returns_empty_response(monkeypatch):
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        return httpx.Response(404, json=_no_results_body())
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    response = asyncio.run(real.instaflights_search(
+        shapes.InstaFlightsRequest(
+            origin="SFO", destination="JFK", departuredate=_DAY,
+        )
+    ))
+
+    assert isinstance(response, shapes.InstaFlightsResponse)
+    assert response.PricedItineraries == []
+
+
+def test_real_client_404_message_fallback_without_error_code(monkeypatch):
+    """Strict match, second leg: a 404 whose body lost the errorCode marker
+    but still says 'No results were found' counts as the documented empty."""
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        return httpx.Response(404, json={"message": "No results were found"})
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    response = asyncio.run(real.instaflights_search(
+        shapes.InstaFlightsRequest(
+            origin="SFO", destination="JFK", departuredate=_DAY,
+        )
+    ))
+
+    assert response.PricedItineraries == []
+
+
+def test_real_client_other_404_still_raises(monkeypatch):
+    """Any other 404 — entitlement drift, a bad path, a gateway flap — stays
+    a genuine failure so the dispatcher's mock swap covers it."""
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        return httpx.Response(404, json={
+            "errorCode": "ERR.2SG.CLIENT.INVALID_REQUEST",
+            "message": "Resource not found in rest table",
+        })
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        asyncio.run(real.instaflights_search(
+            shapes.InstaFlightsRequest(
+                origin="SFO", destination="JFK", departuredate=_DAY,
+            )
+        ))
+    assert excinfo.value.response.status_code == 404
+
+
+def test_documented_empty_speaks_no_flights_end_to_end(monkeypatch, caplog):
+    """The realness posture, seam to seam: SABRE_MODE=real, an empty cache
+    date answers the documented 404 — the agent speaks the existing
+    no-flights line, the mock is never consulted, and no fallback warning
+    is logged (this is not the insurance path)."""
+    monkeypatch.setenv("SABRE_MODE", "real")
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        if "origins-destinations" in request.url.path:
+            return httpx.Response(200, json={
+                "OriginDestinationLocations": [
+                    {"OriginLocation": {"AirportCode": "SFO"},
+                     "DestinationLocation": {"AirportCode": "JFK"}},
+                ]
+            })
+        return httpx.Response(404, json=_no_results_body())
+
+    _mock_transport(monkeypatch, handler)
+    monkeypatch.setattr(client, "_real", _configured_real_client(monkeypatch))
+
+    async def mock_never(request):
+        raise AssertionError("the mock must not serve a documented empty")
+
+    monkeypatch.setattr(client._mock, "instaflights_search", mock_never)
+
+    with caplog.at_level(logging.WARNING):
+        msg = asyncio.run(
+            concierge.search_flights_impl("room-1", "SFO", "JFK", _DAY)
+        )
+
+    assert "couldn't find any flights" in msg
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+    assert concierge._LATEST_SEARCH is None
+    assert "falling back" not in caplog.text
+
+
+def test_other_404_still_mock_swaps_at_the_dispatcher(monkeypatch, caplog):
+    """The event-day insurance asserted intact: a non-documented 404 raises
+    out of the real client and the dispatcher serves the mock for that call,
+    logging the warning."""
+    monkeypatch.setenv("SABRE_MODE", "real")
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        return httpx.Response(404, json={"errorCode": "ERR.2SG.SEC.SOMETHING"})
+
+    _mock_transport(monkeypatch, handler)
+    monkeypatch.setattr(client, "_real", _configured_real_client(monkeypatch))
+
+    with caplog.at_level(logging.WARNING):
+        response = asyncio.run(client.instaflights_search(_request()))
+
+    assert len(response.PricedItineraries) == 3  # the mock served this call
+    assert "falling back" in caplog.text
+
+
+# --- token refresh: retry once on 401 (Phase 28) ---------------------------------
+
+
+def test_401_clears_token_refetches_and_retries_once(monkeypatch):
+    calls = {"token": 0, "search": 0}
+    seen = {}
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            calls["token"] += 1
+            return httpx.Response(200, json={
+                "access_token": f"T1RLtoken{calls['token']}",
+                "token_type": "bearer", "expires_in": 604800,
+            })
+        calls["search"] += 1
+        if calls["search"] == 1:
+            return httpx.Response(401, json={"error": "invalid_token"})
+        seen["retry_auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json=instaflights_payload())
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    response = asyncio.run(real.instaflights_search(
+        shapes.InstaFlightsRequest(
+            origin="JFK", destination="LAX", departuredate=_DAY,
+        )
+    ))
+
+    assert calls["token"] == 2  # cached token cleared, fresh one minted
+    assert calls["search"] == 2  # the request retried exactly once
+    assert seen["retry_auth"] == "Bearer T1RLtoken2"  # retry used the fresh token
+    assert real._token == "T1RLtoken2"
+    assert isinstance(response, shapes.InstaFlightsResponse)
+
+
+def test_persistent_401_raises_after_exactly_one_retry(monkeypatch):
+    calls = {"search": 0}
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        calls["search"] += 1
+        return httpx.Response(401, json={"error": "invalid_token"})
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        asyncio.run(real.instaflights_search(
+            shapes.InstaFlightsRequest(
+                origin="JFK", destination="LAX", departuredate=_DAY,
+            )
+        ))
+
+    assert excinfo.value.response.status_code == 401
+    assert calls["search"] == 2  # one retry, never a loop
 
 
 # --- dispatcher: routing, silent fallback, best-effort markets ------------------
@@ -493,6 +865,60 @@ def test_markets_none_skips_validation_and_searches(monkeypatch):
 
     assert "Option one" in msg
     assert "room-1" in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_metro_codes_alias_to_airports_before_the_market_check(monkeypatch):
+    """Phase 28 (live finding): the model resolved 'New York' to the metro
+    code NYC and the airport-code-only market check redirected the traveler
+    off a carried route. NYC→JFK and WAS→IAD alias before the market check
+    and before the client sees the request."""
+    seen = {}
+
+    async def markets():
+        # Airport codes only, like the real list — the metro pair is absent.
+        return {("JFK", "IAD")}
+
+    async def capture_search(request):
+        seen["request"] = request
+        return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+
+    monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets)
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", capture_search
+    )
+
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-1", "NYC", "WAS", _DAY)
+    )
+
+    assert seen["request"].origin == "JFK"  # aliased, not NYC
+    assert seen["request"].destination == "IAD"  # aliased, not WAS
+    assert msg != concierge._UNSUPPORTED_MARKET_LINE  # market check passed
+    assert "Option one" in msg
+
+
+def test_non_alias_codes_pass_through_untouched(monkeypatch):
+    seen = {}
+
+    async def capture_search(request):
+        seen["request"] = request
+        return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", capture_search
+    )
+
+    asyncio.run(concierge.search_flights_impl("room-1", "msp", "SFO", _DAY))
+
+    assert seen["request"].origin == "MSP"  # normalized, never remapped
+    assert seen["request"].destination == "SFO"
+
+
+def test_instructions_carry_the_airport_code_clause():
+    """The other half of decision 4: the model is told airport codes, never
+    metro/city codes, with the New York example — terse, riding every turn."""
+    assert "never a metro or city code" in concierge.BASE_INSTRUCTIONS
+    assert "JFK, not NYC" in concierge.BASE_INSTRUCTIONS
 
 
 def test_all_unmappable_search_speaks_the_no_flights_line(monkeypatch):

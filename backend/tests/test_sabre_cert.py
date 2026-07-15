@@ -373,6 +373,29 @@ def test_instaflights_search_returns_real_priced_itineraries(client):
         assert option.airline not in option.spoken  # never spoken
 
 
+def test_supported_markets_airports_all_resolve_a_timezone(client):
+    """Phase 28 timezone-table parity: every airport code on either side of
+    the LIVE supported-markets list resolves via airport_zone — so a
+    supported route can never be silently unmappable (the parser skips
+    itineraries touching unmapped airports, which on a fully unmapped pair
+    degrades a real route to the no-flights line). If this fails, add the
+    named codes to AIRPORT_TZ (grouped-by-zone style) in the same commit."""
+    from api.sabre.airport_tz import airport_zone
+
+    markets = asyncio.run(client.supported_markets())
+    codes = set()
+    for pair in markets.OriginDestinationLocations:
+        codes.add(pair.OriginLocation.AirportCode.strip().upper())
+        codes.add(pair.DestinationLocation.AirportCode.strip().upper())
+    assert codes, "supported-markets list came back empty"
+
+    unmapped = sorted(code for code in codes if airport_zone(code) is None)
+    assert not unmapped, (
+        f"{len(unmapped)} supported-market airport codes missing from "
+        f"AIRPORT_TZ: {unmapped}"
+    )
+
+
 def test_cancel_booking_is_authorized(client):
     """Cancel-side certification: unlike create, cancelBooking is entitled —
     a dummy PNR gets a clean RESOURCE_NOT_FOUND business error (HTTP 200),
