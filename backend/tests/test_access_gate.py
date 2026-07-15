@@ -27,6 +27,7 @@ PUBLIC_GETS = (
     "/v1/itinerary/",
     "/v1/demo/",
     "/v1/booking/",
+    "/v1/cascade/",
 )
 
 PAGE_PATHS = (
@@ -35,6 +36,7 @@ PAGE_PATHS = (
     "/v1/itinerary/",
     "/v1/demo/",
     "/v1/booking/",
+    "/v1/cascade/",
 )
 
 

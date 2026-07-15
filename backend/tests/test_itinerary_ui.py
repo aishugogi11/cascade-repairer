@@ -340,10 +340,13 @@ def flight_option(n, price=250.0):
 
 
 def latest_search(session="s-1"):
+    # recorded_at must be fresh: since Phase 22 (item H) a slot older than
+    # concierge._LATEST_SEARCH_TTL stops surfacing — a fixed past date here
+    # would test the expiry path, which has its own tests in test_concierge.
     return concierge.LatestSearch(
         session_id=session,
         options=[flight_option(1), flight_option(2, price=311.4)],
-        recorded_at=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        recorded_at=datetime.now(timezone.utc),
     )
 
 
@@ -365,14 +368,15 @@ def _one_flight_status(bq):
 def test_status_pending_options_for_unpinned_session(bq, monkeypatch):
     """The pre-booking window: a search happened but no trip is pinned yet —
     whatever trip the page polls sees the candidates."""
-    monkeypatch.setattr(concierge, "_LATEST_SEARCH", latest_search())
+    slot = latest_search()
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", slot)
     monkeypatch.setattr(concierge, "_SESSION_TRIPS", {})
     _one_flight_status(bq)
     with TestClient(app) as client:
         body = client.get("/v1/itinerary/status/t-1").json()
 
     block = body["pending_options"]
-    assert block["recorded_at"] == "2026-07-12T18:00:00+00:00"
+    assert block["recorded_at"] == slot.recorded_at.isoformat()
     assert [o["option_number"] for o in block["options"]] == [1, 2]
     option = block["options"][0]
     # The speakable-summary shape: route, PT wall-clock labels, rounded
