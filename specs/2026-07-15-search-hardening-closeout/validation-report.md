@@ -6,7 +6,7 @@
 
 ## Summary
 
-**FAIL (historical result; future-workflow remediation applied afterward).** The Phase 30 implementation and hermetic acceptance tests pass: the exact bare-container suite reports 387 passed, 12 skipped, 9 cert tests deselected, and only the seven explicitly allowed warnings. The mock stale-options walkthrough and `git_pull_dev.sh` resolution also pass. The acceptance package nevertheless fails for two independent reasons: PR #47 has an empty description, so Definition-of-Done B's pre-merge evidence requirement is unmet; and the deliberate read-only CERT subset fails because the computed +30-day DFW→LAX search currently returns no priced itineraries. Validation ran on `vb/dev` because the feature had already merged; HEAD is the exact PR #47 merge with no later commit. After this report, the user authorized hardening `git_pull_dev.sh` so future PRs cannot merge without an evidence-bearing description; that remediation cannot retroactively change PR #47 or this result.
+**FAIL (historical result; workflow changed afterward).** The Phase 30 implementation and hermetic acceptance tests pass: the exact bare-container suite reports 387 passed, 12 skipped, 9 cert tests deselected, and only the seven explicitly allowed warnings. The mock stale-options walkthrough and `git_pull_dev.sh` resolution also pass. The acceptance package nevertheless fails for two independent reasons: PR #47 has an empty description, so Definition-of-Done B's pre-merge evidence requirement is unmet; and the deliberate read-only CERT subset fails because the computed +30-day DFW→LAX search currently returns no priced itineraries. Validation ran on `vb/dev` because the feature had already merged; HEAD is the exact PR #47 merge with no later commit. After this report, a strict evidence-file guard was added and then explicitly superseded at the user's request by a title-only workflow that generates a non-empty placeholder PR description. That prevents GitHub's empty-description state but cannot retroactively change PR #47 or satisfy criteria that require real evidence snippets.
 
 ## Criterion-by-criterion results
 
@@ -94,34 +94,34 @@
 - **D — PASS:** `git_pull_dev.sh` defaults to `vb/dev`, preserves the env override, and documents the complete resolution order.
 - **E — PASS:** `specs/roadmap.md:17` marks Phase 30 `[x] COMPLETE`.
 
-## Validation evidence — post-validation remediation
+## Post-validation workflow changes
 
 **Remediation date:** 2026-07-15  
 **Remediation branch:** `vb/feature/pr-evidence-guard`  
 **Scope:** Future `git_pull_dev.sh` runs; historical PR #47 remains unchanged.
 
-- The original one-argument workflow is now a safe first phase: it commits and pushes, opens a draft PR with an explicit validation-pending description, and exits successfully without merging. This leaves the feature branch and PR available for independent validation.
-- The merge phase can begin either by editing the draft PR description in GitHub and rerunning the one-argument command, or by rerunning with a second positional PR-body path / `PR_BODY_FILE`. A supplied file must be non-empty and contain a populated `## Validation evidence` section; placeholder-only evidence is rejected before staging or pushing.
-- New PRs use explicit `--title` plus `--body`/`--body-file` arguments instead of `--fill`, so a one-line commit subject can no longer silently become a titled PR with an empty description.
-- Existing PRs are checked before merge. A supplied body file updates the PR; without one, the existing remote body must already pass the evidence guard. A failed guard defers the merge.
-- Immediately before merge, the script reads the body back from GitHub and refuses to merge if the description is empty or lacks populated validation evidence.
-- `DRY_RUN=1` now exercises both phases without mutating git or GitHub: without a body it shows the draft/deferred-merge path; with evidence it prints the planned verification and merge path.
+- A strict two-phase evidence-file guard was implemented first, then removed at the user's explicit request because their workflow uses titles only.
+- The current script accepts at most one optional argument, used as both the commit message and PR title. There is no PR-body argument or `PR_BODY_FILE` workflow.
+- Every new or existing PR receives an automatic non-empty placeholder body containing the title under `## Summary`, so GitHub no longer reports `No description provided`.
+- Existing draft PRs are marked ready automatically, then the PR is merged in the same run.
+- `DRY_RUN=1` prints the planned placeholder create/update, draft-ready, merge, and sync actions without mutating git or GitHub.
 - Invoking the script through `sh` now re-enters Bash when necessary, honoring its declared interpreter.
 
-Dry-run evidence after the remediation:
+Dry-run evidence after the final workflow change:
 
 ```text
-Missing body: draft PR / deferred-merge path selected; no merge attempted.
-Body without a Validation evidence section: rejected before mutation.
-Evidence-bearing body: accepted; all commit/push/PR/merge/sync actions printed as DRY RUN only.
+One title argument accepted.
+Automatic placeholder PR description selected.
+Create/update, draft-ready, merge, and sync actions printed as DRY RUN only.
+Second argument rejected with usage guidance.
 ```
 
-This closes the future-workflow cause of Definition-of-Done B. It does not turn the historical report into PASS: pre-merge evidence cannot be added retroactively, and the separate live CERT content-drift failure remains.
+This eliminates the literal empty-description failure mode but does **not** close Definition-of-Done B when a validation spec requires actual command/transcript snippets. It also does not turn the historical report into PASS: pre-merge evidence cannot be added retroactively, and the separate live CERT content-drift failure remains.
 
 ## Missing tests
 
 - **Missing-input stale state:** No committed test stores options, follows with missing input, and then proves both stores clear plus booking is blocked. Proposed: `backend/tests/test_validator_search_hardening_closeout.py::test_missing_input_clears_stale_options_and_blocks_booking`.
-- **Base-branch and PR-evidence workflow:** The script now has a native mutation-free dry-run, but no committed automated shell test. Proposed: `backend/tests/test_git_pull_dev.py::test_base_branch_and_pr_evidence_guards` using a temporary git remote and stubbed `gh` to assert default/override resolution, invalid-body rejection, remote-body verification, and that no merge occurs after a failed guard.
+- **Base-branch and placeholder workflow:** The script has a native mutation-free dry-run, but no committed automated shell test. Proposed: `backend/tests/test_git_pull_dev.py::test_base_branch_and_placeholder_pr_workflow` using a temporary git remote and stubbed `gh` to assert default/override resolution, one-argument handling, placeholder body creation/update, draft-ready handling, and merge invocation.
 - **Exact copy contract:** Criterion 9 has no automated byte-for-byte assertion for all four strings. Proposed: `backend/tests/test_validator_search_hardening_closeout.py::test_non_optioned_search_copy_contract`, driving each branch and asserting the exact response text.
 - **Computed-date guard:** Criterion 5 is enforced only by review/diff inspection. Proposed: `backend/tests/test_validator_docs_contract.py::test_phase30_tests_contain_no_literal_travel_dates`, scanning Phase 30-added test fixtures for literal ISO travel dates.
 
@@ -136,6 +136,6 @@ During the original independent validation, no validator-authored tests were add
 
 ## Risks not covered by validation.md
 
-- At the validated commit, `git_pull_dev.sh` merged with `--admin`; PR #47 was created and merged three seconds later with an empty body and no status checks. The post-validation guard now blocks an empty or evidence-free description before merge, but `--admin` still bypasses branch-protection requirements and remains a separate process risk.
+- At the validated commit, `git_pull_dev.sh` merged with `--admin`; PR #47 was created and merged three seconds later with an empty body and no status checks. The current placeholder prevents an empty body, but it deliberately does not prove validation, and `--admin` still bypasses branch-protection requirements.
 - DFW→LAX remains in the supported-markets list but returned no +30-day content twice during this validation, including from the freshly built image. Any demo or smoke test that assumes this fixed pair/date is currently brittle.
 - Validation occurred after merge on `vb/dev`, not on the feature branch. HEAD is the exact merge commit, so no unrelated post-merge code is included, but the process no longer provides pre-merge isolation.
