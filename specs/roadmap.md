@@ -20,9 +20,19 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Update 2026-07-15 (Phase 22 shipped, QA'd, archived):** the consolidated cascade dashboard (`GET /v1/cascade/` — repair surfaces, disruption score, downstream impact, on-page demo triggers, Phase 23 voice placeholder, item-H age expiry) is merged (PR #53), deployed, manually QA'd on Cloud Run the same day, and archived to [changelog.md](changelog.md). Its independent validation returned **FAIL on the acceptance package only** (DoD-B again: PR #53 placeholder description; report in the spec dir). **QA produced the Phase 23 demo contract** (settled with Josh 2026-07-15, captured in the local `TODO.md` inbox for the Phase 23 spec interview — promote it there, it is gitignored): booking happens by voice through the Concierge (zero quota), the Cancel trigger breaks the flight and places a consent-asking call, **repairs launch only on the traveler's spoken yes — read from the VB session log's `transcript_text` (spike resolved 2026-07-15: the log payload carries full transcripts)**, the recovery timer starts at that consent (never automatically at the break), both call scripts are composed from the real pinned trip's data (the hardcoded MSP→SFO purposes are a bug for voice-booked trips), and a results callback call is placed when the backend's repair tasks land. Open work, in order: **23 → 24**.
 
-## Phase 23: Cascade dashboard, part 2 — live voice surfaces
+## Phase 23: Cascade dashboard, part 2 — live voice surfaces + the consent-gated demo flow
 
-The dashboard's live layers on top of Phase 22: the conversation feed (traveler/Cascade turns), the voice orb with connection/latency state (the `web_call` VB wiring — server-minted token, `useAIAgent → /v1/web_call/query` delegation), and the Sabre live-search log panel. Ends with the full mockup experience on one page.
+The dashboard's live layers on top of Phase 22 — the conversation feed (traveler/Cascade turns), the voice orb with connection/latency state (the `web_call` VB wiring — server-minted token, `useAIAgent → /v1/web_call/query` delegation), and the Sabre live-search log panel — **plus the demo contract settled with Josh at the 2026-07-15 Phase 22 QA** (full version in the local `TODO.md` inbox; promote it at this phase's spec interview):
+
+- **Booking happens by voice** through the Concierge (the guided flow, real InstaFlights fares, zero call quota) — ideally via this phase's on-page orb; the booked trip auto-appears on `/v1/cascade/`.
+- **"Cancel flight → cascade" is reworked to break the flight and place Call 1 only** — the call describes the disruption and asks the traveler for consent to repair. No repairs launch at click time.
+- **Repairs launch only on the traveler's spoken "yes", read from the VB session log's `transcript_text`** (consent watcher polls `find_session` until Call 1 completes, then parses the answer — spike resolved 2026-07-15: the log payload carries full AGENT/USER transcripts).
+- **The recovery — and the 60-second timer — starts at that acknowledged "yes", never automatically at the break.** The page shows a "waiting for the traveler's go-ahead" treatment (red, no running clock) between the break and consent; the timer re-anchors from first-observed-broken to repair start.
+- **Both call scripts are composed from the real pinned trip's data** (today's hardcoded MSP→SFO purposes describe the wrong trip for a voice-booked JFK→LAX booking).
+- **Call 2 — the results callback** — fires when the backend's own repair tasks land, its purpose composed from the actual repair results, so the phone agent speaks the true fixed state.
+- Supporting backend: a `trip_status` Concierge tool (honest "how's my trip?" across sessions) and a consent-watcher timeout/no-answer path.
+
+Quota: 2 calls per full run (booking is web-voice, free). Ends with the full mockup experience — and the complete book → break → consent → repair → callback demo — on one page.
 
 ## Phase 24: Pre-event readiness
 
