@@ -72,18 +72,22 @@ _CONSENT_TIMEOUT_SECONDS = 180.0
 _WATCHER_TASKS: Set[asyncio.Task] = set()
 
 
-async def _await_call_transcript(call_id: Optional[str]) -> Optional[str]:
+async def _await_call_transcript(session_key: Optional[str]) -> Optional[str]:
     """Poll the VB session log until Call 1 reads completed AND carries a
     transcript, or the timeout lapses (None). transcript_text can land a
     beat after the completed status (post_processing lag — the resolved
     2026-07-15 spike), so both conditions gate together and the poll
-    cadence absorbs the lag. find_session matches both id shapes."""
-    if not call_id:
+    cadence absorbs the lag. session_key is the call's room_name (the log
+    join key, Phase 31) with call_id as the legacy fallback; find_session
+    matches id, session_id, and room_name."""
+    if not session_key:
         return None
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _CONSENT_TIMEOUT_SECONDS
     while loop.time() < deadline:
-        ok, session, _error = await asyncio.to_thread(vb_cli.find_session, call_id)
+        ok, session, _error = await asyncio.to_thread(
+            vb_cli.find_session, session_key
+        )
         if ok and isinstance(session, dict):
             status = session.get("call_status") or session.get("status")
             transcript = session.get("transcript_text") or ""
@@ -126,7 +130,7 @@ async def _call_back_with_results(trip_id: str, tasks) -> None:
 
 
 async def _watch_consent_then_repair(
-    trip_id: str, call_id: Optional[str], token: int
+    trip_id: str, session_key: Optional[str], token: int
 ) -> None:
     """The Phase 23 consent watcher, one background task per disrupt: wait
     for Call 1's transcript, classify the traveler's answer, launch the
@@ -135,7 +139,7 @@ async def _watch_consent_then_repair(
     timeout, failure) stands down and resolves the registry so the page
     always learns how the wait ended. Never raises — background task."""
     try:
-        transcript = await _await_call_transcript(call_id)
+        transcript = await _await_call_transcript(session_key)
         if not consent.is_current(trip_id, token):
             return  # superseded by a re-triggered cascade — stand down
         if transcript is None:
@@ -166,11 +170,18 @@ async def _watch_consent_then_repair(
             consent.resolve(trip_id, token, consent.ERROR)
             return
 
-        # The go-ahead moment: repairs launch now, and the page's recovery
-        # timer anchors on the first `repairing` status these flips produce.
+        # The atomic gate (Phase 31, the validator's race): claim the wait
+        # BEFORE launching, with no awaits in between — resolve is
+        # synchronous module state on this single event loop, so a fresh
+        # Cancel registered during the classifier/repository awaits above
+        # makes this return False and the stale watcher stands down without
+        # launching anything. Only then is it the go-ahead moment: repairs
+        # launch, and the page's recovery timer anchors on the first
+        # `repairing` status these flips produce.
+        if not consent.resolve(trip_id, token, consent.GRANTED):
+            return
         repair_session_id = f"demo-{uuid.uuid4().hex[:12]}"
         _launched, tasks = launch_trip_repairs(repair_session_id, items)
-        consent.resolve(trip_id, token, consent.GRANTED)
 
         await _call_back_with_results(trip_id, tasks)
     except Exception:  # noqa: BLE001 — background task must never propagate
@@ -275,9 +286,16 @@ async def disrupt(request: DisruptRequest):
     # traveler's spoken yes. A re-clicked Cancel supersedes the previous
     # wait — register_awaiting mints a fresh token and the old watcher
     # stands down on its next resolution attempt.
-    token = consent.register_awaiting(request.trip_id, call["call_id"])
+    #
+    # The watcher is keyed on room_name (Phase 31): the session logs carry
+    # id + room_name but never call_id, so a call_id-keyed watcher polls to
+    # its timeout while the completed session sits in the log — the exact
+    # live failure of 2026-07-15. call_id remains the fallback for older
+    # CLI shapes; find_session matches every key.
+    session_key = call.get("room_name") or call["call_id"]
+    token = consent.register_awaiting(request.trip_id, session_key)
     task = asyncio.create_task(
-        _watch_consent_then_repair(request.trip_id, call["call_id"], token)
+        _watch_consent_then_repair(request.trip_id, session_key, token)
     )
     _WATCHER_TASKS.add(task)
     task.add_done_callback(_WATCHER_TASKS.discard)

@@ -301,6 +301,32 @@ def test_disrupt_purpose_speaks_the_real_trip_and_asks_consent(monkeypatch):
     assert "already rebooking" not in purpose
 
 
+def test_disrupt_keys_the_watcher_on_room_name_when_present(monkeypatch):
+    """Phase 31: room_name is the session-log join key — when the call
+    response carries it, the registry and the watcher use it (call_id
+    remains the fallback for older CLI shapes, covered by the test above,
+    whose payload has no room_name)."""
+    _set_env(monkeypatch)
+    consent.reset()
+    events = []
+
+    def fake_place_call(purpose, name=None):
+        events.append(("place_call", purpose, name))
+        return True, {
+            "call_id": "call-abc", "status": "initiated",
+            "room_name": "room-77",
+        }, None
+
+    monkeypatch.setattr(vb_cli, "place_call", fake_place_call)
+    _wire_disrupt(monkeypatch, events)
+
+    resp = client.post("/v1/demo/disrupt", json={"trip_id": "t-7"})
+    assert resp.status_code == 200
+    record = consent.current("t-7")
+    assert record.call_id == "room-77"
+    assert events[-1] == ("watch", "t-7", "room-77", record.token)
+
+
 def test_disrupt_404s_before_dialing_when_trip_cannot_break(monkeypatch):
     """An unknown trip or one with no flight item 404s from the pre-call
     read — no quota is spent on a call about a trip that can't break."""

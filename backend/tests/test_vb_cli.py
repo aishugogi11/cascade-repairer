@@ -132,6 +132,7 @@ def test_place_call_happy_path_is_sanitized(monkeypatch):
             payload = {
                 "call_id": "c-42",
                 "status": "initiated",
+                "room_name": "room-42",
                 "livekit_url": "wss://transport-secret",
                 "to_number": FAKE_CALLEE,
             }
@@ -141,8 +142,11 @@ def test_place_call_happy_path_is_sanitized(monkeypatch):
     monkeypatch.setattr(vb_cli.subprocess, "run", fake_run)
     ok, result, error = vb_cli.place_call("purpose", name="demo")
     assert ok and error is None
-    # Sanitized: exactly call_id and status, nothing transport-level.
-    assert result == {"call_id": "c-42", "status": "initiated"}
+    # Sanitized: call_id, status, and the room_name session join key
+    # (Phase 31) — nothing transport-level, never the callee number.
+    assert result == {
+        "call_id": "c-42", "status": "initiated", "room_name": "room-42",
+    }
     # Stateless container: the caller agent is pinned before the call.
     assert ["vb", "agent", "use", FAKE_AGENT_ID] in commands
     call_cmd = next(c for c in commands if c[1] == "call")
@@ -224,6 +228,32 @@ def test_find_session_matches_live_id_key(monkeypatch):
     monkeypatch.setattr(vb_cli.subprocess, "run", fake_run)
     ok, session, _ = vb_cli.find_session("s2")
     assert ok and session["id"] == "s2"
+
+
+def test_find_session_matches_by_room_name_on_live_shaped_rows(monkeypatch):
+    """Phase 31 (proven live 2026-07-15): the session log rows carry id +
+    room_name and NO call_id key — a call joins to its session only through
+    room_name. find_session must match it."""
+    monkeypatch.setenv("VOCAL_BRIDGE_CALLER_AGENT_ID", FAKE_AGENT_ID)
+    payload = [
+        {"id": "d0d991f5-3401", "room_name": "room-a",
+         "call_status": "completed", "transcript_text": "USER: yes"},
+        {"id": "be2b0349-3ab0", "room_name": "room-b",
+         "call_status": "completed", "transcript_text": "USER: no"},
+    ]
+
+    def fake_run(cmd, **kwargs):
+        if cmd[1] == "logs":
+            return _proc(stdout=f"--- JSON ---\n{json.dumps(payload)}")
+        return _proc(stdout="ok")
+
+    monkeypatch.setattr(vb_cli.subprocess, "run", fake_run)
+    ok, session, _ = vb_cli.find_session("room-b")
+    assert ok and session["id"] == "be2b0349-3ab0"
+    # A call_id that appears nowhere in the rows still finds nothing —
+    # the miss is honest, not an exception.
+    ok, session, error = vb_cli.find_session("call-xyz")
+    assert ok and session is None and error is None
 
 
 def test_find_session_matches_by_id(monkeypatch):

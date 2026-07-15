@@ -40,6 +40,7 @@ from agents import Agent, Runner, function_tool
 from pydantic import BaseModel
 
 from api import concurrency_core as core
+from api import consent
 from api.concurrency_agent import session_snapshot
 # Re-exported so concierge.FlightOption / concierge._parse_instaflights_options
 # (and every existing caller and test) keep resolving after the Phase 29
@@ -202,6 +203,27 @@ async def ensure_trip_context(
     return context, None
 
 
+# One consent channel at a time (Phase 31, interview decision): while
+# Call 1 is out asking the traveler, the orb defers to the phone instead
+# of racing the watcher — observed live 2026-07-15, when fix_trip repaired
+# the trip while the watcher was still waiting for the spoken yes.
+_CONSENT_PENDING_LINE = (
+    "I'm already asking you on the phone — just say yes on the call and "
+    "I'll get started."
+)
+
+
+def _consent_wait_pending(trip_id: str) -> bool:
+    """True while the consent watcher is awaiting the traveler's answer for
+    this trip. Best-effort by contract — a registry hiccup must never kill
+    the spoken turn, so any failure reads as 'no wait'."""
+    try:
+        record = consent.current(trip_id)
+        return record is not None and record.state == consent.AWAITING
+    except Exception:  # noqa: BLE001 — never load-bearing for the turn
+        return False
+
+
 async def fix_trip_impl(session_id: str) -> str:
     """Launch the repair cascade for the traveler's trip — the tool body,
     kept a plain function for tests (the hello.py pattern).
@@ -209,12 +231,15 @@ async def fix_trip_impl(session_id: str) -> str:
     Fires one background repair per itinerary item through the same seam as
     /repair_trip and returns immediately with a speakable summary; the tasks
     report into this session's event log as they land. Items come from the
-    session's pinned trip. Failures return speakable strings — a tool that
-    raises would kill the spoken turn."""
+    session's pinned trip. During an awaiting_consent window for that trip,
+    defers to the phone instead of launching (Phase 31). Failures return
+    speakable strings — a tool that raises would kill the spoken turn."""
     try:
         context, speakable_error = await ensure_trip_context(session_id)
         if speakable_error:
             return speakable_error
+        if _consent_wait_pending(context.trip.trip_id):
+            return _CONSENT_PENDING_LINE
         launched, _tasks = launch_trip_repairs(session_id, context.items)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         return (
@@ -423,6 +448,14 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
         end_ts=datetime(arrive.year, arrive.month, arrive.day, arr_h, arr_m,
                         tzinfo=_PACIFIC),
         location=f"{option.origin}-{option.destination}",
+        # The booked flight's identity (Phase 31): the repair re-shop's
+        # exclusion filter reads exactly these keys — without them a
+        # cancelled JFK→LAX flight can be "repaired" onto itself (live QA,
+        # 2026-07-15).
+        details={
+            "airline": option.airline,
+            "flight_number": option.flight_number,
+        },
         price=option.price,
         currency=option.currency,
     )
@@ -690,7 +723,9 @@ async def trip_status_impl(session_id: str) -> str:
             f"your {_spoken_list(names)} {verb} {_STATUS_SPOKEN[status]}"
         )
     summary = "; ".join(clauses)
-    if any(item.status in ("broken", "repairing") for item in items):
+    # No all-clear while anything is broken, repairing, or cancelled — a
+    # cancelled leg is not "on track" (Phase 31, validator finding).
+    if any(item.status in ("broken", "repairing", "cancelled") for item in items):
         return f"Here's your trip right now: {summary}."
     return f"Here's your trip right now: {summary}. Everything is on track."
 

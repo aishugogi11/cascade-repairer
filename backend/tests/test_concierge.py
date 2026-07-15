@@ -346,6 +346,78 @@ def test_fix_trip_launches_all_items_and_returns_before_completion(monkeypatch, 
     assert "rebook flight" in msg and "shift hotel dates" in msg
 
 
+def test_fix_trip_defers_to_the_phone_during_a_consent_wait(monkeypatch, bq):
+    """Phase 31 (interview decision): one consent channel at a time. While
+    Call 1 is out asking, fix_trip launches nothing and points the traveler
+    at the phone; a resolved window launches normally again."""
+    from api import consent as consent_module
+
+    consent_module.reset()
+    launched = []
+    monkeypatch.setattr(
+        concierge, "launch_trip_repairs",
+        lambda sid, items: (launched.append(sid), (["rebook_flight"], []))[1],
+    )
+
+    async def scenario():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
+        consent_module.register_awaiting("t-1", "room-77")
+        deferred = await concierge.fix_trip_impl("room-1")
+        token = consent_module.current("t-1").token
+        consent_module.resolve("t-1", token, consent_module.DECLINED)
+        after = await concierge.fix_trip_impl("room-1")
+        return deferred, after
+
+    deferred, after = asyncio.run(scenario())
+    assert "on the phone" in deferred and "say yes" in deferred
+    assert "Repairs are launched" in after
+    assert launched == ["room-1"]  # only the post-window call launched
+    consent_module.reset()
+
+
+def test_fix_trip_ignores_another_trips_consent_wait(monkeypatch, bq):
+    from api import consent as consent_module
+
+    consent_module.reset()
+    launched = []
+    monkeypatch.setattr(
+        concierge, "launch_trip_repairs",
+        lambda sid, items: (launched.append(sid), (["rebook_flight"], []))[1],
+    )
+
+    async def scenario():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
+        consent_module.register_awaiting("t-other", "room-99")
+        return await concierge.fix_trip_impl("room-1")
+
+    msg = asyncio.run(scenario())
+    assert "Repairs are launched" in msg
+    assert launched == ["room-1"]
+    consent_module.reset()
+
+
+def test_fix_trip_registry_failure_never_kills_the_turn(monkeypatch, bq):
+    """A consent-registry hiccup reads as 'no wait' — the spoken turn and
+    the launch survive (best-effort by contract)."""
+    def explode(trip_id):
+        raise RuntimeError("registry on fire")
+
+    monkeypatch.setattr(concierge.consent, "current", explode)
+    launched = []
+    monkeypatch.setattr(
+        concierge, "launch_trip_repairs",
+        lambda sid, items: (launched.append(sid), (["rebook_flight"], []))[1],
+    )
+
+    async def scenario():
+        await concierge.ensure_trip_context("room-1", trip_id="t-1")
+        return await concierge.fix_trip_impl("room-1")
+
+    msg = asyncio.run(scenario())
+    assert "Repairs are launched" in msg
+    assert launched == ["room-1"]
+
+
 # --- guided booking (Phase 17): search → options → book → complete -----------
 
 
@@ -622,6 +694,14 @@ def test_book_flight_creates_rows_replaces_pin_and_clears_options(monkeypatch, b
     assert booking.raw_response["source"] == "voice_guided_booking"
     assert booking.raw_response["option"]["option_number"] == 1
     assert len(booking.raw_response["options_offered"]) >= 2
+    # Phase 31: the flight's identity rides on the item so the repair
+    # re-shop can exclude the cancelled flight (live QA: without this the
+    # traveler was "repaired" onto their original flight).
+    chosen = booking.raw_response["option"]
+    assert item.details == {
+        "airline": chosen["airline"],
+        "flight_number": chosen["flight_number"],
+    }
     # Blocking writes ran off the event loop's thread (the to_thread rule).
     assert seen["threads"][0] is not threading.main_thread()
     # Pin replaced with the new trip; the spent options are gone.

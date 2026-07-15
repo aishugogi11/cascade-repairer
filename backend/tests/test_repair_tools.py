@@ -214,6 +214,38 @@ def test_pick_replacement_arrival_distance_wraps_the_clock():
     assert chosen.flight_number == 100  # 00:10 is 15 min from 23:55, not 1425
 
 
+def test_pick_replacement_without_identity_excludes_equal_clocks():
+    """Phase 31 (live QA): with no flight identity on the item (seed trips,
+    pre-31 rows), an option matching the original's depart AND arrive
+    clocks is the same flight — the rebooked flight must differ."""
+    # All _opt options depart 08:00; option 1 also arrives at the
+    # original's 10:00 — the same-flight tell.
+    options = [_opt(1, 100, "10:00"), _opt(2, 200, "10:40")]
+    chosen = repair_tools._pick_replacement(
+        options, None, "10:00", original_depart_time="08:00"
+    )
+    assert chosen.flight_number == 200
+
+    # A different depart clock is a different flight, even with the same
+    # arrival — closest-arrival keeps it.
+    chosen = repair_tools._pick_replacement(
+        options, None, "10:00", original_depart_time="09:30"
+    )
+    assert chosen.flight_number == 100
+
+
+def test_pick_replacement_equal_clock_exclusion_never_empties(caplog):
+    """The only cached itinerary IS the original's clocks — fall back to
+    the unfiltered pool with a warning rather than crash or skip."""
+    options = [_opt(1, 100, "10:00")]
+    with caplog.at_level("WARNING"):
+        chosen = repair_tools._pick_replacement(
+            options, None, "10:00", original_depart_time="08:00"
+        )
+    assert chosen.flight_number == 100
+    assert "unfiltered pool" in caplog.text
+
+
 # --- empty re-shop -> mock fallback, never a stall ------------------------------
 
 def test_empty_reshop_falls_back_to_mock_and_still_writes(bq, monkeypatch, caplog):

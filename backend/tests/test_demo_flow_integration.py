@@ -57,16 +57,33 @@ def test_full_consent_gated_flow_break_to_results_call(monkeypatch):
 
     def fake_place_call(purpose, name=None):
         calls.append((name, purpose))
-        return True, {"call_id": f"c-{len(calls)}", "status": "initiated"}, None
+        # The live shape (Phase 31): the call response's call_id never
+        # appears in the session logs — only room_name joins the two.
+        return True, {
+            "call_id": f"call-{len(calls)}", "status": "initiated",
+            "room_name": f"room-{len(calls)}",
+        }, None
 
     monkeypatch.setattr(demo_module.vb_cli, "place_call", fake_place_call)
-    monkeypatch.setattr(
-        demo_module.vb_cli, "find_session",
-        lambda call_id, lookback=50: (True, {
-            "id": call_id, "call_status": "completed",
-            "transcript_text": TRANSCRIPT,
-        }, None),
-    )
+
+    # The real find_session runs against live-shaped log rows (id +
+    # room_name, NO call_id key) served by a fake `vb` CLI — this is the
+    # exact 2026-07-15 live failure, now required to pass end to end.
+    def fake_run_vb(*args, json_output=False, timeout=60):
+        if args[:2] == ("agent", "use"):
+            return True, "ok", None
+        if args[:2] == ("logs", "list"):
+            return True, [{
+                "id": "d0d991f5-3401-4922-9e02-f4dae8c2af82",
+                "room_name": "room-1",
+                "status": "completed",
+                "call_status": "completed",
+                "transcript_text": TRANSCRIPT,
+            }], None
+        raise AssertionError(f"unexpected vb command: {args}")
+
+    monkeypatch.setattr(demo_module.vb_cli, "run_vb", fake_run_vb)
+    monkeypatch.setenv("VOCAL_BRIDGE_CALLER_AGENT_ID", "a")
 
     async def fake_classify(transcript):
         assert "Yeah" in transcript
@@ -153,4 +170,4 @@ def test_full_consent_gated_flow_break_to_results_call(monkeypatch):
     for purpose in (ask, results):
         assert "+15555550123" not in purpose
         assert "VOCAL_BRIDGE" not in purpose
-    assert response["call_id"] == "c-1"
+    assert response["call_id"] == "call-1"

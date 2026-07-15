@@ -34,6 +34,34 @@ The dashboard's live layers on top of Phase 22 — the conversation feed (travel
 
 Quota: 2 calls per full run (booking is web-voice, free). Ends with the full mockup experience — and the complete book → break → consent → repair → callback demo — on one page.
 
+## Phase 31: Phase 23 close-out — the consent flow works live [x] COMPLETE (implementation; manual QA pending)
+
+The live-QA and independent-validation findings from 2026-07-15 (report:
+`specs/2026-07-15-cascade-live-voice-demo/validation-report.md`; live-run diagnosis in
+the session notes). Josh's live run proved booking, Call 1's real-trip consent script,
+and the honest stand-down — and broke the headline moment: the consent watcher can
+never find its own call, so yes → repairs → Call 2 never fires in production.
+
+- **The watcher matches Call 1's session by `room_name`** — `vb call` returns
+  `call_id` + `room_name`, but the session log carries only `id`/`room_name` (proven
+  live 2026-07-15: watcher `timed_out` at its 3-minute deadline while the completed,
+  transcript-bearing session sat in the log). `place_call` returns `room_name`;
+  `find_session` matches it. The Call 2 blocker.
+- **The rebooked flight must differ from the original** (Josh, live QA): voice-booked
+  items carry no flight identity, so the re-shop's exclusion filter is starved and
+  "closest arrival" re-picks the cancelled flight. `book_flight` stamps
+  `airline`/`flight_number` into the item's `details`; the repair excludes it.
+- **Re-trigger race** (validator, CONFIRMED failing test): the watcher checks token
+  currency before classification but not again before launching — a Cancel re-click
+  during the classifier's await can double-launch repairs and Call 2. Atomic
+  resolve-to-granted before launch.
+- **`trip_status` honesty** (validator, CONFIRMED failing test): a `cancelled` leg
+  currently gets "Everything is on track." appended.
+- **`fix_trip` vs the consent gate**: during an `awaiting_consent` window the orb's
+  fix_trip races the phone watcher (observed live — the orb repaired while the watcher
+  waited). Decide + implement the interplay.
+- Adopt the validator's two tests; PR evidence pre-merge (the guard now exists).
+
 ## Phase 24: Pre-event readiness
 
 The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 evening replan and again 2026-07-14 (evening): **the full `SABRE_MODE=real` flip shipped with Phase 27** (search real on Cloud Run since 2026-07-14), and **the event-day entitlement ask is deleted** — decision 2026-07-14: no extra permissions are coming, so the former "conditional punch list" (dead `POS` field, empty-BFM shapes, BM errors-as-200, BFM offset-bearing time conversion) is retired from this roadmap; it stays documented in the Phase 25 notes' deltas if circumstances ever change. Everything here must land before July 18.

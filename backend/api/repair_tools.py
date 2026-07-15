@@ -181,24 +181,47 @@ def _pick_replacement(
     options: List[flight_options.FlightOption],
     cancelled_flight: Optional[Tuple[str, int]],
     original_arrive_time: Optional[str],
+    original_depart_time: Optional[str] = None,
 ) -> flight_options.FlightOption:
-    """Choose the replacement flight (Phase 29, decision 2): drop any option
-    whose (airline, flight_number) is the cancelled flight's — but keep the
-    filter only if the cancelled flight is known AND excluding it leaves
-    something (best-effort "where possible"). Among the survivors, return the
-    option whose PT arrival is closest to the original flight's arrival time,
-    protecting downstream hotel/ground timing. With no original arrival known,
-    take the first option (response order — cheapest/earliest by the parser's
-    contract). Assumes a non-empty list (the caller guarantees it via the
-    mock fallback)."""
+    """Choose the replacement flight (Phase 29, decision 2; hardened by
+    Phase 31 — live QA rebooked the traveler onto their cancelled flight):
+
+    - Identity exclusion: drop any option whose (airline, flight_number) is
+      the cancelled flight's. Since Phase 31 the voice booking stamps that
+      identity into the item's details, so this filter actually engages.
+    - No-identity fallback (seed trips, pre-Phase-31 rows): an option whose
+      depart AND arrive clocks equal the original's is treated as the same
+      flight and dropped.
+    - Never fatal: if exclusion empties the pool, fall back to the
+      unfiltered pool with a warning — a repaired-if-identical flight beats
+      a crashed repair (the demo pins a pair with multiple itineraries).
+
+    Among the survivors, return the option whose PT arrival is closest to
+    the original flight's arrival time, protecting downstream hotel/ground
+    timing. With no original arrival known, take the first option (response
+    order — cheapest/earliest by the parser's contract). Assumes a
+    non-empty list (the caller guarantees it via the mock fallback)."""
     candidates = options
     if cancelled_flight is not None:
         survivors = [
             o for o in options
             if (o.airline, o.flight_number) != cancelled_flight
         ]
-        if survivors:
-            candidates = survivors
+    elif original_depart_time and original_arrive_time:
+        survivors = [
+            o for o in options
+            if (o.depart_time[:5], o.arrive_time[:5])
+            != (original_depart_time[:5], original_arrive_time[:5])
+        ]
+    else:
+        survivors = options
+    if survivors:
+        candidates = survivors
+    elif options:
+        logger.warning(
+            "flight repair: every candidate matches the cancelled flight; "
+            "falling back to the unfiltered pool"
+        )
     if not original_arrive_time:
         return candidates[0]
     target = _minutes_of_day(original_arrive_time)
@@ -232,6 +255,7 @@ async def _rebook_flight(
     original_currency: str = "USD",
     original_arrive_time: Optional[str] = None,
     cancelled_flight: Optional[Tuple[str, int]] = None,
+    original_depart_time: Optional[str] = None,
 ) -> dict:
     """Rebook a broken flight by re-shopping **real InstaFlights data**
     (Phase 29): the repair speaks a real replacement flight, not BFM content
@@ -270,7 +294,9 @@ async def _rebook_flight(
             mock_search, origin, destination
         )
 
-    chosen = _pick_replacement(options, cancelled_flight, original_arrive_time)
+    chosen = _pick_replacement(
+        options, cancelled_flight, original_arrive_time, original_depart_time
+    )
 
     # PNR write stays mock — permanently (requirements/DoD-C). Only the *search*
     # above is real; the cancel + create go straight to the mock client, never
