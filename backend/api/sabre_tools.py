@@ -201,6 +201,10 @@ def _repair_call(item: ItineraryItem):
             original_currency=item.currency or "USD",
             original_arrive_time=_pt_hhmm(item.end_ts),
             cancelled_flight=_cancelled_flight(item),
+            # Phase 31: when the item carries no flight identity (seed
+            # trips, pre-31 rows), the depart+arrive clocks are the
+            # same-flight tell for the exclusion filter.
+            original_depart_time=_pt_hhmm(item.start_ts),
         )
     if item.type == "hotel":
         return repair_tools._shift_hotel_dates(

@@ -1,15 +1,27 @@
 #!/bin/bash
 #
-# Commit -> push -> open/update PR -> merge it -> sync dev.
+# Commit -> push -> open/update PR -> evidence check -> merge it -> sync dev.
 #
 # Works from whatever branch you're on. The single optional argument is both
-# the commit message and PR title. The PR description is generated
-# automatically from that title so GitHub never shows "No description provided."
+# the commit message and PR title.
+#
+# PR evidence guard (Phase 31 — a non-empty-only check let four phases merge
+# with placeholder bodies): the merge is BLOCKED unless the PR description
+# carries all three evidence sections and no auto-generated placeholder:
+#   ### Mock walkthrough
+#   ### Live run
+#   ### Pytest
+# Write them in PR_BODY.md at the repo root (gitignored) and this script uses
+# it as the PR description verbatim; without that file a template with the
+# three headings (and a placeholder notice that fails the guard until
+# replaced) is generated. A hand-edited PR body on GitHub is never clobbered.
+# SKIP_EVIDENCE=1 bypasses the check, loudly, for PRs with no runtime surface.
 #
 # Usage:
 #   ./git_pull_dev.sh
 #   ./git_pull_dev.sh "my commit message / PR title"
 #   DRY_RUN=1 BASE_BRANCH=main ./git_pull_dev.sh "preview only"
+#   SKIP_EVIDENCE=1 ./git_pull_dev.sh "chore: docs only"
 #
 # If someone invokes this Bash script as `sh git_pull_dev.sh`, re-enter Bash
 # instead of relying on the host's /bin/sh implementation.
@@ -61,9 +73,24 @@ if [ "$#" -gt 1 ]; then
   exit 2
 fi
 
-PR_BODY="$(printf '%s\n' \
-  "## Summary" "" "${COMMIT_MSG}" "" \
-  "_Placeholder description generated automatically by git_pull_dev.sh._")"
+# The three sections the merge guard requires, and the placeholder marker
+# that fails it until the template is actually filled in.
+PLACEHOLDER_MARK="Placeholder description generated automatically"
+
+if [ -f "PR_BODY.md" ]; then
+  # The evidence draft (gitignored) is the PR description, verbatim.
+  PR_BODY="$(cat PR_BODY.md)"
+  BODY_SOURCE="PR_BODY.md"
+  echo "==> PR description from PR_BODY.md"
+else
+  PR_BODY="$(printf '%s\n' \
+    "## Summary" "" "${COMMIT_MSG}" "" \
+    "### Mock walkthrough" "" "_fill in before merge_" "" \
+    "### Live run" "" "_fill in before merge_" "" \
+    "### Pytest" "" "_fill in before merge_" "" \
+    "_${PLACEHOLDER_MARK} by git_pull_dev.sh — replace the fill-ins (or write PR_BODY.md) before merging._")"
+  BODY_SOURCE="template"
+fi
 
 # 1. Commit any pending changes on the current branch.
 if [ "${DRY_RUN}" = "1" ]; then
@@ -91,14 +118,30 @@ if [ "${CURRENT_BRANCH}" = "${BASE_BRANCH}" ]; then
   echo "==> On ${BASE_BRANCH}; skipping PR/merge (a branch can't PR into itself)."
 elif [ "${DRY_RUN}" = "1" ]; then
   echo "==> DRY RUN: would create/update ${CURRENT_BRANCH} -> ${BASE_BRANCH}"
-  echo "==> DRY RUN: would set the automatic placeholder PR description"
+  echo "==> DRY RUN: would set the PR description from ${BODY_SOURCE}"
   echo "==> DRY RUN: would mark a draft PR ready if needed"
+  echo "==> DRY RUN: would check the PR body for the three evidence sections"
   echo "==> DRY RUN: would merge with ${MERGE_METHOD} ${MERGE_EXTRA} and delete the branch"
 else
   if gh pr view "${CURRENT_BRANCH}" >/dev/null 2>&1; then
     echo "==> Reusing existing PR for ${CURRENT_BRANCH}"
-    echo "==> Updating PR title and automatic placeholder description"
-    gh pr edit "${CURRENT_BRANCH}" --title "${COMMIT_MSG}" --body "${PR_BODY}"
+    if [ "${BODY_SOURCE}" = "PR_BODY.md" ]; then
+      echo "==> Updating PR title and description from PR_BODY.md"
+      gh pr edit "${CURRENT_BRANCH}" --title "${COMMIT_MSG}" --body "${PR_BODY}"
+    else
+      # Never clobber a hand-written body with the template — this exact
+      # clobber produced the placeholder-only bodies of PRs #53/#54
+      # (Phase 31). Only an empty or still-placeholder body is replaced.
+      EXISTING_BODY="$(gh pr view "${CURRENT_BRANCH}" --json body --jq .body)"
+      if [ -z "${EXISTING_BODY}" ] \
+         || printf '%s' "${EXISTING_BODY}" | grep -qF "${PLACEHOLDER_MARK}"; then
+        echo "==> Updating PR title and template description"
+        gh pr edit "${CURRENT_BRANCH}" --title "${COMMIT_MSG}" --body "${PR_BODY}"
+      else
+        echo "==> Updating PR title only (keeping the existing description)"
+        gh pr edit "${CURRENT_BRANCH}" --title "${COMMIT_MSG}"
+      fi
+    fi
   else
     echo "==> Opening PR: ${CURRENT_BRANCH} -> ${BASE_BRANCH}"
     gh pr create \
@@ -111,6 +154,31 @@ else
   if [ "$(gh pr view "${CURRENT_BRANCH}" --json isDraft --jq .isDraft)" = "true" ]; then
     echo "==> Marking draft PR ready for merge"
     gh pr ready "${CURRENT_BRANCH}"
+  fi
+
+  # The evidence guard (Phase 31): no merge without the three evidence
+  # sections in the PR body, and never with the placeholder still present.
+  BODY_NOW="$(gh pr view "${CURRENT_BRANCH}" --json body --jq .body)"
+  MISSING=""
+  for section in "### Mock walkthrough" "### Live run" "### Pytest"; do
+    if ! printf '%s' "${BODY_NOW}" | grep -qF "${section}"; then
+      MISSING="${MISSING}    missing section: ${section}"$'\n'
+    fi
+  done
+  if printf '%s' "${BODY_NOW}" | grep -qF "${PLACEHOLDER_MARK}"; then
+    MISSING="${MISSING}    the auto-generated placeholder is still in the body"$'\n'
+  fi
+  if [ -n "${MISSING}" ]; then
+    if [ "${SKIP_EVIDENCE:-0}" = "1" ]; then
+      echo "==> WARNING: SKIP_EVIDENCE=1 — merging despite missing evidence:"
+      printf '%s' "${MISSING}"
+    else
+      echo "!!! PR evidence guard: refusing to merge — the description lacks required evidence:" >&2
+      printf '%s' "${MISSING}" >&2
+      echo "!!! Write the evidence into PR_BODY.md (repo root, gitignored) and re-run this" >&2
+      echo "!!! script, or edit the PR description on GitHub. SKIP_EVIDENCE=1 bypasses, loudly." >&2
+      exit 1
+    fi
   fi
 
   # GitHub may need a moment to compute mergeability after a fresh push/PR, so

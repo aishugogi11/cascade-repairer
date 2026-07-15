@@ -115,8 +115,14 @@ def set_caller_purpose(purpose: str) -> Tuple[bool, Optional[str], Optional[str]
 def place_call(purpose: str, name: str | None = None) -> Tuple[bool, Optional[dict], Optional[str]]:
     """Pin the caller agent, inject the purpose, optionally refresh the
     outbound greeting from env, then dial the configured callee. Returns a
-    sanitized payload — call_id and status only, so nothing transport-level
-    (and never the callee number) leaks to an LLM or API client."""
+    sanitized payload — call_id, status, and room_name only, so nothing
+    transport-level (and never the callee number or API key) leaks to an
+    LLM or API client.
+
+    room_name is the join key to the session logs (Phase 31, proven live
+    2026-07-15): `vb call` returns call_id + room_name, but `vb logs list`
+    rows carry only id + room_name — a watcher keyed on call_id polls
+    forever. It's a session identifier, not a transport secret."""
     callee = os.environ.get("VOCAL_BRIDGE_CALLEE_PHONE", "").strip()
     if not callee:
         return False, None, "VOCAL_BRIDGE_CALLEE_PHONE not set"
@@ -147,6 +153,7 @@ def place_call(purpose: str, name: str | None = None) -> Tuple[bool, Optional[di
     return True, {
         "call_id": raw.get("call_id"),
         "status": raw.get("status", "initiated"),
+        "room_name": raw.get("room_name"),
     }, None
 
 
@@ -187,9 +194,13 @@ def find_session(session_id: str, lookback: int = 50) -> Tuple[bool, Optional[di
         return False, None, error
     for session in _sessions_from_payload(payload):
         # Live CLI payloads key the id as `id` (observed 2026-07-08 on the
-        # deployed service); older/newer shapes may use `session_id`.
+        # deployed service); older/newer shapes may use `session_id`. The
+        # log rows never carry `call_id` — a call joins to its session by
+        # `room_name` (Phase 31, proven live 2026-07-15), so that key
+        # matches too.
         if isinstance(session, dict) and session_id in (
-            session.get("id"), session.get("session_id")
+            session.get("id"), session.get("session_id"),
+            session.get("room_name"),
         ):
             return True, session, None
     return True, None, None
