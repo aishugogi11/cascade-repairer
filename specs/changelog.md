@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 30 — Search-hardening close-out: Phase 28 validation gaps
+**Completed:** 2026-07-15 (implementation + hermetic suite green, merged PR #47 and deployed on `vb/dev`; independent validation returned **FAIL** on two non-code items only, both re-verified as environmental rather than implementation defects — an empty PR #47 description [DoD-B], and a live CERT priced-search test hardcoding DFW→LAX +30d that drifted to empty; report in the spec dir) · **Spec:** [specs/2026-07-15-search-hardening-closeout/](2026-07-15-search-hardening-closeout/)
+
+The four Phase 28 remediation items shipped on one branch (PR #47) so Phase 29 starts from validated ground: `search_flights_impl` now clears both `_SESSION_FLIGHT_OPTIONS` and its owned `_LATEST_SEARCH` slot on every non-optioned return (missing input, unsupported market, error, no-results) so a traveler told "no flights" can't book a stale choice; a six-case parametrized test asserts `NYC→JFK`/`WAS→IAD`/`CHI→ORD` alias in both request positions and reach the market check; a POST-path test proves `_post` refreshes the token once on a 401 and raises on a second; and `git_pull_dev.sh` defaults its base branch to `vb/dev` ahead of the `gh`/`origin/HEAD` fallbacks (which resolve to `main` and `--admin`-merge immediately). Bare suite 387 passed; the two FAILs were independently confirmed non-code — the CERT test's DFW→LAX +30d is honest-empty cache drift while JFK→LAX +30d returns real fares through the identical path, and the empty-PR-body gap is superseded by the `pr-evidence-guard` workflow (PR #48) that auto-populates future descriptions.
+
 ## Phase 28 — Search hardening: Phase 27 validation fixes and honest empties
 **Completed:** 2026-07-14 (implementation + deployed real-mode spot checks the same evening; independent validation returned **FAIL** on acceptance-package gaps — every behavior criterion passed, but criterion 6's six metro-alias cases and the POST-path 401 test are uncommitted and the pre-merge PR-evidence rule was missed; remediation plus two report-surfaced risks are roadmap **Phase 30**, report in the spec dir) · **Spec:** [specs/2026-07-14-search-hardening/](2026-07-14-search-hardening/)
 
