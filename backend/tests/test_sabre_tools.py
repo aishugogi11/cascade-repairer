@@ -1,5 +1,6 @@
 """Walkthrough-surface tests (seed + repair endpoints) — hermetic, BigQuery
 mocked at the bq_helper boundary per test_repositories.py conventions."""
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -125,6 +126,37 @@ def test_repair_trip_runs_one_repair_per_item_all_ok(bq):
     assert len(status_writes) == 5
     for item_id, statuses in status_writes.items():
         assert statuses == ["repairing", "fixed"], item_id
+
+
+def test_repair_trip_flight_writes_flight_repair_and_flips_to_fixed(bq):
+    """Phase 29 end-to-end through the cascade: the flight repair re-shops
+    InstaFlights and writes a `flight_repair` booking (parsed option, non-empty
+    alternatives), and the cascade unit flips the item broken -> repairing ->
+    fixed. No BFM `flight_search` is on this path anymore."""
+    bq.select.return_value = (True, five_item_rows(), None)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/v1/sabre_tools/repair_trip", json={"trip_id": "t-1", "wait": True}
+        )
+    assert resp.status_code == 200
+
+    flight_raw = None
+    flight_statuses = []
+    for call in bq.dml.call_args_list:
+        params = {p.name: p.value for p in call.args[1]}
+        if params.get("item_id") != "i-flight":
+            continue
+        if "raw_response" in params:
+            flight_raw = json.loads(params["raw_response"])
+        elif "status" in params:
+            flight_statuses.append(params["status"])
+
+    assert flight_raw is not None
+    assert flight_raw["source"] == "flight_repair"
+    assert flight_raw["option"]["flight_number"] > 0  # a parsed itinerary
+    assert len(flight_raw["alternatives"]) >= 1
+    assert flight_raw["from_mock_fallback"] is False
+    assert flight_statuses == ["repairing", "fixed"]  # the cascade owns the flip
 
 
 def test_repair_trip_404_when_trip_has_no_items(bq):

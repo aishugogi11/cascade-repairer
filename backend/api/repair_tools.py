@@ -19,13 +19,18 @@ write raises, so the completion event reports an error instead of a false ok.
 """
 import asyncio
 import hashlib
+import logging
+from typing import List, Optional, Tuple
 
 from agents import function_tool
 
+from api import flight_options
 from api.repositories import bookings, itinerary_items
 from api.repositories.models import Booking
 from api.sabre import client as sabre_client
 from api.sabre import shapes
+
+logger = logging.getLogger(__name__)
 
 # Canned traveler for demo bookings — the demo trip has one traveler and the
 # voice flow never collects passport-grade details.
@@ -172,49 +177,103 @@ async def _search_and_book_flight(
     }
 
 
+def _pick_replacement(
+    options: List[flight_options.FlightOption],
+    cancelled_flight: Optional[Tuple[str, int]],
+    original_arrive_time: Optional[str],
+) -> flight_options.FlightOption:
+    """Choose the replacement flight (Phase 29, decision 2): drop any option
+    whose (airline, flight_number) is the cancelled flight's — but keep the
+    filter only if the cancelled flight is known AND excluding it leaves
+    something (best-effort "where possible"). Among the survivors, return the
+    option whose PT arrival is closest to the original flight's arrival time,
+    protecting downstream hotel/ground timing. With no original arrival known,
+    take the first option (response order — cheapest/earliest by the parser's
+    contract). Assumes a non-empty list (the caller guarantees it via the
+    mock fallback)."""
+    candidates = options
+    if cancelled_flight is not None:
+        survivors = [
+            o for o in options
+            if (o.airline, o.flight_number) != cancelled_flight
+        ]
+        if survivors:
+            candidates = survivors
+    if not original_arrive_time:
+        return candidates[0]
+    target = _minutes_of_day(original_arrive_time)
+    # Circular minute-of-day distance: the original arrival carries a PT
+    # time-of-day but no date, so compare on the 24-hour clock (23:50 vs
+    # 00:10 is 20 minutes apart, not 1420) — the honest closest-arrival read.
+    return min(
+        candidates,
+        key=lambda o: _clock_distance(_minutes_of_day(o.arrive_time), target),
+    )
+
+
+def _minutes_of_day(hhmm: str) -> int:
+    """'14:30' -> minutes since midnight."""
+    return int(hhmm[:2]) * 60 + int(hhmm[3:5])
+
+
+def _clock_distance(a: int, b: int) -> int:
+    """Shortest distance between two minute-of-day points on the 24h clock."""
+    diff = abs(a - b)
+    return min(diff, 1440 - diff)
+
+
 async def _rebook_flight(
     trip_id: str,
     item_id: str,
     origin: str,
     destination: str,
     departure_date: str,
+    original_price: float = 0.0,
+    original_currency: str = "USD",
+    original_arrive_time: Optional[str] = None,
+    cancelled_flight: Optional[Tuple[str, int]] = None,
 ) -> dict:
-    """Rebook a broken flight: cancel the old Sabre booking and book a
-    replacement (cancel + create — Sabre has no single rebook call). Writes
-    the new booking; the cascade unit owns the item's status flip."""
+    """Rebook a broken flight by re-shopping **real InstaFlights data**
+    (Phase 29): the repair speaks a real replacement flight, not BFM content
+    that has none on this PCC. Search the broken route/date, parse the priced
+    itineraries, pick a real alternative, and cancel + create the PNR (the
+    create stays the mock client — the entitlement wall is permanent). Writes
+    an enriched `flight_repair` booking; the cascade unit owns the item's
+    status flip.
+
+    The original flight's context (price/currency/arrival/flight number) is
+    supplied best-effort by the caller (sabre_tools._repair_call) for the
+    selection and price-delta; every param is optional so the walkthrough
+    endpoint and tests can omit it."""
     old_ref = await _latest_sabre_ref(trip_id, item_id)
 
-    search = await sabre_client.flight_search(
-        shapes.FlightSearchRequest(
-            OTA_AirLowFareSearchRQ=shapes.OTAAirLowFareSearchRQ(
-                OriginDestinationInformation=[
-                    shapes.OriginDestinationInformation(
-                        RPH="1",
-                        DepartureDateTime=f"{departure_date}T08:00:00",
-                        OriginLocation=shapes.AirportLocation(LocationCode=origin),
-                        DestinationLocation=shapes.AirportLocation(
-                            LocationCode=destination
-                        ),
-                    )
-                ],
-                TravelerInfoSummary=shapes.TravelerInfoSummary(
-                    AirTravelerAvail=[
-                        shapes.AirTravelerAvail(
-                            PassengerTypeQuantity=[
-                                shapes.PassengerTypeQuantity(Code="ADT", Quantity=1)
-                            ]
-                        )
-                    ]
-                ),
-            )
-        )
+    request = shapes.InstaFlightsRequest(
+        origin=origin, destination=destination, departuredate=departure_date,
     )
-    schedule = search.groupedItineraryResponse.scheduleDescs[0]
-    fare = (
-        search.groupedItineraryResponse.itineraryGroups[0]
-        .itineraries[0].pricingInformation[0].fare
-    )
+    search = await sabre_client.instaflights_search(request)
+    options = flight_options._parse_instaflights_options(search, origin, destination)
 
+    # Empty -> mock fallback (decision 3): the dispatcher returns an honest
+    # empty on the documented no-results 404 (Phase 28) rather than mock-
+    # swapping, so a merely-empty cache date reaches here as zero options. Call
+    # the mock directly for the same route/date so the 60-second cascade never
+    # stalls, and log the route. When the real parse succeeded, this stays False.
+    from_mock_fallback = False
+    if not options:
+        from_mock_fallback = True
+        logger.warning(
+            "flight repair re-shop empty for %s-%s %s; using mock",
+            origin, destination, departure_date,
+        )
+        mock_search = await sabre_client._mock.instaflights_search(request)
+        options = flight_options._parse_instaflights_options(
+            mock_search, origin, destination
+        )
+
+    chosen = _pick_replacement(options, cancelled_flight, original_arrive_time)
+
+    # PNR write stays mock (entitlement wall) — cancel + create, sourced from
+    # the chosen real option's fields, not BFM schedule descriptors.
     rebooked = await sabre_client.rebook_flight(
         shapes.RebookFlightRequest(
             confirmationId=old_ref,
@@ -228,12 +287,12 @@ async def _rebook_flight(
                 flightDetails=shapes.FlightDetails(
                     flights=[
                         shapes.FlightToBook(
-                            flightNumber=schedule.carrier.marketingFlightNumber,
-                            airlineCode=schedule.carrier.marketing,
+                            flightNumber=chosen.flight_number,
+                            airlineCode=chosen.airline,
                             fromAirportCode=origin,
                             toAirportCode=destination,
-                            departureDate=departure_date,
-                            departureTime=schedule.departure.time[:5],
+                            departureDate=chosen.depart_date,
+                            departureTime=chosen.depart_time,
                         )
                     ],
                     flightPricing=[shapes.FlightPricing()],
@@ -242,19 +301,32 @@ async def _rebook_flight(
         )
     )
 
+    # The enriched raw_response drives the booking page's flight_repair detail
+    # panel (why-chosen / price-delta). The chosen option, the alternatives it
+    # beat, the original fare, and the mock rebook payload (unchanged).
+    raw_response = {
+        "source": "flight_repair",
+        "option": chosen.model_dump(),
+        "alternatives": [o.model_dump() for o in options if o is not chosen],
+        "original_price": original_price,
+        "original_currency": original_currency,
+        "from_mock_fallback": from_mock_fallback,
+        "rebooked": rebooked.model_dump(),
+    }
     await _write_booking(
-        trip_id, item_id, rebooked.created.confirmationId, rebooked.model_dump()
+        trip_id, item_id, rebooked.created.confirmationId, raw_response
     )
-    flight = rebooked.created.booking.flights[0]
     return {
         "cancelled_ref": old_ref,
         "confirmation_ref": rebooked.created.confirmationId,
-        "airline": flight.airlineCode,
-        "flight_number": flight.flightNumber,
-        "departure_date": flight.departureDate,
-        "departure_time": flight.departureTime,
-        "price": fare.totalFare.totalPrice,
-        "currency": fare.totalFare.currency,
+        "airline": chosen.airline,
+        "flight_number": chosen.flight_number,
+        "departure_date": chosen.depart_date,
+        "departure_time": chosen.depart_time,
+        "price": chosen.price,
+        "currency": chosen.currency,
+        "from_mock_fallback": from_mock_fallback,
+        "price_delta": chosen.price - original_price,
     }
 
 

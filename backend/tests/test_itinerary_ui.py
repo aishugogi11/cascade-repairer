@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import concierge
+from api import concierge, itinerary_ui as itinerary_ui_mod
 from api.helpers.bigquery_helper import bq_helper
 from api.itinerary_ui import itinerary_ui
 
@@ -250,6 +250,68 @@ def test_status_detail_for_repaired_item_and_latest_booking_wins(bq):
     assert "rescheduled" in detail["why_chosen"]
     assert detail["price_delta"] == "$0"
     assert "landing" in detail["impact"] or "ride" in detail["impact"]
+
+
+# --- flight_repair detail (Phase 29) — real why-chosen + signed price-delta ---
+
+
+def _flight_repair_raw(price=420.0, original=500.0, airline="DL",
+                       flight_number=2412, stops=0, arrive_time="15:10"):
+    return {
+        "source": "flight_repair",
+        "option": {
+            "airline": airline, "flight_number": flight_number, "stops": stops,
+            "arrive_time": arrive_time, "price": price,
+        },
+        "alternatives": [{"flight_number": 999}],
+        "original_price": original,
+        "original_currency": "USD",
+        "from_mock_fallback": False,
+    }
+
+
+def test_flight_repair_detail_names_flight_and_signs_a_cheaper_delta():
+    detail = itinerary_ui_mod._flight_repair_detail(_flight_repair_raw())
+    # Names the airline + flight number + arrival, warm and jargon-free.
+    assert "Delta 2412" in detail["why_chosen"]
+    assert "3:10 PM" in detail["why_chosen"]  # 15:10 -> 12-hour PT clock
+    assert "nonstop" in detail["why_chosen"]
+    for jargon in ("mock", "sandbox", "API", "InstaFlights", "DL"):
+        assert jargon not in detail["why_chosen"]
+    assert detail["price_delta"] == "-$80"  # 420 vs 500 — a cheaper rebooking
+    assert detail["impact"]
+
+
+def test_flight_repair_detail_signed_delta_costlier_and_zero():
+    costlier = itinerary_ui_mod._flight_repair_detail(
+        _flight_repair_raw(price=560.0, original=500.0, stops=1, airline="AA",
+                           flight_number=100)
+    )
+    assert costlier["price_delta"] == "+$60"
+    assert "American 100" in costlier["why_chosen"] and "one stop" in costlier["why_chosen"]
+
+    within = itinerary_ui_mod._flight_repair_detail(
+        _flight_repair_raw(price=500.30, original=500.0)
+    )
+    assert within["price_delta"] == "$0"  # inside the +/-$0.50 threshold
+
+
+def test_status_routes_flight_repair_booking_to_the_real_builder(bq):
+    """The status endpoint dispatches a flight_repair booking to
+    _flight_repair_detail, not the static _REPAIR_WHY fallback."""
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, item_rows(("flight", "fixed")), None),
+        (True, [booking_row("i-0", _flight_repair_raw())], None),
+    ]
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    detail = body["items"][0]["detail"]
+    assert "Delta 2412" in detail["why_chosen"]
+    assert detail["price_delta"] == "-$80"
+    # not the static "Rebooked automatically to keep the trip on track." copy
+    assert "automatically" not in detail["why_chosen"]
 
 
 def test_status_detail_read_failure_never_breaks_the_poll(bq):
