@@ -204,11 +204,16 @@ CODE="cascade2026"                 # the DEMO_ACCESS_CODE on the service
 DEMO_DATE="July 20 2026"           # the date you'll actually say in the demo
 
 # Curated demo shortlist (from specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md).
+# Each probe MUST use a unique session_name — reusing one makes the agent replay the
+# prior conversation ("I already have options…") instead of searching. epoch+counter
+# guarantees uniqueness; do NOT use $RANDOM (it can collapse to a constant in a shell).
+RUN="$(date +%s)"; i=0
 for PAIR in "SFO to MIA" "SEA to BOS" "BOS to SEA" "JFK to LAX" "JFK to ORD" \
             "ATL to SEA" "LAX to MSP" "DFW to EWR" "MCO to JFK" "SEA to PDX"; do
+  i=$((i+1))
   REPLY=$(curl -s -X POST "$BASE/v1/web_call/query" \
     -H "Content-Type: application/json" -H "X-Access-Code: $CODE" \
-    -d "{\"query\": \"Search flights from $PAIR on $DEMO_DATE\", \"session_name\": \"probe-$RANDOM\"}" \
+    -d "{\"query\": \"Search flights from $PAIR on $DEMO_DATE\", \"session_name\": \"probe-$RUN-$i\"}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('response',''))")
   case "$REPLY" in
     *"I found"*)          echo "✅ LIVE     $PAIR — $REPLY" ;;
