@@ -71,6 +71,27 @@ def test_reads_fresh_statuses_not_the_pinned_cache(monkeypatch):
     assert "Everything is on track" not in reply
 
 
+def test_broken_trip_suppresses_all_clear(monkeypatch):
+    """Phase 31 validation gap: `broken` had no dedicated assertion — a live
+    broken leg must be spoken as disrupted with no all-clear claim (the
+    cancelled and repairing cases have their own tests)."""
+    _pin("room-4", "t-4")
+    live = [
+        ItineraryItem(item_id="i-flight", trip_id="t-4", type="flight",
+                      status="broken"),
+        ItineraryItem(item_id="i-hotel", trip_id="t-4", type="hotel",
+                      status="booked"),
+    ]
+    monkeypatch.setattr(
+        concierge.itinerary_items, "list_items_for_trip",
+        lambda trip_id: (True, live, None),
+    )
+    reply = asyncio.run(concierge.trip_status_impl("room-4"))
+    assert "your flight is disrupted" in reply
+    assert "your hotel is booked and confirmed" in reply
+    assert "Everything is on track" not in reply
+
+
 def test_all_clear_trip_reads_on_track_with_grouped_legs(monkeypatch):
     _pin("room-2", "t-2")
     live = [

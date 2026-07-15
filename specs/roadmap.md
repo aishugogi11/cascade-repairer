@@ -25,7 +25,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 **Open follow-ups (from Phases 23/31, 2026-07-15):**
 - **The live rerun** (2 calls, on the `e20c57a` deploy): book by voice → Cancel → spoken "yes" → repairs with the timer at the go-ahead → **Call 2 arrives with a different flight than the cancelled one**; mid-window, `fix_trip` speaks the phone deferral. Passing it closes both phases' "manual QA pending."
 - **PR #55 evidence**: the manual GitHub merge bypassed the new guard, so the description is still the unfilled template — after the rerun, `gh pr edit 55 --body-file PR_BODY.md` with the three evidence sections.
-- **Cloud Run max-instances is 100, not 1** (found at the Phase 31 deploy check): the in-process consent/session/search-log state assumes a single instance — pin it before the 18th (also listed under Phase 24).
+- ~~Cloud Run max-instances~~ **resolved — no action** (corrected by the Phase 31 validation, 2026-07-15): the *service-level* cap is already `1` (`run.googleapis.com/maxScale`, the enforced knob); the earlier "max is 100" read grabbed the revision-level annotation's cosmetic default. The single-instance assumption holds as deployed — don't "fix" the wrong knob.
 
 ## Phase 24: Pre-event readiness
 
@@ -60,11 +60,13 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   debt). Chase them to their fixtures/mocks and fix or properly close the coroutines —
   they can mask async cleanup defects in the exact code that keeps the agent talking
   during repairs.
-- **Pin Cloud Run max-instances to 1** (Phase 31 deploy check, 2026-07-15): the service
-  allows max scale 100, but the consent registry, session/history state, and search log
-  are in-process memory (the standing single-instance scope decision) — a second
-  instance mid-demo would answer status polls with no knowledge of the consent wait.
-  One `gcloud run services update --max-instances 1` before the first rehearsal.
+- **Single-instance cap: verified, leave it alone** (Phase 31 validation, 2026-07-15):
+  the service-level `run.googleapis.com/maxScale` is already `1` — the enforced cap
+  protecting the in-process consent/session/search-log state. The revision-level
+  `autoscaling.knative.dev/maxScale: 100` annotation is a cosmetic default that does
+  NOT override it; an operator "fixing" that knob is the actual risk. Morning smoke
+  may re-confirm with `gcloud run services describe vocal-bridge-be-dev
+  --format='value(metadata.annotations."run.googleapis.com/maxScale")'`.
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the in-review binary
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge

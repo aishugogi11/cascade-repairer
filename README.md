@@ -213,6 +213,67 @@ without it, drive the Concierge via the `/v1/web_call/query` curl seam and
 watch the page adopt the trip; the disrupt endpoints 503 cleanly without the
 VB env.
 
+### Running it live — the operator run sheet
+
+One full run costs **2 calls** of the 10/day quota (resets 00:00 UTC = 5 PM PDT).
+Have the phone next to the computer; you are both operator and traveler.
+
+**0. Re-verify the anchor pair first (free)** — run the probe loop in
+"Demo-day: check which flight pairs are live" below, within the hour before the
+run. Book whichever pair answers "I found…" (JFK→LAX is the usual anchor).
+
+**1. Open the dashboard** (the `?code=` persists to localStorage, so reloads
+keep working):
+
+```
+https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade/?code=cascade2026
+```
+
+**2. Book by voice (free)** — tap the orb, allow the mic, and say e.g. *"Book a
+flight from New York to Los Angeles on July 17th"* → pick an option by number →
+say yes when the Concierge offers to **arrange the rest of the trip** (without
+this the cascade has only a flight to repair). The trip auto-appears on the
+page within ~4 s.
+
+**3. Cancel flight → cascade (Call 1)** — click it once. Expect: the screen
+turns red with **"waiting for the traveler's go-ahead"** and **no running
+clock**, and the phone rings (~15–30 s). Call 1 must describe the trip you just
+booked and ask permission. Do **not** click Cancel again while the call is up.
+
+**4. Optional mid-window check** — before answering yes, ask the orb to fix the
+trip: it must answer *"I'm already asking you on the phone — just say yes on
+the call and I'll get started."* and launch nothing.
+
+**5. Say "yes" on the phone** — expect: the timer starts (anchored at the
+go-ahead, not at the break), cards animate broken → repairing → fixed, and the
+**rebooked flight differs from the cancelled one** (different flight/time on
+the flight card).
+
+**6. Call 2 arrives** (~35 s after consent) speaking the actual rebooked
+details and price delta.
+
+**The "no" path** (second run, if quota allows): answer "no" on Call 1 —
+no repairs launch, the page shows the stand-down message, the Cancel button
+re-arms, and no Call 2 fires.
+
+**Under-the-hood verification** (curl only — these JSON endpoints read the
+`X-Access-Code` *header*, so a browser address bar gets a 401):
+
+```bash
+BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
+CODE="cascade2026"
+# The page's source of truth: item statuses + the consent block
+# (awaiting_consent → granted after your yes; declined/timed_out on stand-down)
+curl -s -H "X-Access-Code: $CODE" "$BASE/v1/itinerary/status/<TRIP_ID>" | python3 -m json.tool
+curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/latest_trip_id"   # what the page auto-adopts
+curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/search_log"       # the live-search panel feed
+```
+
+**After a passing run:** write the notes (date, pair, both call outcomes, the
+differing rebooked flight) into the PR evidence — `PR_BODY.md` + `gh pr edit
+<PR#> --body-file PR_BODY.md` — and clear the run's items from the roadmap's
+open-follow-ups list.
+
 ## Demo-day: check which flight pairs are live
 
 The guided-booking and repair flows shop **real** Sabre fares (`SABRE_MODE=real`
