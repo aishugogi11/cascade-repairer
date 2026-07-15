@@ -15,7 +15,7 @@ tests (the test_sabre_client.py convention).
 """
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -420,6 +420,103 @@ def test_mock_unmapped_airport_emits_the_fiction_unchanged():
     assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
 
 
+@pytest.mark.parametrize("scenario", ["empty", "error", "unsupported"])
+def test_non_result_search_clears_stale_options(monkeypatch, scenario):
+    """Phase 30 (validation-report Risks): a non-optioned return must clear the
+    previous search's stored options and _LATEST_SEARCH, so a traveler told
+    'no flights' can't book a stale choice by number. Store options with a good
+    search, then trigger each non-result branch and assert both slots clear and
+    a follow-up book finds nothing."""
+    session = "room-stale"
+
+    async def markets_ok():
+        return None  # skip validation, search anyway
+
+    async def search_ok(request):
+        return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+
+    monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets_ok)
+    monkeypatch.setattr(concierge.sabre_client, "instaflights_search", search_ok)
+
+    first = asyncio.run(
+        concierge.search_flights_impl(session, "SFO", "JFK", _DAY)
+    )
+    assert "Option one" in first  # precondition: options are stored
+    assert session in concierge._SESSION_FLIGHT_OPTIONS
+    assert concierge._LATEST_SEARCH is not None
+    assert concierge._LATEST_SEARCH.session_id == session
+
+    if scenario == "empty":
+        monkeypatch.setattr(
+            concierge, "_parse_instaflights_options", lambda *a, **k: []
+        )
+        second = asyncio.run(
+            concierge.search_flights_impl(session, "SFO", "JFK", _NEXT_DAY)
+        )
+        assert "couldn't find any flights" in second
+    elif scenario == "error":
+        async def boom(request):
+            raise RuntimeError("sabre down")
+
+        monkeypatch.setattr(concierge.sabre_client, "instaflights_search", boom)
+        second = asyncio.run(
+            concierge.search_flights_impl(session, "SFO", "JFK", _NEXT_DAY)
+        )
+        assert second == concierge._SEARCH_ERROR_LINE
+    else:  # unsupported market
+        async def markets_without():
+            return {("LAX", "ORD")}  # the requested SFO→JFK pair is absent
+
+        monkeypatch.setattr(
+            concierge.sabre_client, "supported_markets", markets_without
+        )
+        second = asyncio.run(
+            concierge.search_flights_impl(session, "SFO", "JFK", _NEXT_DAY)
+        )
+        assert second == concierge._UNSUPPORTED_MARKET_LINE
+
+    # Both slots are cleared — the stale choice is no longer bookable.
+    assert session not in concierge._SESSION_FLIGHT_OPTIONS
+    assert concierge._LATEST_SEARCH is None
+    book = asyncio.run(concierge.book_flight_impl(session, 1))
+    assert "don't have flight options" in book
+
+
+def test_non_result_search_leaves_other_sessions_untouched(monkeypatch):
+    """The clear is ownership-guarded (mirrors book_flight_impl): another
+    session's in-flight options survive when this session's search comes up
+    empty."""
+    other = concierge.LatestSearch(
+        session_id="room-other",
+        options=_searched_options("SFO", "JFK"),
+        recorded_at=datetime.now(timezone.utc),
+    )
+    concierge._SESSION_FLIGHT_OPTIONS["room-other"] = other.options
+    concierge._LATEST_SEARCH = other
+
+    async def markets_ok():
+        return None
+
+    async def empty_search(request):
+        return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+
+    monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets_ok)
+    monkeypatch.setattr(concierge.sabre_client, "instaflights_search", empty_search)
+    monkeypatch.setattr(
+        concierge, "_parse_instaflights_options", lambda *a, **k: []
+    )
+
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-empty", "SFO", "JFK", _DAY)
+    )
+    assert "couldn't find any flights" in msg
+    assert "room-other" in concierge._SESSION_FLIGHT_OPTIONS  # untouched
+    assert concierge._LATEST_SEARCH is other  # other session's slot survives
+
+    concierge._SESSION_FLIGHT_OPTIONS.pop("room-other", None)
+    concierge._LATEST_SEARCH = None
+
+
 # --- real client contract: mocked transport, no network -------------------------
 
 
@@ -706,6 +803,57 @@ def test_persistent_401_raises_after_exactly_one_retry(monkeypatch):
     assert calls["search"] == 2  # one retry, never a loop
 
 
+def test_post_401_clears_token_and_retries_once(monkeypatch):
+    """The 401-refresh guarantee holds for the POST path too — the tests above
+    exercise _send_with_refresh through _get only (Phase 30). _post clears the
+    cached token and retries exactly once with a freshly minted bearer."""
+    calls = {"token": 0, "post": 0}
+    seen = {}
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            calls["token"] += 1
+            return httpx.Response(200, json={
+                "access_token": f"T1RLtoken{calls['token']}",
+                "token_type": "bearer", "expires_in": 604800,
+            })
+        calls["post"] += 1
+        if calls["post"] == 1:
+            return httpx.Response(401, json={"error": "invalid_token"})
+        seen["retry_auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"ok": True})
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    result = asyncio.run(real._post("/v1/offers/shop", {"q": 1}))
+
+    assert calls["token"] == 2  # cached token cleared, fresh one minted
+    assert calls["post"] == 2  # the request retried exactly once
+    assert seen["retry_auth"] == "Bearer T1RLtoken2"  # retry used the fresh token
+    assert real._token == "T1RLtoken2"
+    assert result == {"ok": True}
+
+
+def test_post_persistent_401_raises_after_one_retry(monkeypatch):
+    calls = {"post": 0}
+
+    def handler(request):
+        if request.url.path == "/v2/auth/token":
+            return _token_response()
+        calls["post"] += 1
+        return httpx.Response(401, json={"error": "invalid_token"})
+
+    _mock_transport(monkeypatch, handler)
+    real = _configured_real_client(monkeypatch)
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        asyncio.run(real._post("/v1/offers/shop", {"q": 1}))
+
+    assert excinfo.value.response.status_code == 401
+    assert calls["post"] == 2  # one retry, never a loop
+
+
 # --- dispatcher: routing, silent fallback, best-effort markets ------------------
 
 
@@ -912,6 +1060,49 @@ def test_non_alias_codes_pass_through_untouched(monkeypatch):
 
     assert seen["request"].origin == "MSP"  # normalized, never remapped
     assert seen["request"].destination == "SFO"
+
+
+@pytest.mark.parametrize(
+    "origin_in, dest_in, expect_origin, expect_dest",
+    [
+        ("NYC", "SFO", "JFK", "SFO"),  # NYC→JFK as origin
+        ("SFO", "NYC", "SFO", "JFK"),  # NYC→JFK as destination
+        ("WAS", "SFO", "IAD", "SFO"),  # WAS→IAD as origin
+        ("SFO", "WAS", "SFO", "IAD"),  # WAS→IAD as destination
+        ("CHI", "SFO", "ORD", "SFO"),  # CHI→ORD as origin
+        ("SFO", "CHI", "SFO", "ORD"),  # CHI→ORD as destination
+    ],
+)
+def test_all_metro_aliases_apply_as_origin_and_destination(
+    monkeypatch, origin_in, dest_in, expect_origin, expect_dest
+):
+    """Criterion 6, six-case reading (Phase 30): NYC→JFK, WAS→IAD, CHI→ORD each
+    alias before the market check in BOTH request positions. The market list
+    carries only the airport pair (metro absent, like the real list), so the
+    aliased pair must reach AND pass the check, and the captured client request
+    must carry the airport code, not the metro code."""
+    seen = {}
+
+    async def markets():
+        return {(expect_origin, expect_dest)}  # airport codes only
+
+    async def capture_search(request):
+        seen["request"] = request
+        return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+
+    monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets)
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", capture_search
+    )
+
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-1", origin_in, dest_in, _DAY)
+    )
+
+    assert seen["request"].origin == expect_origin  # aliased to airport
+    assert seen["request"].destination == expect_dest  # aliased to airport
+    assert msg != concierge._UNSUPPORTED_MARKET_LINE  # reached + passed the check
+    assert "Option one" in msg
 
 
 def test_instructions_carry_the_airport_code_clause():

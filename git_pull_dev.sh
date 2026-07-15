@@ -16,10 +16,17 @@ MERGE_EXTRA="--admin"
 
 # Base branch to integrate into. Resolution order:
 #   1. BASE_BRANCH env var, if you set one:  BASE_BRANCH=main ./git_pull_dev.sh
-#   2. the repo's default branch, via gh
-#   3. the repo's default branch, via git (origin/HEAD)
+#   2. vb/dev — this repo's integration branch (CI/CD deploys on push to it)
+#   3. the repo's default branch, via gh
+#   4. the repo's default branch, via git (origin/HEAD)
+# gh/origin/HEAD resolve to `main` (the stable branch) in this checkout, and
+# this script merges with --admin immediately, so vb/dev is pinned ahead of
+# them; an explicit BASE_BRANCH= still wins, and the fallbacks remain in case
+# the integration branch is ever renamed.
 if [ -n "${BASE_BRANCH:-}" ]; then
   :
+elif git show-ref --verify --quiet refs/remotes/origin/vb/dev; then
+  BASE_BRANCH="vb/dev"
 elif BASE_BRANCH="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)" \
      && [ -n "${BASE_BRANCH}" ]; then
   :

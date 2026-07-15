@@ -14,7 +14,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-14 (late night — Phase 28 close-out):** Phase 28's independent validation returned **FAIL** on acceptance-package gaps while every behavior criterion passed (report: `specs/2026-07-14-search-hardening/validation-report.md`) — criterion 6 needs all six committed metro-alias cases and the token-refresh tests cover only the GET path; the report also surfaced one real behavior risk (an empty repeat search leaves the previous options bookable) and one tooling hazard (`git_pull_dev.sh` defaults its merge base to `main`, not `vb/dev`, and merges with `--admin`). Those four items are **Phase 30**, a small close-out landing before Phase 29 builds on the search path (the Phase 26 precedent). Constitution updates from the same evening: the documented no-results 404 is now an honest empty (never a mock swap), 401s refresh the token once, `AIRPORT_TZ` covers the full live supported-markets list (metro + non-US codes) under a cert parity test, and the pair menu shifts **as the UTC day rolls** (00:00 UTC = 5 PM PDT) — evening rehearsals cross that boundary, sharpening the Phase 24/29 morning-smoke rule. Process lesson carried into Phase 30's spec: PR evidence must be in the description **pre-merge** (the validator's four `validation.md` gap questions are that spec interview's input). New order: **30 → 29 → 22 → 23 → 24**.
 
-## Phase 30: Search-hardening close-out — Phase 28 validation gaps
+## Phase 30: Search-hardening close-out — Phase 28 validation gaps [x] COMPLETE (implementation; manual QA pending)
 
 The Phase 28 validation report's remediation, kept deliberately small so Phase 29 starts from validated ground:
 
