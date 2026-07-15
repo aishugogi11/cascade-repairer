@@ -201,7 +201,7 @@ days out — are the most likely to be cached):
 ```bash
 BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
 CODE="cascade2026"                 # the DEMO_ACCESS_CODE on the service
-DEMO_DATE="July 20 2026"           # the date you'll actually say in the demo
+DEMO_DATE="July 18 2026"           # the date you'll actually say in the demo
 
 # Curated demo shortlist (from specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md).
 # Each probe MUST use a unique session_name — reusing one makes the agent replay the

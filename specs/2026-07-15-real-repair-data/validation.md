@@ -44,6 +44,11 @@ docker run --rm hackathon-vocal-bridge-backend python -m pytest tests/ -q
    fixed and the `GET /v1/itinerary/status/{trip_id}` `detail` for the flight shows a real
    why-chosen (names a flight + arrival) and a numeric price-delta — not the static
    "Rebooked automatically…" copy. Capture the status JSON.
+   ## from josh
+   1. i went here: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/demo/?trip_id=befa8932-e633-468c-9eef-23e436386448, Click to flight canceled 
+   2. In 5.2 seconds, had already recovered it 
+   3. I got the phone call from Vocal Bridge, but she didn't know that the flight was fixed. She did know it was canceled. 
+   4. I pressed the agent to tell me if they knew it was rescheduled or fixed, and she said no, but I said I was able to see it online. There's a disconnect between what I'm able to see and what they're able to see. Mine was updated, and theirs wasn't. 
 9. **Live CERT repair on the demo anchor.** With `SABRE_MODE=real` and credentials, run the
    repair for **JFK→LAX** (the 2026-07-15 verified anchor) at a near-term cached date;
    confirm the chosen replacement is a **real** flight (real airline/number/fare), differs

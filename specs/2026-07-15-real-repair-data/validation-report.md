@@ -1,19 +1,17 @@
 # Validation Report — Real repair data: the cascade re-shops InstaFlights
 
-**Branch:** `vb/dev`  
-**Commit:** `107d40dddef7d1d1ec666665bc4b0e5be301f61a`  
-**Date:** 2026-07-15
+**Branch:** `vb/dev` **Commit:** `6c806c0f00cd0cecf50bf24cb6093de6a64881a6` **Date:** 2026-07-15
 
 ## Summary
 
-**FAIL.** The InstaFlights re-shop, selection, fallback, detail rendering, and live
-CERT behaviors pass, but the feature violates the permanent mock-PNR boundary:
-`_rebook_flight` calls the mode-dispatching `sabre_client.rebook_flight`, so real mode
-attempts the real cancel/create path. A validator-written test proves the real PNR
-client is awaited. Definition-of-done B also fails because merged PR #51 contains only
-the generated placeholder description, not the required pre-merge mock/CERT output.
-The feature was already merged when validation began; `vb/dev` HEAD is PR #51's merge
-commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d104c`.
+**FAIL (acceptance package; implementation passes).** The Phase 29 implementation now
+passes every automated and safely runnable live criterion: the bare-container suite is
+green, the mock-PNR regression guard passes, and both credentialed CERT checks report
+`pnr_write: mock client`. Definition-of-done B remains failed because original PR #51
+and remediation PR #52 contain only generated placeholder descriptions, not the
+required pre-merge mock/CERT output snippets. The mock-mode BigQuery walkthrough also
+remains untestable with the available local credentials. Re-validation ran at PR #52's
+merge commit; its remediation commit is `bfb1cbbeb495aca748960c1770dae0498d033c46`.
 
 ## Criterion-by-criterion results
 
@@ -21,21 +19,18 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 
 - **Criterion:** All bare-container tests pass with only the allowed one Starlette
   deprecation and six pre-existing unawaited-coroutine warnings.
-- **Status:** FAIL
-- **Evidence:** Before adding validator coverage, `docker run --rm
-  hackathon-vocal-bridge-backend python -m pytest tests/ -q` reported `403 passed, 12
-  skipped, 9 deselected, 7 warnings`. With the validator tests included, the same
-  command reports `1 failed, 404 passed, 12 skipped, 11 deselected, 7 warnings`.
-- **Notes:** The warning set is exactly the allowed baseline. The sole failure is
-  `test_validator_real_mode_uses_mock_pnr_client_only`, which exposes criterion C's
-  production defect.
+- **Status:** PASS
+- **Evidence:** `docker run --rm hackathon-vocal-bridge-backend python -m pytest tests/
+  -q` reports `405 passed, 12 skipped, 11 deselected, 7 warnings`.
+- **Notes:** The warning set is exactly the allowed baseline: one Starlette deprecation
+  and the six pre-existing unawaited-coroutine warnings.
 
 ### 2. Refactor is behavior-neutral
 
 - **Criterion:** Existing InstaFlights/Concierge behavior remains green; the re-export
   identity holds; the extracted module has no cycle-forming import.
 - **Status:** PASS
-- **Evidence:** The pre-validator full suite passed. In particular,
+- **Evidence:** The current full suite passed. In particular,
   `test_flight_options.py::test_module_has_no_cycle_forming_import` and
   `test_reexport_identity_holds` passed. `backend/api/flight_options.py` imports only
   datetime, Pydantic, `api.sabre.shapes`, and `api.sabre.airport_tz`; `concierge` directly
@@ -112,8 +107,9 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 - **Evidence:** The container had no default GCP credentials. Mounting the host ADC
   credential read-only progressed to BigQuery but returned `403 ... User does not have
   bigquery.jobs.create permission in project vocal-bridge-hackathon`. PR #51 contains no
-  prior walkthrough capture. Automated endpoint/detail tests pass but are not the
-  required live repository walkthrough.
+  prior walkthrough capture; remediation PR #52 also contains only a placeholder.
+  Automated endpoint/detail tests pass but are not the required live repository
+  walkthrough.
 - **Notes:** No Cloud Run mode change was attempted; changing the deployed service from
   real to mock would be an external deployment mutation, not an independent read-only
   validation step.
@@ -128,9 +124,8 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
   `2026-07-17`: three offers; cancelled Delta 773; chosen Delta 767 at USD 336.40;
   `from_mock_fallback=false`; detail was `Rebooked on Delta 767, nonstop, landing 1:49
   PM` with `$0` delta.
-- **Notes:** The PNR operation was deliberately intercepted to the mock client. This
-  safely validates the live search/selection/detail behavior; the unmodified production
-  PNR routing separately fails criterion C.
+- **Notes:** The test spies on both PNR clients. Output reported `pnr_write: mock client`;
+  the real PNR spy was never awaited.
 
 ### 10. Empty-route fallback observed live
 
@@ -142,8 +137,8 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
   computed date `2026-07-17`, then asserted one booking write, the route warning,
   `from_mock_fallback=true`, and exact `repairing -> fixed` transitions.
 - **Notes:** The live empty response was replayed immediately into the repair to avoid a
-  second network response drifting between probe and assertion; PNR was intercepted to
-  the mock client.
+  second network response drifting between probe and assertion. Output reported
+  `pnr_write: mock client`; the real PNR spy was never awaited.
 
 ### 11. Tone check
 
@@ -160,10 +155,10 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 
 - **Criterion:** Every automated assertion in criteria 1-7 exists and passes in the bare
   container.
-- **Status:** FAIL
-- **Evidence:** The current bare-container run has one failure: the validator-added
-  real-mode mock-PNR boundary test.
-- **Notes:** Criteria 2-7 pass; A fails through criterion 1 and the criterion C defect.
+- **Status:** PASS
+- **Evidence:** The current bare-container run reports `405 passed`; every assertion in
+  criteria 1-7, including both validator regression tests, passes.
+- **Notes:** The seven warnings are the explicitly allowed baseline.
 
 ### Definition of done B
 
@@ -172,22 +167,20 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 - **Status:** FAIL
 - **Evidence:** `gh pr view 51` reports a merged PR whose entire body is the phase title
   plus `_Placeholder description generated automatically by git_pull_dev.sh._`.
+  Remediation PR #52 has the same generated placeholder and no mock/CERT output.
 - **Notes:** Post-merge validator output cannot retroactively satisfy a pre-merge gate.
 
 ### Definition of done C
 
 - **Criterion:** PNR cancel/create remains mock; only search is real.
-- **Status:** FAIL
-- **Evidence:** `backend/api/repair_tools.py:277` calls the mode-dispatching
-  `sabre_client.rebook_flight`; `backend/api/sabre/client.py:97-100` routes that operation
-  through `_dispatch`; in real mode `_dispatch` awaits `_real`; and
-  `backend/api/sabre/real_client.py:185-192` performs real cancel followed by real
-  `create_booking`. Validator-written
-  `test_validator_real_mode_uses_mock_pnr_client_only` fails because the real PNR client
-  was awaited once.
-- **Notes:** This is more than an entitlement fallback: real cancel can run before the
-  unauthorized create fails, so the current flow can mutate the old CERT PNR before
-  falling back to a mock rebook.
+- **Status:** PASS
+- **Evidence:** `backend/api/repair_tools.py:281` now calls
+  `sabre_client._mock.rebook_flight` directly. Focused command
+  `pytest tests/test_validator_real_repair_data.py -m 'not cert' -q` reports `2 passed`;
+  `test_validator_real_mode_uses_mock_pnr_client_only` asserts the real PNR client is
+  never awaited and the mock client is awaited once. Both live CERT tests also printed
+  `pnr_write: mock client`.
+- **Notes:** Real-mode shopping remains live; only cancel/create bypasses the dispatcher.
 
 ### Definition of done D
 
@@ -207,20 +200,13 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 - **Evidence:** `specs/roadmap.md:19` says `Phase 29 ... [x] COMPLETE (implementation;
   manual QA pending)`.
 - **Notes:** The manual-QA qualifier accurately reflects criterion 8, but does not cure
-  the code and PR-evidence failures.
+  the failed pre-merge PR-evidence gate.
 
 ## Missing tests
 
-- **Mock-PNR boundary:** Previously absent. The validator added
-  `backend/tests/test_validator_real_repair_data.py::test_validator_real_mode_uses_mock_pnr_client_only`;
-  it fails and is the direct regression guard for definition-of-done C.
-- **Empty fallback through the cascade:** Previously split across two tests. The validator
-  added `test_validator_empty_reshop_fallback_flips_fixed`; it passes and asserts the
-  combined fallback/write/status contract.
-- **Live criteria:** The validator added cert-marked
-  `test_validator_live_anchor_repair_uses_real_fares` and
-  `test_validator_live_empty_route_falls_back_without_stall`; both passed with PNR safely
-  intercepted to mock.
+- No automated gap remains for criteria 1-7 or 9-11. The committed validator suite now
+  covers the mock-PNR boundary, combined empty-fallback/write/status behavior, live
+  anchor repair, and live cache-empty fallback; all four tests pass.
 - **Mock walkthrough status payload:** Still lacks an automated equivalent. Proposed:
   `backend/tests/test_validator_real_repair_data.py::test_validator_mock_walkthrough_status_payload`
   with stateful repository fakes, exercising seed, break, waited repair, and status GET;
@@ -234,9 +220,9 @@ commit, and the implementation commit is `e53e097d7e9eac37ffadb46c30b83a806b3d10
 
 - Should criteria 3 and 5 explicitly say the cascade core—not `_rebook_flight`—owns the
   `fixed` transition, so the required test seam is unambiguous?
-- Does a live CERT search passed through the production repair with PNR intercepted to
-  mock count for criterion 9, or must the criterion wait for a deployed end-to-end run
-  after the mock-PNR routing defect is fixed?
+- Does a credentialed live search passed through the production repair, with spies
+  proving mock-only PNR routing, count for criterion 9, or is a deployed BigQuery-backed
+  end-to-end run required?
 - What credential mechanism and project role should an ephemeral mock-mode container use
   for criterion 8's BigQuery-backed walkthrough?
 - What immutable source establishes that PR evidence existed before merge if a PR body

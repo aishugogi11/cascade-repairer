@@ -8,6 +8,11 @@ Ordered newest phase first.
 
 ---
 
+## Phase 29 — Real repair data: the cascade re-shops InstaFlights
+**Completed:** 2026-07-15 (implementation complete, manual QA pending; merged PR #51 with remediation PR #52; independent validation returned **FAIL** on the acceptance package [DoD-B] only — every automated and safely runnable live criterion passed, but PRs #51/#52 carry placeholder descriptions instead of the required pre-merge mock/CERT snippets and the mock-mode BigQuery walkthrough was untestable on local creds; report in the spec dir) · **Spec:** [specs/2026-07-15-real-repair-data/](2026-07-15-real-repair-data/)
+
+The demo's credibility pivot: when the flight breaks, the repair now speaks real replacement flights instead of a mock swap. `_rebook_flight` re-shops the broken flight's route and date through the Phase 27 `instaflights_search` dispatcher op (replacing the content-empty BFM `flight_search`), picks a real alternative — a different flight number/time than the cancelled one where possible — and carries it plus the alternatives into the booking row's `raw_response` so the booking page's `detail` panel shows real price-delta / why-chosen data; `FlightOption`, `_parse_instaflights_options`, and the spoken-option helpers were extracted verbatim into a new cycle-free `backend/api/flight_options.py` and re-exported through `concierge` so every existing caller resolves unchanged. PNR writes stay on the mock client (permanent entitlement posture, guarded by a regression test); both credentialed CERT checks report `pnr_write: mock client` and the bare suite is green (405 passed).
+
 ## Phase 30 — Search-hardening close-out: Phase 28 validation gaps
 **Completed:** 2026-07-15 (implementation + hermetic suite green, merged PR #47 and deployed on `vb/dev`; independent validation returned **FAIL** on two non-code items only, both re-verified as environmental rather than implementation defects — an empty PR #47 description [DoD-B], and a live CERT priced-search test hardcoding DFW→LAX +30d that drifted to empty; report in the spec dir) · **Spec:** [specs/2026-07-15-search-hardening-closeout/](2026-07-15-search-hardening-closeout/)
 
