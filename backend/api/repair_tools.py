@@ -272,9 +272,13 @@ async def _rebook_flight(
 
     chosen = _pick_replacement(options, cancelled_flight, original_arrive_time)
 
-    # PNR write stays mock (entitlement wall) — cancel + create, sourced from
-    # the chosen real option's fields, not BFM schedule descriptors.
-    rebooked = await sabre_client.rebook_flight(
+    # PNR write stays mock — permanently (requirements/DoD-C). Only the *search*
+    # above is real; the cancel + create go straight to the mock client, never
+    # the mode dispatcher. In real mode the dispatcher would attempt the real
+    # cancel/create, and cancel is entitlement-*authorized* (only create is
+    # blocked), so a real cancel could mutate the live CERT PNR before the create
+    # failed into a mock fallback. Sourcing from the chosen real option's fields.
+    rebooked = await sabre_client._mock.rebook_flight(
         shapes.RebookFlightRequest(
             confirmationId=old_ref,
             cancel=shapes.CancelBookingRequest(
