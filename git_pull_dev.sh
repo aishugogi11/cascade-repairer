@@ -1,11 +1,22 @@
 #!/bin/bash
 #
-# Commit -> push -> open PR into dev -> merge it -> pull latest dev.
+# Commit -> push -> open/update PR -> merge it -> sync dev.
 #
-# Works from whatever branch you're on. Usage:
-#   ./git_pull_dev.sh                 # default commit message
-#   ./git_pull_dev.sh "my message"    # custom commit message / PR title
+# Works from whatever branch you're on. The single optional argument is both
+# the commit message and PR title. The PR description is generated
+# automatically from that title so GitHub never shows "No description provided."
 #
+# Usage:
+#   ./git_pull_dev.sh
+#   ./git_pull_dev.sh "my commit message / PR title"
+#   DRY_RUN=1 BASE_BRANCH=main ./git_pull_dev.sh "preview only"
+#
+# If someone invokes this Bash script as `sh git_pull_dev.sh`, re-enter Bash
+# instead of relying on the host's /bin/sh implementation.
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 MERGE_METHOD="--merge"   # or --squash / --rebase (must be enabled on the repo)
@@ -13,6 +24,7 @@ MERGE_METHOD="--merge"   # or --squash / --rebase (must be enabled on the repo)
 # admin rights) so the pull in step 4 reflects the merge. Swap for --auto to
 # instead queue the merge until required checks pass (won't merge right now).
 MERGE_EXTRA="--admin"
+DRY_RUN="${DRY_RUN:-0}"
 
 # Base branch to integrate into. Resolution order:
 #   1. BASE_BRANCH env var, if you set one:  BASE_BRANCH=main ./git_pull_dev.sh
@@ -43,28 +55,62 @@ echo "==> Base branch: ${BASE_BRANCH}"
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 COMMIT_MSG="${1:-chore: sync work on ${CURRENT_BRANCH}}"
 
+if [ "$#" -gt 1 ]; then
+  echo "!!! Expected at most one argument: the commit message / PR title." >&2
+  echo "!!! Usage: ./git_pull_dev.sh \"my commit message / PR title\"" >&2
+  exit 2
+fi
+
+PR_BODY="$(printf '%s\n' \
+  "## Summary" "" "${COMMIT_MSG}" "" \
+  "_Placeholder description generated automatically by git_pull_dev.sh._")"
+
 # 1. Commit any pending changes on the current branch.
-git add -A
-if git diff --cached --quiet; then
-  echo "==> No staged changes to commit."
+if [ "${DRY_RUN}" = "1" ]; then
+  echo "==> DRY RUN: would stage and commit changes as: ${COMMIT_MSG}"
 else
-  echo "==> Committing on ${CURRENT_BRANCH}: ${COMMIT_MSG}"
-  git commit -m "${COMMIT_MSG}"
+  git add -A
+  if git diff --cached --quiet; then
+    echo "==> No staged changes to commit."
+  else
+    echo "==> Committing on ${CURRENT_BRANCH}: ${COMMIT_MSG}"
+    git commit -m "${COMMIT_MSG}"
+  fi
 fi
 
 # 2. Push the current branch to GitHub (creating the upstream if needed).
-echo "==> Pushing ${CURRENT_BRANCH} to origin"
-git push -u origin "${CURRENT_BRANCH}"
+if [ "${DRY_RUN}" = "1" ]; then
+  echo "==> DRY RUN: would push ${CURRENT_BRANCH} to origin"
+else
+  echo "==> Pushing ${CURRENT_BRANCH} to origin"
+  git push -u origin "${CURRENT_BRANCH}"
+fi
 
 # 3. Open (or reuse) a PR into dev, then merge it.
 if [ "${CURRENT_BRANCH}" = "${BASE_BRANCH}" ]; then
   echo "==> On ${BASE_BRANCH}; skipping PR/merge (a branch can't PR into itself)."
+elif [ "${DRY_RUN}" = "1" ]; then
+  echo "==> DRY RUN: would create/update ${CURRENT_BRANCH} -> ${BASE_BRANCH}"
+  echo "==> DRY RUN: would set the automatic placeholder PR description"
+  echo "==> DRY RUN: would mark a draft PR ready if needed"
+  echo "==> DRY RUN: would merge with ${MERGE_METHOD} ${MERGE_EXTRA} and delete the branch"
 else
   if gh pr view "${CURRENT_BRANCH}" >/dev/null 2>&1; then
     echo "==> Reusing existing PR for ${CURRENT_BRANCH}"
+    echo "==> Updating PR title and automatic placeholder description"
+    gh pr edit "${CURRENT_BRANCH}" --title "${COMMIT_MSG}" --body "${PR_BODY}"
   else
     echo "==> Opening PR: ${CURRENT_BRANCH} -> ${BASE_BRANCH}"
-    gh pr create --base "${BASE_BRANCH}" --head "${CURRENT_BRANCH}" --fill
+    gh pr create \
+      --base "${BASE_BRANCH}" \
+      --head "${CURRENT_BRANCH}" \
+      --title "${COMMIT_MSG}" \
+      --body "${PR_BODY}"
+  fi
+
+  if [ "$(gh pr view "${CURRENT_BRANCH}" --json isDraft --jq .isDraft)" = "true" ]; then
+    echo "==> Marking draft PR ready for merge"
+    gh pr ready "${CURRENT_BRANCH}"
   fi
 
   # GitHub may need a moment to compute mergeability after a fresh push/PR, so
@@ -87,8 +133,12 @@ else
 fi
 
 # 4. Pull the latest dev from origin (now includes the merge).
-echo "==> Syncing ${BASE_BRANCH} from origin"
-git checkout "${BASE_BRANCH}"
-git pull origin "${BASE_BRANCH}"
+if [ "${DRY_RUN}" = "1" ]; then
+  echo "==> DRY RUN: would sync ${BASE_BRANCH} from origin"
+else
+  echo "==> Syncing ${BASE_BRANCH} from origin"
+  git checkout "${BASE_BRANCH}"
+  git pull origin "${BASE_BRANCH}"
+fi
 
 echo "==> Done."
