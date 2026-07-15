@@ -9,6 +9,10 @@
 set -euo pipefail
 
 MERGE_METHOD="--merge"   # or --squash / --rebase (must be enabled on the repo)
+# --admin bypasses branch-protection requirements and merges immediately (needs
+# admin rights) so the pull in step 4 reflects the merge. Swap for --auto to
+# instead queue the merge until required checks pass (won't merge right now).
+MERGE_EXTRA="--admin"
 
 # Base branch to integrate into. Resolution order:
 #   1. BASE_BRANCH env var, if you set one:  BASE_BRANCH=main ./git_pull_dev.sh
@@ -56,11 +60,12 @@ else
     gh pr create --base "${BASE_BRANCH}" --head "${CURRENT_BRANCH}" --fill
   fi
 
-  # GitHub may need a moment to compute mergeability after a fresh push/PR.
-  echo "==> Merging PR into ${BASE_BRANCH} (${MERGE_METHOD})"
+  # GitHub may need a moment to compute mergeability after a fresh push/PR, so
+  # retry a couple of times for that transient case.
+  echo "==> Merging PR into ${BASE_BRANCH} (${MERGE_METHOD} ${MERGE_EXTRA})"
   merged=""
-  for attempt in 1 2 3 4 5; do
-    if gh pr merge "${CURRENT_BRANCH}" ${MERGE_METHOD} --delete-branch; then
+  for attempt in 1 2 3; do
+    if gh pr merge "${CURRENT_BRANCH}" ${MERGE_METHOD} ${MERGE_EXTRA} --delete-branch; then
       merged="yes"
       break
     fi
@@ -68,8 +73,9 @@ else
     sleep 3
   done
   if [ -z "${merged}" ]; then
-    echo "!!! Could not auto-merge. Merge the PR manually on GitHub, then re-run."
-    echo "!!! (Common causes: required reviews/status checks, or ${MERGE_METHOD#--} merges disabled on the repo.)"
+    echo "!!! Could not merge automatically. Merge the PR manually on GitHub, then re-run."
+    echo "!!! (Causes: not a repo admin so --admin can't bypass protection, a real"
+    echo "!!!  merge conflict, or ${MERGE_METHOD#--} merges disabled on the repo.)"
   fi
 fi
 
