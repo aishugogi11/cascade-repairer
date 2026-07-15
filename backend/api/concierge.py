@@ -265,6 +265,15 @@ class LatestSearch(BaseModel):
 # for a single-operator demo.
 _LATEST_SEARCH: Optional[LatestSearch] = None
 
+# Age expiry for the slot (Phase 22, item H): a conversation that got real
+# options and was then abandoned — no booking, no further search — must not
+# leave its candidates on the poll indefinitely. Ten minutes is comfortably
+# longer than a real guided-booking turn (search → read back → pick, well
+# under a minute) but short enough that an abandoned conversation clears
+# within the demo. Read-time filter only: the pinned/unpinned resolution is
+# untouched, and a stale slot simply stops surfacing.
+_LATEST_SEARCH_TTL = timedelta(minutes=10)
+
 # Strong refs so the complete_trip background task isn't garbage-collected
 # (the web_call._LOG_TASKS pattern).
 _BUILD_TASKS: Set[asyncio.Task] = set()
@@ -501,6 +510,11 @@ def pending_options_for_trip(trip_id: str) -> Optional[dict]:
     Phase 19 discipline), rounded price, no airline codes."""
     slot = _LATEST_SEARCH
     if slot is None:
+        return None
+    # Item H (Phase 22): an abandoned search stops surfacing once the slot
+    # ages past the TTL. Best-effort read-time filter — no exception path,
+    # and the pinned/unpinned logic below is unchanged for a fresh slot.
+    if datetime.now(timezone.utc) - slot.recorded_at > _LATEST_SEARCH_TTL:
         return None
     pinned = _SESSION_TRIPS.get(slot.session_id)
     if pinned is not None and pinned.trip.trip_id != trip_id:

@@ -17,6 +17,7 @@ from api.cascade_demo import cascade_demo
 from api.web_call import web_call
 from api.itinerary_ui import itinerary_ui
 from api.booking_ui import booking_ui
+from api.cascade_ui import cascade_ui
 from api.demo import demo
 from api.legal import legal
 from api.mobile_voice import mobile_voice
@@ -90,6 +91,12 @@ app.include_router(
     booking_ui,
     prefix="/v1/booking",
     tags=["booking"],
+)
+
+app.include_router(
+    cascade_ui,
+    prefix="/v1/cascade",
+    tags=["cascade"],
 )
 
 app.include_router(

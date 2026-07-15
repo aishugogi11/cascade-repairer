@@ -8,7 +8,7 @@ session snapshot, failures come back speakable, and the acceptance shape —
 a turn is answered while five real repair coroutines run — holds end to end.
 """
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -488,6 +488,87 @@ def test_book_flight_leaves_another_sessions_slot_alone(monkeypatch, bq):
 
     assert concierge._LATEST_SEARCH is not None
     assert concierge._LATEST_SEARCH.session_id == "room-2"
+
+
+# --- item H (Phase 22): the pending-options slot expires by age ----------------
+
+
+def _slot_option(n=1):
+    return concierge.FlightOption(
+        option_number=n, airline="AA", flight_number=100 + n, origin="MSP",
+        destination="SFO", depart_date="2026-07-17", depart_time="08:00",
+        arrive_time="10:05", stops=0, price=250.0, currency="USD",
+        spoken=f"Option {n}.",
+    )
+
+
+def _slot(age=timedelta(0), session="s-1"):
+    return concierge.LatestSearch(
+        session_id=session,
+        options=[_slot_option(1), _slot_option(2)],
+        recorded_at=datetime.now(timezone.utc) - age,
+    )
+
+
+def _pinned(trip_id):
+    return concierge.TripContext(
+        trip=concierge.Trip(**dict(trip_row(), trip_id=trip_id)),
+        items=[], summary="pinned",
+    )
+
+
+def test_pending_options_fresh_slot_surfaces_unpinned():
+    """The pre-booking window is untouched by the TTL: a fresh unpinned
+    slot still surfaces on whatever trip the page polls."""
+    concierge._LATEST_SEARCH = _slot()
+
+    block = concierge.pending_options_for_trip("any-trip")
+
+    assert block is not None
+    assert [o["option_number"] for o in block["options"]] == [1, 2]
+
+
+def test_pending_options_fresh_slot_surfaces_pinned_to_the_trip():
+    concierge._LATEST_SEARCH = _slot()
+    concierge._SESSION_TRIPS["s-1"] = _pinned("t-1")
+
+    assert concierge.pending_options_for_trip("t-1") is not None
+
+
+def test_pending_options_fresh_slot_still_hidden_from_other_trips():
+    """The TTL check must not loosen the pinned-session resolution: a fresh
+    slot pinned elsewhere stays off this trip's poll."""
+    concierge._LATEST_SEARCH = _slot()
+    concierge._SESSION_TRIPS["s-1"] = _pinned("t-other")
+
+    assert concierge.pending_options_for_trip("t-1") is None
+
+
+def test_pending_options_expired_slot_returns_none():
+    """Item H: an abandoned search (older than the TTL) stops surfacing on
+    the poll — the age-expiry hardening from the Phase 21 validation."""
+    concierge._LATEST_SEARCH = _slot(
+        age=concierge._LATEST_SEARCH_TTL + timedelta(seconds=1)
+    )
+
+    assert concierge.pending_options_for_trip("any-trip") is None
+
+
+def test_pending_options_expired_slot_hidden_even_when_pinned():
+    concierge._LATEST_SEARCH = _slot(
+        age=concierge._LATEST_SEARCH_TTL + timedelta(seconds=1)
+    )
+    concierge._SESSION_TRIPS["s-1"] = _pinned("t-1")
+
+    assert concierge.pending_options_for_trip("t-1") is None
+
+
+def test_pending_options_slot_just_inside_the_ttl_still_surfaces():
+    concierge._LATEST_SEARCH = _slot(
+        age=concierge._LATEST_SEARCH_TTL - timedelta(seconds=5)
+    )
+
+    assert concierge.pending_options_for_trip("any-trip") is not None
 
 
 def test_book_flight_without_search_is_speakable_and_writes_nothing(monkeypatch, bq):
