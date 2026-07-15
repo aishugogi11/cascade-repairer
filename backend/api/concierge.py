@@ -75,7 +75,9 @@ BASE_INSTRUCTIONS = (
     "flow: confirm the destination and departure date in one short turn, "
     "then call search_flights — origin airport code (assume MSP unless the "
     "traveler says otherwise), destination airport code, and the departure "
-    "date as YYYY-MM-DD; turn city names into airport codes yourself. Read "
+    "date as YYYY-MM-DD; turn city names into airport codes yourself — "
+    "always a specific airport, never a metro or city code (New York is "
+    "JFK, not NYC). Read "
     "the options back and ask the traveler to pick one by number. When they "
     "choose, call book_flight with that option number and confirm the "
     "booking in one short sentence, then offer to arrange the rest of the "
@@ -296,6 +298,13 @@ _NUMBER_WORDS = {1: "one", 2: "two", 3: "three"}
 
 _MAX_SPOKEN_OPTIONS = 3
 
+# Metro/city codes the model sometimes produces despite the instructions
+# ("New York" → NYC); the supported-markets list is airport codes only, so
+# an unaliased metro code redirects the traveler off a route the system
+# actually carries (live finding, 2026-07-14). Belt-and-suspenders to the
+# BASE_INSTRUCTIONS clause (Phase 28, decision 4).
+_METRO_ALIASES = {"NYC": "JFK", "WAS": "IAD", "CHI": "ORD"}
+
 _SEARCH_ERROR_LINE = (
     "I'm having trouble searching flights right now — give me a second and "
     "ask me again."
@@ -341,9 +350,14 @@ def _parse_instaflights_options(
     localized to its own airport's zone and converted to Pacific before
     anything is spoken or stored (the Phase 19 discipline — speaking
     '2026-XX-XXT07:20:00' at JFK as Pacific would be the old bug class).
-    An airport missing from the timezone table skips that itinerary in
-    favor of the next (requirements, decision 2) — never a mangled time."""
+    An itinerary touching ANY airport missing from the timezone table —
+    connections included, not just the endpoints — is skipped in favor of
+    the next (requirements, decision 2 of Phase 27; the Phase 28 fix) —
+    never a mangled time. Byte-identical itineraries are offered once:
+    CERT has returned duplicates, and the agent read 'option three is the
+    same as option two' aloud (Phase 28, decision 5)."""
     options: List[FlightOption] = []
+    offered: Set[Tuple] = set()
     for itinerary in search.PricedItineraries:
         if len(options) >= _MAX_SPOKEN_OPTIONS:
             break
@@ -353,11 +367,23 @@ def _parse_instaflights_options(
         )
         if not segments:
             continue
+        if any(
+            airport_zone(seg.DepartureAirport.LocationCode) is None
+            or airport_zone(seg.ArrivalAirport.LocationCode) is None
+            for seg in segments
+        ):
+            continue
         first, last = segments[0], segments[-1]
         depart_zone = airport_zone(first.DepartureAirport.LocationCode)
         arrive_zone = airport_zone(last.ArrivalAirport.LocationCode)
-        if depart_zone is None or arrive_zone is None:
+        fare = itinerary.AirItineraryPricingInfo.ItinTotalFare.TotalFare
+        key = (
+            first.FlightNumber, first.DepartureDateTime,
+            last.ArrivalDateTime, fare.Amount,
+        )
+        if key in offered:
             continue
+        offered.add(key)
         depart_pt = (
             datetime.fromisoformat(first.DepartureDateTime)
             .replace(tzinfo=depart_zone).astimezone(_PACIFIC)
@@ -369,7 +395,6 @@ def _parse_instaflights_options(
         # Connections count as stops too: segment-internal StopQuantity
         # plus one per plane change.
         stops = sum(seg.StopQuantity for seg in segments) + len(segments) - 1
-        fare = itinerary.AirItineraryPricingInfo.ItinTotalFare.TotalFare
         number = len(options) + 1
         options.append(
             FlightOption(
@@ -403,6 +428,8 @@ async def search_flights_impl(
     returns a speakable string — a raising tool kills the spoken turn."""
     origin = (origin or "").strip().upper()
     destination = (destination or "").strip().upper()
+    origin = _METRO_ALIASES.get(origin, origin)
+    destination = _METRO_ALIASES.get(destination, destination)
     depart_date = (depart_date or "").strip()
     if not origin or not destination or not depart_date:
         return (

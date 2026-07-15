@@ -8,8 +8,15 @@ delay (network feel for the demo); tests pass 0.
 """
 import asyncio
 import hashlib
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from api.sabre import shapes
+from api.sabre.airport_tz import airport_zone
+
+# The mock's wall-clock fiction is Pacific (the Phase 19 declaration); real
+# InstaFlights times are airport-local, so the mock must speak that dialect.
+_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 
 def _ref(*parts: str, length: int = 6) -> str:
@@ -127,14 +134,30 @@ class MockSabreClient:
 
     # Same semantic spread as the BFM variants above — nonstop/one-stop,
     # morning/midday, matching price points — so the guided-booking flow in
-    # SABRE_MODE=mock behaves as before in spirit. Times keep the mock's
-    # Pacific wall-clock fiction, expressed in the InstaFlights offset-less
-    # airport-local convention: (depart, arrive, stops, price).
+    # SABRE_MODE=mock behaves as before in spirit. Each clock is the mock's
+    # Pacific wall-clock fiction; instaflights_search re-expresses it in the
+    # InstaFlights airport-local convention so the parser's round trip lands
+    # back on this spread (Phase 28): (depart, arrive, stops, price).
     _INSTA_VARIANTS = [
         ("08:00:00", "10:05:00", 0, 187.6),
         ("11:30:00", "13:40:00", 0, 242.0),
         ("06:15:00", "11:20:00", 1, 155.0),
     ]
+
+    @staticmethod
+    def _airport_local(day: str, clock: str, code: str) -> str:
+        """The Pacific-fiction instant `{day}T{clock}` as offset-less wall
+        clock at the airport's own zone — dates from the conversion, never
+        the request string, so a variant crossing midnight stays honest. An
+        airport absent from the timezone table gets the fiction unchanged:
+        the parser skips those itineraries anyway (no fabricated zone)."""
+        zone = airport_zone(code)
+        if zone is None:
+            return f"{day}T{clock}"
+        fiction = datetime.fromisoformat(f"{day}T{clock}").replace(
+            tzinfo=_PACIFIC
+        )
+        return fiction.astimezone(zone).strftime("%Y-%m-%dT%H:%M:%S")
 
     async def instaflights_search(
         self, request: shapes.InstaFlightsRequest
@@ -161,8 +184,12 @@ class MockSabreClient:
                                             ArrivalAirport=shapes.SegmentAirport(
                                                 LocationCode=dest
                                             ),
-                                            DepartureDateTime=f"{day}T{depart}",
-                                            ArrivalDateTime=f"{day}T{arrive}",
+                                            DepartureDateTime=self._airport_local(
+                                                day, depart, origin
+                                            ),
+                                            ArrivalDateTime=self._airport_local(
+                                                day, arrive, dest
+                                            ),
                                             FlightNumber=flight_number + i * 7,
                                             MarketingAirline=shapes.MarketingAirline(
                                                 Code="AA"
