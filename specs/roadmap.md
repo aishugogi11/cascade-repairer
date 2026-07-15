@@ -18,49 +18,14 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Update 2026-07-15 (Phase 29 shipped — implementation, manual QA pending):** the real-repair pivot is implemented, merged (PRs #51/#52), and archived to [changelog.md](changelog.md) — the flight-repair leg now re-shops real InstaFlights data (BFM → `instaflights_search`), PNR writes stay mock, and the shared `FlightOption` parser is extracted to `backend/api/flight_options.py`. Its independent validation returned **FAIL on the acceptance package only** (DoD-B: PRs #51/#52 carry placeholder descriptions, not the required pre-merge mock/CERT snippets; local mock-mode BigQuery walkthrough untestable) — every implementation criterion passed and the bare suite is green (405 passed); **manual QA remains pending** and Phase 24's morning-smoke keeps its Phase 29 rider (probe the scripted pair's repair re-shop route, not just its booking route).
 
-**Update 2026-07-15 (Phase 22 shipped, QA'd, archived):** the consolidated cascade dashboard (`GET /v1/cascade/` — repair surfaces, disruption score, downstream impact, on-page demo triggers, Phase 23 voice placeholder, item-H age expiry) is merged (PR #53), deployed, manually QA'd on Cloud Run the same day, and archived to [changelog.md](changelog.md). Its independent validation returned **FAIL on the acceptance package only** (DoD-B again: PR #53 placeholder description; report in the spec dir). **QA produced the Phase 23 demo contract** (settled with Josh 2026-07-15, captured in the local `TODO.md` inbox for the Phase 23 spec interview — promote it there, it is gitignored): booking happens by voice through the Concierge (zero quota), the Cancel trigger breaks the flight and places a consent-asking call, **repairs launch only on the traveler's spoken yes — read from the VB session log's `transcript_text` (spike resolved 2026-07-15: the log payload carries full transcripts)**, the recovery timer starts at that consent (never automatically at the break), both call scripts are composed from the real pinned trip's data (the hardcoded MSP→SFO purposes are a bug for voice-booked trips), and a results callback call is placed when the backend's repair tasks land. Open work, in order: **23 → 24**.
+**Update 2026-07-15 (Phase 22 shipped, QA'd, archived):** the consolidated cascade dashboard (`GET /v1/cascade/` — repair surfaces, disruption score, downstream impact, on-page demo triggers, Phase 23 voice placeholder, item-H age expiry) is merged (PR #53), deployed, manually QA'd on Cloud Run the same day, and archived to [changelog.md](changelog.md). Its independent validation returned **FAIL on the acceptance package only** (DoD-B again: PR #53 placeholder description; report in the spec dir). **QA produced the Phase 23 demo contract** (settled with Josh 2026-07-15): booking by voice, consent-gated repairs read from the VB transcript, the timer anchored at the spoken yes, real-trip call scripts, and a results callback.
 
-## Phase 23: Cascade dashboard, part 2 — live voice surfaces + the consent-gated demo flow [x] COMPLETE (implementation; manual QA pending)
+**Update 2026-07-15 (evening — Phases 23 and 31 shipped and archived):** Phase 23 (live voice surfaces + the consent-gated demo flow, PR #54) and its same-day close-out Phase 31 (PR #55 — the `room_name` session join that unblocks Call 2, the different-flight rebooking guarantee, the re-trigger race, `trip_status` honesty, the `fix_trip` phone deferral, and the hardened PR-evidence guard) are merged, deployed (image `e20c57a`), and archived to [changelog.md](changelog.md) — both marked **implementation complete, manual QA pending**. Open work: the follow-ups below, then **Phase 24**.
 
-The dashboard's live layers on top of Phase 22 — the conversation feed (traveler/Cascade turns), the voice orb with connection/latency state (the `web_call` VB wiring — server-minted token, `useAIAgent → /v1/web_call/query` delegation), and the Sabre live-search log panel — **plus the demo contract settled with Josh at the 2026-07-15 Phase 22 QA** (full version in the local `TODO.md` inbox; promote it at this phase's spec interview):
-
-- **Booking happens by voice** through the Concierge (the guided flow, real InstaFlights fares, zero call quota) — ideally via this phase's on-page orb; the booked trip auto-appears on `/v1/cascade/`.
-- **"Cancel flight → cascade" is reworked to break the flight and place Call 1 only** — the call describes the disruption and asks the traveler for consent to repair. No repairs launch at click time.
-- **Repairs launch only on the traveler's spoken "yes", read from the VB session log's `transcript_text`** (consent watcher polls `find_session` until Call 1 completes, then parses the answer — spike resolved 2026-07-15: the log payload carries full AGENT/USER transcripts).
-- **The recovery — and the 60-second timer — starts at that acknowledged "yes", never automatically at the break.** The page shows a "waiting for the traveler's go-ahead" treatment (red, no running clock) between the break and consent; the timer re-anchors from first-observed-broken to repair start.
-- **Both call scripts are composed from the real pinned trip's data** (today's hardcoded MSP→SFO purposes describe the wrong trip for a voice-booked JFK→LAX booking).
-- **Call 2 — the results callback** — fires when the backend's own repair tasks land, its purpose composed from the actual repair results, so the phone agent speaks the true fixed state.
-- Supporting backend: a `trip_status` Concierge tool (honest "how's my trip?" across sessions) and a consent-watcher timeout/no-answer path.
-
-Quota: 2 calls per full run (booking is web-voice, free). Ends with the full mockup experience — and the complete book → break → consent → repair → callback demo — on one page.
-
-## Phase 31: Phase 23 close-out — the consent flow works live [x] COMPLETE (implementation; manual QA pending)
-
-The live-QA and independent-validation findings from 2026-07-15 (report:
-`specs/2026-07-15-cascade-live-voice-demo/validation-report.md`; live-run diagnosis in
-the session notes). Josh's live run proved booking, Call 1's real-trip consent script,
-and the honest stand-down — and broke the headline moment: the consent watcher can
-never find its own call, so yes → repairs → Call 2 never fires in production.
-
-- **The watcher matches Call 1's session by `room_name`** — `vb call` returns
-  `call_id` + `room_name`, but the session log carries only `id`/`room_name` (proven
-  live 2026-07-15: watcher `timed_out` at its 3-minute deadline while the completed,
-  transcript-bearing session sat in the log). `place_call` returns `room_name`;
-  `find_session` matches it. The Call 2 blocker.
-- **The rebooked flight must differ from the original** (Josh, live QA): voice-booked
-  items carry no flight identity, so the re-shop's exclusion filter is starved and
-  "closest arrival" re-picks the cancelled flight. `book_flight` stamps
-  `airline`/`flight_number` into the item's `details`; the repair excludes it.
-- **Re-trigger race** (validator, CONFIRMED failing test): the watcher checks token
-  currency before classification but not again before launching — a Cancel re-click
-  during the classifier's await can double-launch repairs and Call 2. Atomic
-  resolve-to-granted before launch.
-- **`trip_status` honesty** (validator, CONFIRMED failing test): a `cancelled` leg
-  currently gets "Everything is on track." appended.
-- **`fix_trip` vs the consent gate**: during an `awaiting_consent` window the orb's
-  fix_trip races the phone watcher (observed live — the orb repaired while the watcher
-  waited). Decide + implement the interplay.
-- Adopt the validator's two tests; PR evidence pre-merge (the guard now exists).
+**Open follow-ups (from Phases 23/31, 2026-07-15):**
+- **The live rerun** (2 calls, on the `e20c57a` deploy): book by voice → Cancel → spoken "yes" → repairs with the timer at the go-ahead → **Call 2 arrives with a different flight than the cancelled one**; mid-window, `fix_trip` speaks the phone deferral. Passing it closes both phases' "manual QA pending."
+- **PR #55 evidence**: the manual GitHub merge bypassed the new guard, so the description is still the unfilled template — after the rerun, `gh pr edit 55 --body-file PR_BODY.md` with the three evidence sections.
+- **Cloud Run max-instances is 100, not 1** (found at the Phase 31 deploy check): the in-process consent/session/search-log state assumes a single instance — pin it before the 18th (also listed under Phase 24).
 
 ## Phase 24: Pre-event readiness
 
@@ -95,6 +60,11 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   debt). Chase them to their fixtures/mocks and fix or properly close the coroutines —
   they can mask async cleanup defects in the exact code that keeps the agent talking
   during repairs.
+- **Pin Cloud Run max-instances to 1** (Phase 31 deploy check, 2026-07-15): the service
+  allows max scale 100, but the consent registry, session/history state, and search log
+  are in-process memory (the standing single-instance scope decision) — a second
+  instance mid-demo would answer status polls with no knowledge of the consent wait.
+  One `gcloud run services update --max-instances 1` before the first rehearsal.
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the in-review binary
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
