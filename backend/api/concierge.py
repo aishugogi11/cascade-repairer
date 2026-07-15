@@ -431,7 +431,19 @@ async def search_flights_impl(
     origin = _METRO_ALIASES.get(origin, origin)
     destination = _METRO_ALIASES.get(destination, destination)
     depart_date = (depart_date or "").strip()
+
+    def _clear_search_state() -> None:
+        """Drop this session's stored options so a non-result can't leave a
+        stale choice bookable (Phase 30): every non-optioned return below clears
+        both slots. Mirrors book_flight_impl's ownership-guarded clear — never
+        wipes another session's in-flight slot."""
+        global _LATEST_SEARCH
+        _SESSION_FLIGHT_OPTIONS.pop(session_id, None)
+        if _LATEST_SEARCH is not None and _LATEST_SEARCH.session_id == session_id:
+            _LATEST_SEARCH = None
+
     if not origin or not destination or not depart_date:
+        _clear_search_state()
         return (
             "I need the destination and a departure date to search — where "
             "are you headed, and when?"
@@ -443,6 +455,7 @@ async def search_flights_impl(
         # means skip validation and search anyway.
         markets = await sabre_client.supported_markets()
         if markets and (origin, destination) not in markets:
+            _clear_search_state()
             return _UNSUPPORTED_MARKET_LINE
         search = await sabre_client.instaflights_search(
             shapes.InstaFlightsRequest(
@@ -453,8 +466,10 @@ async def search_flights_impl(
         )
         options = _parse_instaflights_options(search, origin, destination)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        _clear_search_state()
         return _SEARCH_ERROR_LINE
     if not options:
+        _clear_search_state()
         return (
             "I couldn't find any flights for that day — want to try a "
             "different date?"
