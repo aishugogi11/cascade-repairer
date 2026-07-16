@@ -44,6 +44,20 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-16 (Phase 34 close-out):** three decisions, all settled at the replan interview. (1) **All three conversational residuals are accepted — no instruction tuning before the event**: the spoken answers were honest and fluent (the silently-used date was the trip's *real* end date, stated aloud; never an invented one), the no-booking guarantee is code-enforced regardless of phrasing, and tuning gpt-5.4-mini's adherence two days before the event risks regressing other rehearsed beats — recorded in tech-stack § Backend as accepted loosenesses, with an operator briefing note (answer the agent's date question with a real date or decline plainly; "whenever works" once round-tripped as a literal date into a malformed sentence). (2) The validator's **return-check-during-repair purity test** folds into Phase 24 as a hermetic test item — it closes the quota-blocked Manual-6 walkthrough structurally. (3) The validator's proposed **live conversational smoke test is skipped** — it would assert exactly the stochastic adherence decision 1 accepts, redding on model drift the way the cert tripwire reds on cache drift (the brittleness Phase 24 exists to remove); the return beat stays a manual eyeball in the day-of probe loop if wanted. tech-stack § Backend gains the shipped `check_return_flights` entry (and the entitlement addendum notes the ship). `mission.md` unchanged. Open order unchanged: **24**.
 
+**App Review replan 2026-07-16 (v1.0 (3), Submission `6945d2a4-5010-40d6-b283-e58e52ae75c6`):** Apple rejected the public iOS submission under Guideline 3.2 because the access-code-gated app serves a limited hackathon-event audience. Josh selected **Unlisted App Distribution**, which Apple explicitly supports for special events and limited audiences on unmanaged devices. The same final build can be resubmitted; no archive/upload or code change is required. This external recovery jumps the queue because the event is about 40 hours away, while Phase 24 remains the final engineering/readiness phase. Open order: **36 → 24**. The web demo and direct Xcode/TestFlight install remain the non-blocking event fallback; Apple-controlled approval time cannot become a hackathon success gate.
+
+## Phase 36: Unlisted App Store recovery
+
+Recover the rejected v1.0 (3) submission as an unlisted final app without replacing the binary:
+
+- Keep **Pricing and Availability → App Distribution Methods** set to **Public** while applying; Apple's unlisted workflow starts from a public app record and changes the method to Unlisted only when the request is approved. Do not switch to Private/Custom App distribution.
+- Edit App Review Notes to say the app is a final limited-audience special-event release intended for Unlisted App Distribution (not a beta/TestFlight substitute), retain the non-expiring reviewer access code and complete test script, then resubmit the existing iOS 1.0 (3) item. **Do not upload a new build.**
+- Reply to the Guideline 3.2 message: agree that unlisted is the correct distribution method; explain that users are hackathon participants/judges on personal unmanaged devices rather than employees or clients of one Apple Business Manager organization; state that the unlisted request is being filed; include Apple ID `6789972026` and the submission ID above.
+- Submit Apple's authenticated **Unlisted App Distribution** request immediately after the app is resubmitted. State that the app is a final release for the event, distributed only by direct link, and protected by its access-code mechanism.
+- Submit an **expedited App Review request** for the resubmitted version immediately afterward. This qualifies as Apple's documented event-related case: name the DeepLearning.AI Voice AI Hackathon, its July 18, 2026 date and Mountain View location, the team's direct participation, and the live-demo requirement; include both Apple ID and submission ID and mention that the separate unlisted request is already filed.
+- Keep `DEMO_ACCESS_CODE` and the backend stable throughout re-review, monitor App Review messages, and answer any question immediately. On approval, verify the generated direct link on a clean device, record it in the runbook, and share it only with the event audience.
+- Completion means both the app version and unlisted request are approved and the direct App Store link installs successfully. If Apple does not finish before the event, leave the phase open and use TestFlight/Xcode plus the web demo; do not weaken the access gate or upload a replacement binary to chase the deadline.
+
 ## Phase 24: Pre-event readiness
 
 The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 evening replan and again 2026-07-14 (evening): **the full `SABRE_MODE=real` flip shipped with Phase 27** (search real on Cloud Run since 2026-07-14), and **the event-day entitlement ask is deleted** — decision 2026-07-14: no extra permissions are coming, so the former "conditional punch list" (dead `POS` field, empty-BFM shapes, BM errors-as-200, BFM offset-bearing time conversion) is retired from this roadmap; it stays documented in the Phase 25 notes' deltas if circumstances ever change. Everything here must land before July 18.
@@ -127,7 +141,7 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   deliberately removed by commit `933f8e8` and PR evidence retired as a merge
   gate; see tech-stack § Deployment.)*
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
-  physical iPhone via Xcode install — does not touch the in-review binary
+  physical iPhone via Xcode install — does not touch the Phase 36 same-build unlisted recovery
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
   cases (Phase 17 validation.md § 7).
 - Review the hardcoded dev Cloud Run URL in `APIConfig.swift`.
