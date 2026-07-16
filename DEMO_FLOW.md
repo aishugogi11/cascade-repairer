@@ -2,7 +2,9 @@
 
 Demo Code Flow (url: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade)
 
-1. The initial booking conversation is a real tool-calling LLM agent, not pre-staged data. Every utterance you speak flows: Vocal Bridge → the /query seam (web_call.py) → answer_query() in concierge.py, which builds an OpenAI Agents SDK agent (gpt-5.4-mini by default) fresh for that turn and runs it with up to 6 internal turns. The agent carries five live function tools (concierge.py:).  Booking is reflected on the webpage.
+1. The initial booking conversation is a real tool-calling LLM agent, not pre-staged data. Every utterance you speak flows: Vocal Bridge → the /query seam (web_call.py) → answer_query() in concierge.py, which builds an OpenAI Agents SDK agent (gpt-5.4-mini by default) fresh for that turn and runs it with up to 6 internal turns. The agent carries seven live function tools (concierge.py). Booking is reflected on the webpage.
+
+   **The return-question beat (Phase 34, optional after booking):** once the outbound is booked, ask the orb *"is there a way to get home?"*. The agent asks for your return date (suggesting the trip's end date), then `check_return_flights` derives the reverse route from the booked trip and asks **Tavily web search** — speaking an indication like "I can't book the return from here, but there are nonstop flights back that day on Delta, American, and JetBlue." This is deliberately **verify-only**: web schedule info, never searched fares — nothing appears on the page's candidates panel and nothing becomes bookable (the Tavily path stores no options, unlike `search_flights`). Saying "whenever" instead of a date gets a general route indication. Spec: [`specs/2026-07-16-return-flight-indication/`](specs/2026-07-16-return-flight-indication/).
 2. Press **Cancel flight → cascade**. The browser disables the button and sends `POST /v1/demo/disrupt` with the trip currently pinned on the page. The handler in [`demo.py`](backend/api/demo.py) then:
 
    - Loads the real trip and its itinerary items. This both validates that the trip has a flight and gives Call 1 an accurate route, date, and list of downstream reservations.
