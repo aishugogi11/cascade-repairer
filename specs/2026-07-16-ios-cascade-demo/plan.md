@@ -123,6 +123,9 @@ trip ID or injected JavaScript workaround.
 6.5 Recheck `APIConfig.swift` against the deployed Cloud Run service and preserve
     the access gate, privacy manifest, legal/support links, AI-consent flow,
     Keychain lifecycle, and About withdrawal behavior.
+6.6 Correct both Debug and Release `LSApplicationCategoryType` build settings from
+    `public.app-category.business` to `public.app-category.travel` before the next
+    archive. App Store Connect already uses Travel; the bundle metadata must agree.
 
 ## 7. Tests, build, and device rehearsal
 
@@ -146,5 +149,6 @@ trip ID or injected JavaScript workaround.
     repairing/fixed, no timer or Call 2 occurs, and the visible action permits a
     deliberate retry. This consumes one outbound call.
 7.6 Install directly from Xcode only. Do not archive, upload, replace, or submit
-    an App Store binary under this feature; post-approval release remains an
-    explicit later action with the Phase 20 prerequisite.
+    an App Store binary under this feature while Phase 36 is recovering v1.0 (3)
+    unchanged. A later unlisted App Store update remains an explicit release
+    action with the Phase 20 prerequisite.

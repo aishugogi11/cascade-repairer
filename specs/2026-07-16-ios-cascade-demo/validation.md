@@ -2,9 +2,9 @@
 
 ## Preconditions
 
-- The build under App Review has been approved before any new binary is uploaded.
-  Direct Xcode installation is allowed; this validation does not authorize an
-  App Store upload.
+- Phase 36's unchanged v1.0 (3) resubmission has been approved for Unlisted App
+  Distribution before any new binary is uploaded. Direct Xcode installation is
+  allowed; this validation does not authorize an App Store upload.
 - Backlogged Phase 20 has removed the temporary `mobile_voice.py` latest-trip
   fallback on the deployed backend. A clean-slate Demo session must send no old
   trip pin. If the fallback is still deployed, end-to-end booking-first
@@ -191,6 +191,9 @@ survived both phone-call interruptions without restart or stale pinning.
   assertions; the app and tests compile with zero third-party dependencies.
 - The current Home tab is preserved and the app owns exactly one Vocal Bridge
   bridge across both tabs.
+- Both target configurations compile `LSApplicationCategoryType` as
+  `public.app-category.travel`, matching App Store Connect rather than the
+  rejected build's mistaken Business bundle category.
 - Clean-slate guided booking, visible Cancel, consent wait, approved parallel
   repair, repaired-flight result, and the two-call finale pass on a physical
   iPhone against the deployed backend.
@@ -199,4 +202,5 @@ survived both phone-call interruptions without restart or stale pinning.
   and duplicate-call safeguards pass.
 - No backend production file, roadmap file, or App Store submission was changed
   by this iOS-only feature. Phase 20 is completed separately before deployment,
-  and no replacement binary is uploaded before the current review approves.
+  and no replacement binary is uploaded while the Phase 36 unlisted recovery is
+  active.

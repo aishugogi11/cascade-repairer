@@ -9,8 +9,10 @@ approve → watch all five legs repair → receive the Vocal Bridge results call
 Branch: `vb/feature/ios-cascade-demo`.
 
 This spec was requested as a focused iOS follow-up; it does not insert, reorder,
-or mark a phase in `specs/roadmap.md`. Scheduling it against the remaining roadmap
-work is a separate decision.
+or mark its implementation as a phase in `specs/roadmap.md`. The 2026-07-16 App
+Review replan added a separate, immediate Phase 36 for the same-build unlisted
+recovery; scheduling this implementation against Phase 24 remains a separate
+decision.
 
 ## Scope
 
@@ -226,9 +228,12 @@ button: the only authorization channel is the traveler's answer on Call 1.
 - **Server truth over optimistic animation**: Call 1 is queued before the backend
   writes `broken`; consent launches repairs; Call 2 follows settled repair tasks.
   The app reflects those facts and never simulates them locally.
-- **Post-approval release posture**: the in-review binary is untouched. No new
-  archive or App Store upload occurs until it is approved and the Phase 20 bridge
-  prerequisite can ship; direct Xcode device installs do not affect review.
+- **Unlisted release posture** (Josh, App Review replan 2026-07-16): the rejected
+  v1.0 (3) binary is resubmitted unchanged through Phase 36 for Unlisted App
+  Distribution. No new archive or upload occurs while that same-build recovery is
+  active. After the unlisted release is approved and Phase 20 removes the bridge,
+  this feature may ship as a later update to the same unlisted app record; direct
+  Xcode device installs do not affect review.
 
 ## Context
 
@@ -248,6 +253,10 @@ button: the only authorization channel is the traveler's answer on Call 1.
 - Keep iOS 17+, iPhone-only, portrait, SwiftUI + WebKit + AVFoundation, and zero
   third-party dependencies. Preserve the access gate, first-use AI consent,
   privacy manifest, legal/support links, Keychain behavior, and About withdrawal.
+- Distribution remains **unlisted**: this is a finished limited-audience
+  special-event app installed through a direct App Store link, with the existing
+  access gate preventing unauthorized use. It is not a public-search product and
+  not a TestFlight substitute.
 - The backend is single-operator demo infrastructure. Adopting a changed global
   `latest_trip_id` is acceptable only for this staged flow; multi-user trip
   ownership is out of scope.
@@ -265,5 +274,5 @@ button: the only authorization channel is the traveler's answer on Call 1.
   recommendation/downstream sheets, or an activity feed in the Demo tab.
 - User accounts, Sign in with Apple, per-user trip storage, notifications, Live
   Activities, iPad, landscape, Android, or a native Vocal Bridge transport.
-- App Store archive/upload/release, roadmap edits, or replacing the binary now in
-  review.
+- App Store archive/upload/release, roadmap edits, or replacing the binary in the
+  Phase 36 same-build unlisted recovery.
