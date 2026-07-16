@@ -32,7 +32,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-16 (evening — Phase 32 close-out):** four decisions, all settled at the replan interview. (1) **PR evidence retires as a merge gate** — commit `933f8e8`'s removal of the `git_pull_dev.sh` guard is accepted, not restored: every validation since Phase 28 FAILed on exactly this paperwork while never catching a behavior defect, and the evidence already lives in each spec dir + changelog entry (tech-stack § Deployment records the convention; future `validation.md` files must not require PR-body evidence, retiring the recurring DoD-B). Phase 24's guard-test sub-item is deleted as moot. (2) The **Phase 32 write-back contract is recorded in tech-stack** (§ Backend): the repair rewrites the flight item's row wholesale — `details` included — which becomes a **Phase 33 scoping constraint** (see its block). (3) The validator's **partial-write risk is accepted** (bookings insert precedes the field write; a failed field write strands an inert booking row while the repair honestly errors) — noted in tech-stack, no rollback machinery at demo scale. (4) `DEMO_FLOW.md`'s "current Phase 32 gap" paragraph is refreshed to the shipped behavior. `mission.md` unchanged.
 
-## Phase 33: Rich flight fields from the sabre_endpoints notebook
+## Phase 33: Rich flight fields from the sabre_endpoints notebook [x] COMPLETE (implementation; manual QA pending)
 
 Pull the already-coded notebook parsing through to production: airline name, flight number, cabin (economy or not), nonstop vs. connecting, and total duration — surfaced on the cascade page and available to the agent when speaking options to the traveler. Also feeds Phase 34's spoken example.
 

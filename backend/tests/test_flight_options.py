@@ -112,6 +112,160 @@ def test_option_timestamps_are_pacific_instants():
     assert end_ts > start_ts
 
 
+# --- rich fields (Phase 33) -------------------------------------------------------
+
+
+def _rich_itinerary():
+    """A two-segment JFK→ORD→LAX connection carrying every rich field the
+    notebook extracts: ElapsedTime and the FareInfos cabin chain."""
+    return {
+        "AirItinerary": {
+            "OriginDestinationOptions": {
+                "OriginDestinationOption": [{
+                    "FlightSegment": [
+                        {
+                            "DepartureAirport": {"LocationCode": "JFK"},
+                            "ArrivalAirport": {"LocationCode": "ORD"},
+                            "DepartureDateTime": f"{_DAY}T08:00:00",
+                            "ArrivalDateTime": f"{_DAY}T09:40:00",
+                            "FlightNumber": "212",
+                            "MarketingAirline": {"Code": "DL"},
+                            "StopQuantity": 0,
+                        },
+                        {
+                            "DepartureAirport": {"LocationCode": "ORD"},
+                            "ArrivalAirport": {"LocationCode": "LAX"},
+                            "DepartureDateTime": f"{_DAY}T10:45:00",
+                            "ArrivalDateTime": f"{_DAY}T13:05:00",
+                            "FlightNumber": "213",
+                            "MarketingAirline": {"Code": "DL"},
+                            "StopQuantity": 0,
+                        },
+                    ],
+                    "ElapsedTime": 485,
+                }]
+            }
+        },
+        "AirItineraryPricingInfo": {
+            "ItinTotalFare": {"TotalFare": {"Amount": "205.40",
+                                            "CurrencyCode": "USD"}},
+            "FareInfos": {
+                "FareInfo": [{"TPA_Extensions": {"Cabin": {"Cabin": "Y"}}}]
+            },
+        },
+    }
+
+
+def test_parser_fills_rich_fields():
+    response = shapes.InstaFlightsResponse.model_validate(
+        {"PricedItineraries": [_rich_itinerary()]}
+    )
+    option = flight_options._parse_instaflights_options(response, "JFK", "LAX")[0]
+
+    assert option.airline_name == "Delta"
+    assert option.cabin == "Economy"
+    assert option.duration_minutes == 485
+    assert option.layover_airports == ["ORD"]
+    assert option.arrives_next_day is False
+    assert option.stops == 1
+
+
+def test_parser_missing_rich_fields_degrade_never_skip():
+    """An itinerary with neither ElapsedTime nor the cabin chain is still
+    offered — rich fields are garnish, not correctness."""
+    payload = {"PricedItineraries": [
+        _itinerary("JFK", "LAX", f"{_DAY}T07:20:00", f"{_DAY}T10:35:00",
+                   "439", "DL", "260.60"),
+    ]}
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    options = flight_options._parse_instaflights_options(response, "JFK", "LAX")
+
+    assert len(options) == 1  # offered, not skipped
+    assert options[0].duration_minutes == 0
+    assert options[0].cabin == ""
+    assert options[0].layover_airports == []
+    assert options[0].airline_name == "Delta"  # the table always answers
+
+
+def test_parser_red_eye_sets_arrives_next_day():
+    payload = {"PricedItineraries": [
+        _itinerary("JFK", "LAX", f"{_DAY}T21:00:00",
+                   f"{(date.fromisoformat(_DAY) + timedelta(days=1)).isoformat()}"
+                   f"T00:30:00", "1187", "UA", "189.20"),
+    ]}
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    option = flight_options._parse_instaflights_options(response, "JFK", "LAX")[0]
+
+    assert option.arrives_next_day is True
+    assert option.arrive_date != option.depart_date
+
+
+def test_spoken_clause_names_the_airline_never_codes():
+    """Phase 33 decision 2: the clause gains the airline name ONLY — no
+    duration, cabin, or fare-class letters ride the per-option read-out."""
+    response = shapes.InstaFlightsResponse.model_validate(
+        {"PricedItineraries": [_rich_itinerary()]}
+    )
+    option = flight_options._parse_instaflights_options(response, "JFK", "LAX")[0]
+
+    assert "on Delta" in option.spoken
+    assert "DL" not in option.spoken
+    assert "Economy" not in option.spoken  # cabin is on-request only
+    assert "485" not in option.spoken and "8h" not in option.spoken
+    assert "ORD" not in option.spoken  # via codes never spoken unprompted
+
+
+def test_pre_33_stored_payload_still_validates():
+    """The additive-field guarantee, Phase 33 edition: a stored option
+    payload with none of the rich fields validates with defaults."""
+    option = flight_options.FlightOption(
+        option_number=1, airline="AA", flight_number=100, origin="MSP",
+        destination="SFO", depart_date=_DAY, depart_time="08:00",
+        arrive_time="10:05", stops=0, price=250.0, currency="USD",
+        spoken="Option one.",
+    )
+    assert option.airline_name == ""
+    assert option.cabin == ""
+    assert option.duration_minutes == 0
+    assert option.layover_airports == []
+    assert option.arrives_next_day is False
+
+
+def test_airline_name_falls_back_to_the_code():
+    assert flight_options.airline_name("DL") == "Delta"
+    assert flight_options.airline_name(" ua ") == "United"
+    assert flight_options.airline_name("ZZ") == "ZZ"
+    assert flight_options.airline_name("") == ""
+
+
+def test_unknown_cabin_letter_passes_through():
+    """The notebook contract: CABIN_NAMES.get(letter, letter) — degraded,
+    not broken."""
+    rich = _rich_itinerary()
+    rich["AirItineraryPricingInfo"]["FareInfos"]["FareInfo"][0][
+        "TPA_Extensions"]["Cabin"]["Cabin"] = "Q"
+    response = shapes.InstaFlightsResponse.model_validate(
+        {"PricedItineraries": [rich]}
+    )
+    option = flight_options._parse_instaflights_options(response, "JFK", "LAX")[0]
+    assert option.cabin == "Q"
+
+
+def test_fmt_duration():
+    assert flight_options.fmt_duration(349) == "5h 49m"
+    assert flight_options.fmt_duration(120) == "2h"
+    assert flight_options.fmt_duration(45) == "45m"
+    assert flight_options.fmt_duration(0) == "0m"
+
+
+def test_airline_table_has_exactly_one_copy():
+    """itinerary_ui's table is the flight_options object itself (Phase 33
+    promotion) — no second dict to drift."""
+    from api import itinerary_ui
+
+    assert itinerary_ui._AIRLINE_NAMES is flight_options.AIRLINE_NAMES
+
+
 def test_option_timestamps_red_eye_lands_next_pt_day():
     """A converted red-eye arrives on the next PT date — end_ts must never
     precede start_ts."""

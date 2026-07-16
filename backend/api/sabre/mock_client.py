@@ -137,12 +137,21 @@ class MockSabreClient:
     # SABRE_MODE=mock behaves as before in spirit. Each clock is the mock's
     # Pacific wall-clock fiction; instaflights_search re-expresses it in the
     # InstaFlights airport-local convention so the parser's round trip lands
-    # back on this spread (Phase 28): (depart, arrive, stops, price).
+    # back on this spread (Phase 28). Phase 33: each variant also carries the
+    # rich fields — cabin letter and whole-journey ElapsedTime minutes
+    # (consistent with the fiction clocks) — and the one-stop variant is a
+    # genuine two-segment connection through a hub, so layover_airports has
+    # mock data to exercise: (depart, arrive, stops, price, cabin, elapsed).
     _INSTA_VARIANTS = [
-        ("08:00:00", "10:05:00", 0, 187.6),
-        ("11:30:00", "13:40:00", 0, 242.0),
-        ("06:15:00", "11:20:00", 1, 155.0),
+        ("08:00:00", "10:05:00", 0, 187.6, "Y", 125),
+        ("11:30:00", "13:40:00", 0, 242.0, "J", 130),
+        ("06:15:00", "11:20:00", 1, 155.0, "Y", 305),
     ]
+
+    # The connecting variant's Pacific-fiction leg clocks: origin→hub,
+    # ground time, hub→destination — endpoints match the variant above so
+    # the parsed PT spread is unchanged.
+    _CONNECTION_LEGS = [("06:15:00", "08:05:00"), ("08:50:00", "11:20:00")]
 
     @staticmethod
     def _airport_local(day: str, clock: str, code: str) -> str:
@@ -159,44 +168,56 @@ class MockSabreClient:
         )
         return fiction.astimezone(zone).strftime("%Y-%m-%dT%H:%M:%S")
 
+    def _segment(self, day: str, depart: str, arrive: str, dep_airport: str,
+                 arr_airport: str, flight_number: int) -> "shapes.FlightSegment":
+        return shapes.FlightSegment(
+            DepartureAirport=shapes.SegmentAirport(LocationCode=dep_airport),
+            ArrivalAirport=shapes.SegmentAirport(LocationCode=arr_airport),
+            DepartureDateTime=self._airport_local(day, depart, dep_airport),
+            ArrivalDateTime=self._airport_local(day, arrive, arr_airport),
+            FlightNumber=flight_number,
+            MarketingAirline=shapes.MarketingAirline(Code="AA"),
+            StopQuantity=0,
+        )
+
     async def instaflights_search(
         self, request: shapes.InstaFlightsRequest
     ) -> shapes.InstaFlightsResponse:
-        """InstaFlights — three deterministic priced itineraries."""
+        """InstaFlights — three deterministic priced itineraries. The
+        one-stop variant connects through a hub (DFW, or ORD when DFW is an
+        endpoint) so the rich connection fields have mock data; endpoints
+        keep the classic clock spread, so parsed PT times are unchanged."""
         await self._lag()
         origin = request.origin.upper()
         dest = request.destination.upper()
         day = request.departuredate
+        hub = "DFW" if "DFW" not in (origin, dest) else "ORD"
         flight_number = int(hashlib.sha256(f"{origin}{dest}".encode()).hexdigest(), 16) % 900 + 100
         itineraries = []
-        for i, (depart, arrive, stops, price) in enumerate(self._INSTA_VARIANTS):
+        for i, (depart, arrive, stops, price, cabin, elapsed) in enumerate(
+            self._INSTA_VARIANTS
+        ):
+            if stops == 0:
+                segments = [
+                    self._segment(day, depart, arrive, origin, dest,
+                                  flight_number + i * 7)
+                ]
+            else:
+                (leg1_dep, leg1_arr), (leg2_dep, leg2_arr) = self._CONNECTION_LEGS
+                segments = [
+                    self._segment(day, leg1_dep, leg1_arr, origin, hub,
+                                  flight_number + i * 7),
+                    self._segment(day, leg2_dep, leg2_arr, hub, dest,
+                                  flight_number + i * 7 + 1),
+                ]
             itineraries.append(
                 shapes.PricedItinerary(
                     AirItinerary=shapes.AirItinerary(
                         OriginDestinationOptions=shapes.OriginDestinationOptions(
                             OriginDestinationOption=[
                                 shapes.OriginDestinationOption(
-                                    FlightSegment=[
-                                        shapes.FlightSegment(
-                                            DepartureAirport=shapes.SegmentAirport(
-                                                LocationCode=origin
-                                            ),
-                                            ArrivalAirport=shapes.SegmentAirport(
-                                                LocationCode=dest
-                                            ),
-                                            DepartureDateTime=self._airport_local(
-                                                day, depart, origin
-                                            ),
-                                            ArrivalDateTime=self._airport_local(
-                                                day, arrive, dest
-                                            ),
-                                            FlightNumber=flight_number + i * 7,
-                                            MarketingAirline=shapes.MarketingAirline(
-                                                Code="AA"
-                                            ),
-                                            StopQuantity=stops,
-                                        )
-                                    ]
+                                    FlightSegment=segments,
+                                    ElapsedTime=elapsed,
                                 )
                             ]
                         )
@@ -206,7 +227,16 @@ class MockSabreClient:
                             TotalFare=shapes.InstaTotalFare(
                                 Amount=price, CurrencyCode="USD"
                             )
-                        )
+                        ),
+                        FareInfos=shapes.InstaFareInfos(
+                            FareInfo=[
+                                shapes.InstaFareInfo(
+                                    TPA_Extensions=shapes.FareInfoTPAExtensions(
+                                        Cabin=shapes.CabinInfo(Cabin=cabin)
+                                    )
+                                )
+                            ]
+                        ),
                     ),
                 )
             )

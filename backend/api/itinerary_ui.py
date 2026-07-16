@@ -106,11 +106,9 @@ def _voice_booking_detail(raw: dict) -> dict:
 # Airline codes → warm names for the repair why-chosen (the standing spoken/
 # displayed-copy rule: a traveler-facing name, not a bare code). Unknown codes
 # fall back to the code itself.
-_AIRLINE_NAMES = {
-    "AA": "American", "DL": "Delta", "UA": "United", "B6": "JetBlue",
-    "WN": "Southwest", "AS": "Alaska", "NK": "Spirit", "F9": "Frontier",
-    "HA": "Hawaiian", "G4": "Allegiant",
-}
+# The airline code→name table moved to flight_options (Phase 33) so the
+# parser, both stamping paths, and these detail builders share one copy.
+_AIRLINE_NAMES = flight_options.AIRLINE_NAMES
 
 
 def _signed_delta(delta: float) -> str:
@@ -137,7 +135,11 @@ def _rebooked_from_line(raw: dict) -> Optional[str]:
         flight_no = original.get("flight_number")
         depart = original.get("depart_time")
         if airline_code and flight_no:
-            airline = _AIRLINE_NAMES.get(airline_code, airline_code)
+            # Phase 33: the repair stamps the name; older rows fall back to
+            # the shared table lookup.
+            airline = original.get("airline_name") or _AIRLINE_NAMES.get(
+                airline_code, airline_code
+            )
             parts.append(f"{airline} {flight_no}")
             if depart:
                 parts.append(
@@ -165,7 +167,11 @@ def _flight_repair_detail(raw: dict) -> dict:
     the real difference against the cancelled flight's fare."""
     option = raw.get("option", {})
     airline_code = option.get("airline", "")
-    airline = _AIRLINE_NAMES.get(airline_code, airline_code or "your carrier")
+    # Phase 33: the option carries its own name; older rows fall back to
+    # the shared table lookup.
+    airline = option.get("airline_name") or _AIRLINE_NAMES.get(
+        airline_code, airline_code or "your carrier"
+    )
     flight_no = option.get("flight_number", "")
     stops = option.get("stops", 0)
     legs = "nonstop" if stops == 0 else (

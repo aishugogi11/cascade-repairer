@@ -696,12 +696,14 @@ def test_book_flight_creates_rows_replaces_pin_and_clears_options(monkeypatch, b
     assert len(booking.raw_response["options_offered"]) >= 2
     # Phase 31: the flight's identity rides on the item so the repair
     # re-shop can exclude the cancelled flight (live QA: without this the
-    # traveler was "repaired" onto their original flight).
+    # traveler was "repaired" onto their original flight). Phase 33: the
+    # stamp is the shared rich-field dict — identity keys unchanged.
     chosen = booking.raw_response["option"]
-    assert item.details == {
-        "airline": chosen["airline"],
-        "flight_number": chosen["flight_number"],
-    }
+    assert item.details == concierge.details_from_option(
+        concierge.FlightOption(**chosen)
+    )
+    assert item.details["airline"] == chosen["airline"]
+    assert item.details["flight_number"] == chosen["flight_number"]
     # Blocking writes ran off the event loop's thread (the to_thread rule).
     assert seen["threads"][0] is not threading.main_thread()
     # Pin replaced with the new trip; the spent options are gone.

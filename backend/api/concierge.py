@@ -52,7 +52,9 @@ from api.flight_options import (  # noqa: F401 — re-export surface
     _parse_instaflights_options,
     _spoken_clock,
     _spoken_option,
+    details_from_option,
     FlightOption,
+    fmt_duration,
     option_timestamps,
 )
 from api.repositories import bookings, itinerary_items, trips
@@ -93,7 +95,12 @@ BASE_INSTRUCTIONS = (
     "date as YYYY-MM-DD; turn city names into airport codes yourself — "
     "always a specific airport, never a metro or city code (New York is "
     "JFK, not NYC). Read "
-    "the options back and ask the traveler to pick one by number. When they "
+    "the options back and ask the traveler to pick one by number. Speak "
+    "airline names, never airline codes or fare-class letters. The search "
+    "result's bracketed reference section is not part of the read-back — "
+    "use it to answer follow-up questions about the airline, cabin, total "
+    "duration, connections, or a next-day arrival without searching again, "
+    "and say connection airports as city names. When they "
     "choose, call book_flight with that option number and confirm the "
     "booking in one short sentence, then offer to arrange the rest of the "
     "trip; when they agree, call complete_trip and tell them the pieces are "
@@ -402,15 +409,35 @@ async def search_flights_impl(
     )
     count_word = {2: "two", 3: "three"}.get(len(options), str(len(options)))
     spoken = " ".join(option.spoken for option in options)
+    reference = " ".join(_option_facts(option) for option in options)
+    facts = f" [Reference, don't read aloud unless asked: {reference}]"
     if len(options) == 1:
         return (
             f"I found one flight. {spoken} Should I book it? Just say "
-            "option one."
+            f"option one.{facts}"
         )
     return (
         f"I found {count_word} good options. {spoken} Which one would "
-        "you like?"
+        f"you like?{facts}"
     )
+
+
+def _option_facts(option: FlightOption) -> str:
+    """One option's rich facts for the tool result's bracketed reference
+    section (Phase 33) — the agent answers 'how long is it?' / 'is that
+    economy?' from this instead of re-searching. Never part of the spoken
+    read-back; fields the response didn't carry are simply absent."""
+    word = _NUMBER_WORDS.get(option.option_number, str(option.option_number))
+    parts = [f"{option.airline_name or option.airline} {option.flight_number}"]
+    if option.cabin:
+        parts.append(option.cabin)
+    if option.duration_minutes:
+        parts.append(fmt_duration(option.duration_minutes))
+    if option.layover_airports:
+        parts.append("connects in " + ", ".join(option.layover_airports))
+    if option.arrives_next_day:
+        parts.append("arrives the next day")
+    return f"Option {word}: {', '.join(parts)}."
 
 
 def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
@@ -443,14 +470,13 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
         start_ts=start_ts,
         end_ts=end_ts,
         location=f"{option.origin}-{option.destination}",
-        # The booked flight's identity (Phase 31): the repair re-shop's
-        # exclusion filter reads exactly these keys — without them a
-        # cancelled JFK→LAX flight can be "repaired" onto itself (live QA,
-        # 2026-07-15).
-        details={
-            "airline": option.airline,
-            "flight_number": option.flight_number,
-        },
+        # The booked flight's identity (Phase 31) plus the rich display
+        # fields (Phase 33), via the stamp shared with the repair
+        # write-back — the repair replaces `details` wholesale, so a key
+        # stamped only here would be wiped from the card by the first
+        # repair. The exclusion filter reads airline/flight_number exactly
+        # as before.
+        details=details_from_option(option),
         price=option.price,
         currency=option.currency,
     )
@@ -562,6 +588,14 @@ def pending_options_for_trip(trip_id: str) -> Optional[dict]:
                 "arrive_time": _spoken_clock(o.arrive_time),
                 "stops": o.stops,
                 "price": round(o.price),
+                # Phase 33: the candidates panel names the carrier and shows
+                # the journey length — still a name, never a code; empty
+                # strings when the response didn't carry them.
+                "airline_name": o.airline_name,
+                "duration": (
+                    fmt_duration(o.duration_minutes)
+                    if o.duration_minutes else ""
+                ),
             }
             for o in slot.options
         ],

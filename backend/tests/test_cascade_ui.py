@@ -274,12 +274,29 @@ def test_page_has_an_awaiting_state():
 
 def test_page_renders_pending_options_as_the_candidates_panel():
     """The booking beat survives on this page: the mockup's "AI Recommended"
-    card, fed by the status payload's pending_options block."""
+    card, fed by the status payload's pending_options block. Phase 33: the
+    candidate line also names the carrier and shows the journey length."""
     text = page_text()
     assert 'id="candidates"' in text
     assert "AI Recommended" in text
     assert "pending_options" in text
     for field in ("option_number", "arrive_time", "depart_time",
-                  "route", "stops"):
+                  "route", "stops", "airline_name", "duration"):
         assert f"o.{field}" in text, field
     assert "fmtPrice(o.price)" in text
+
+
+def test_page_has_the_rich_flight_fields():
+    """Phase 33: the flight card carries the carrier headline and the terse
+    facts row (cabin · stops/via · duration · next-day), each rendered off
+    the item's `details` stamp and hidden entirely when the field is absent
+    — a pre-33 trip shows exactly the pre-33 card."""
+    text = page_text()
+    assert 'id="flight-airline"' in text
+    assert 'id="flight-facts"' in text
+    for field in ("airline_name", "cabin", "duration_minutes",
+                  "layover_airports", "arrives_next_day"):
+        assert f"d.{field}" in text, field
+    assert "Nonstop" in text and "via" in text
+    assert "arrives next day" in text
+    assert "fmtDuration" in text

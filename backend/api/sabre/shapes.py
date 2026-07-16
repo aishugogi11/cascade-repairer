@@ -478,6 +478,9 @@ class FlightSegment(BaseModel):
 
 class OriginDestinationOption(BaseModel):
     FlightSegment: List[FlightSegment]
+    # Whole-journey minutes including layovers (Phase 33). Optional: a real
+    # itinerary missing it must still parse — rich fields degrade, never skip.
+    ElapsedTime: Optional[int] = None
 
 
 class OriginDestinationOptions(BaseModel):
@@ -497,8 +500,27 @@ class ItinTotalFare(BaseModel):
     TotalFare: InstaTotalFare
 
 
+class CabinInfo(BaseModel):
+    Cabin: str  # booking-class letter, e.g. "Y"
+
+
+class FareInfoTPAExtensions(BaseModel):
+    Cabin: Optional[CabinInfo] = None
+
+
+class InstaFareInfo(BaseModel):
+    TPA_Extensions: Optional[FareInfoTPAExtensions] = None
+
+
+class InstaFareInfos(BaseModel):
+    FareInfo: List[InstaFareInfo] = []
+
+
 class AirItineraryPricingInfo(BaseModel):
     ItinTotalFare: ItinTotalFare
+    # Cabin chain (Phase 33): FareInfos.FareInfo[0].TPA_Extensions.Cabin.Cabin
+    # per the notebook's observed response. Optional end to end.
+    FareInfos: Optional[InstaFareInfos] = None
 
 
 class PricedItinerary(BaseModel):
