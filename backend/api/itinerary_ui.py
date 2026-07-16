@@ -123,6 +123,41 @@ def _signed_delta(delta: float) -> str:
     return "$0"
 
 
+def _rebooked_from_line(raw: dict) -> Optional[str]:
+    """The old flight as one struck-through-able line for the cascade page's
+    old -> new treatment (Phase 32): "Was Delta 439 · departed 8:05 AM PT ·
+    $214". Best-effort over the repair booking's rebooked_from block —
+    identity may be absent (seed trips), so the line degrades to whatever is
+    known and returns None when nothing usable remains. Never raises:
+    _item_detail runs outside _details_for's guard."""
+    try:
+        original = raw.get("rebooked_from") or {}
+        parts = []
+        airline_code = original.get("airline")
+        flight_no = original.get("flight_number")
+        depart = original.get("depart_time")
+        if airline_code and flight_no:
+            airline = _AIRLINE_NAMES.get(airline_code, airline_code)
+            parts.append(f"{airline} {flight_no}")
+            if depart:
+                parts.append(
+                    f"departed {flight_options._spoken_clock(depart)} PT"
+                )
+        elif depart:
+            # No identity to name (seed trips) — lead with the clock instead.
+            parts.append(
+                f"the {flight_options._spoken_clock(depart)} PT departure"
+            )
+        price = original.get("price")
+        if price:
+            parts.append(f"${price:,.0f}")
+        if not parts:
+            return None
+        return "Was " + " · ".join(parts)
+    except Exception:  # noqa: BLE001 — additive, never load-bearing
+        return None
+
+
 def _flight_repair_detail(raw: dict) -> dict:
     """The Phase 29 case: the flight repair re-shopped real InstaFlights data
     and stored the chosen option, the alternatives it beat, and the original
@@ -139,7 +174,7 @@ def _flight_repair_detail(raw: dict) -> dict:
     arrive = option.get("arrive_time")
     landing = flight_options._spoken_clock(arrive) if arrive else "the planned time"
     delta = (option.get("price") or 0) - (raw.get("original_price") or 0)
-    return {
+    detail = {
         "why_chosen": (
             f"Rebooked on {airline} {flight_no}, {legs}, landing {landing} — "
             "the closest available arrival to your original flight."
@@ -147,6 +182,12 @@ def _flight_repair_detail(raw: dict) -> dict:
         "price_delta": _signed_delta(delta),
         "impact": _REPAIR_IMPACT["flight"],
     }
+    # Phase 32: the cascade page's old -> new treatment — additive, omitted
+    # when the repair recorded nothing usable about the original flight.
+    was = _rebooked_from_line(raw)
+    if was:
+        detail["rebooked_from"] = was
+    return detail
 
 
 def _item_detail(item: ItineraryItem, booking: Optional[Booking]) -> Optional[dict]:

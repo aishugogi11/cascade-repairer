@@ -77,6 +77,44 @@ def list_items_for_trip(
     return True, rows_to_models(ItineraryItem, rows), None
 
 
+def update_flight_fields(
+    item_id: str,
+    *,
+    start_ts,
+    end_ts,
+    price: float,
+    currency: str,
+    details: Optional[dict],
+) -> Tuple[bool, int, Optional[str]]:
+    """Rewrite a flight item's display fields after a repair rebooks it
+    (Phase 32) — the cascade page renders exactly this row, so the rebooked
+    flight's times/price/identity must land here or the card keeps showing
+    the cancelled flight. Stamps updated_at like every lifecycle write.
+
+    Returns (success, affected_rows, error) — affected_rows 0 means no such
+    item (a no-op, not an error; the caller decides whether that's fatal).
+    """
+    query = f"""
+        UPDATE `{_table()}`
+        SET start_ts = @start_ts, end_ts = @end_ts, price = @price,
+            currency = @currency, details = PARSE_JSON(@details),
+            updated_at = CURRENT_TIMESTAMP()
+        WHERE item_id = @item_id
+    """
+    params = [
+        bigquery.ScalarQueryParameter("start_ts", "TIMESTAMP", start_ts),
+        bigquery.ScalarQueryParameter("end_ts", "TIMESTAMP", end_ts),
+        bigquery.ScalarQueryParameter("price", "FLOAT64", price),
+        bigquery.ScalarQueryParameter("currency", "STRING", currency),
+        bigquery.ScalarQueryParameter(
+            "details", "STRING",
+            json.dumps(details) if details is not None else None,
+        ),
+        bigquery.ScalarQueryParameter("item_id", "STRING", item_id),
+    ]
+    return bq_helper.run_dml(query, params)
+
+
 def update_status(item_id: str, status: str) -> Tuple[bool, int, Optional[str]]:
     """Transition an item through the repair lifecycle, stamping updated_at.
 

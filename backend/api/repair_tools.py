@@ -331,6 +331,19 @@ async def _rebook_flight(
         )
     )
 
+    # The original flight, structured, from the best-effort caller context
+    # (Phase 32): the cascade page's old -> new treatment and the detail
+    # payload's "was ..." line both speak from this block. Identity may be
+    # absent (seed trips, walkthrough calls) — every field is optional.
+    rebooked_from = {
+        "airline": cancelled_flight[0] if cancelled_flight else None,
+        "flight_number": cancelled_flight[1] if cancelled_flight else None,
+        "depart_time": original_depart_time,
+        "arrive_time": original_arrive_time,
+        "price": original_price,
+        "currency": original_currency,
+    }
+
     # The enriched raw_response drives the booking page's flight_repair detail
     # panel (why-chosen / price-delta). The chosen option, the alternatives it
     # beat, the original fare, and the mock rebook payload (unchanged).
@@ -340,12 +353,45 @@ async def _rebook_flight(
         "alternatives": [o.model_dump() for o in options if o is not chosen],
         "original_price": original_price,
         "original_currency": original_currency,
+        "rebooked_from": rebooked_from,
         "from_mock_fallback": from_mock_fallback,
         "rebooked": rebooked.model_dump(),
     }
     await _write_booking(
         trip_id, item_id, rebooked.created.confirmationId, raw_response
     )
+
+    # Phase 32: write the rebooked flight into the itinerary_items row itself —
+    # the cascade page renders exactly this row, so without this write the card
+    # flips to `fixed` still showing the cancelled flight's times and price.
+    # details.airline/flight_number become the NEW identity (the Phase 31
+    # exclusion filter reads these keys — a second break -> repair must exclude
+    # the flight the traveler is actually on now). Raising on a failed or 0-row
+    # write keeps the ordering guarantee: _repair_one flips `fixed` only after
+    # this tool returns, so the poll can never see `fixed` over stale fields.
+    new_start_ts, new_end_ts = flight_options.option_timestamps(chosen)
+    write_ok, affected_rows, write_error = await asyncio.to_thread(
+        itinerary_items.update_flight_fields,
+        item_id,
+        start_ts=new_start_ts,
+        end_ts=new_end_ts,
+        price=chosen.price,
+        currency=chosen.currency,
+        details={
+            "airline": chosen.airline,
+            "flight_number": chosen.flight_number,
+            "rebooked_from": rebooked_from,
+        },
+    )
+    if not write_ok:
+        raise RuntimeError(
+            f"flight field write failed for item {item_id}: {write_error}"
+        )
+    if affected_rows == 0:
+        raise RuntimeError(
+            f"flight field write for item {item_id} matched no rows"
+        )
+
     return {
         "cancelled_ref": old_ref,
         "confirmation_ref": rebooked.created.confirmationId,

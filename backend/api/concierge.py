@@ -53,6 +53,7 @@ from api.flight_options import (  # noqa: F401 — re-export surface
     _spoken_clock,
     _spoken_option,
     FlightOption,
+    option_timestamps,
 )
 from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
@@ -432,21 +433,15 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
     if not success:
         raise RuntimeError(f"trip insert failed: {error}")
 
-    dep_h, dep_m = int(option.depart_time[:2]), int(option.depart_time[3:5])
-    arr_h, arr_m = int(option.arrive_time[:2]), int(option.arrive_time[3:5])
-    # The arrival's own PT date, not the departure's: a converted red-eye
-    # lands the next PT day, and end_ts must never precede start_ts.
-    arrive = date.fromisoformat(option.arrive_date or option.depart_date)
+    start_ts, end_ts = option_timestamps(option)
     item = ItineraryItem(
         trip_id=trip.trip_id,
         type="flight",
         status="planned",
         provider="sabre",
         provider_ref=f"VOICE-FLIGHT-{uuid.uuid4().hex[:6].upper()}",
-        start_ts=datetime(depart.year, depart.month, depart.day, dep_h, dep_m,
-                          tzinfo=_PACIFIC),
-        end_ts=datetime(arrive.year, arrive.month, arrive.day, arr_h, arr_m,
-                        tzinfo=_PACIFIC),
+        start_ts=start_ts,
+        end_ts=end_ts,
         location=f"{option.origin}-{option.destination}",
         # The booked flight's identity (Phase 31): the repair re-shop's
         # exclusion filter reads exactly these keys — without them a
