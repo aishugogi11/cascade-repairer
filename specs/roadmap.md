@@ -38,28 +38,6 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-16 (Phase 33 close-out):** four decisions, all settled at the replan interview. (1) **Phase 35 moves ahead of Phase 34** — 34's gating data is dry today (the reverse pair LAX→JFK honest-empty at the scripted date) and it can't be rehearsed against an empty cache, while 35 is not data-gated; 34 stays alive as **build-only-if-data-returns** (its go/no-go signal is the reverse-pair probe, re-run at any later probe or the Phase 24 morning smoke). (2) The validator's **two-repair lifecycle test** (book → break → repair → second break → second repair over one item, each wholesale `details` write carrying the full shared stamp with the prior flight under `rebooked_from`) folds into **Phase 24** as a hermetic test item. (3) The **codeshare/mixed-cabin summarization risk is accepted** (first segment's carrier, first fare-info cabin — noted in tech-stack § Backend; demo pairs are nonstop-rich, no code change). (4) The optional **live CERT rich-field parse folds into Phase 24's cert-tripwire de-brittling** (assert rich fields parse present-or-cleanly-absent on the anchor pair). `mission.md` unchanged. New order: **35 → 34 (data-gated) → 24**.
 
-## Phase 35: Tavily destination-info tool for the Concierge — [x] COMPLETE
-
-One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
-
-> **TODO:** Tavily destination-info tool for the Concierge — added 2026-07-16 (proof:
-> `jupyter_notebook/agent_search.ipynb`, working Agents SDK agent + `tavily_search`
-> function tool, same SDK/model/pattern as the Concierge). Scope settled with Josh:
-> **conversational only — no real hotel/dining/experience booking** (those APIs
-> aren't coming; `complete_trip`'s mocked build-out stays exactly as-is). Add ONE
-> new trip-aware tool (e.g. `destination_info(question)`) to `build_agent` that
-> appends the pinned trip's destination + dates to the query server-side and
-> answers "what's happening there / things to do during my trip" with live Tavily
-> results during the initial call. A second tool (weather / dining recs) is a
-> stretch goal only if the first rehearses reliably — every extra tool is another
-> mid-demo model choice. House rules: tool body try/excepts and returns a
-> speakable string on failure; condense results for voice (`include_answer=True`);
-> start with `search_depth='basic'` (advanced can take seconds inside a live
-> voice turn). Deployment surface: `tavily-python` in backend deps +
-> `TAVILY_API_KEY` on Cloud Run — the one piece code alone can't ship.
-> Blast radius otherwise: one tool registration + instruction sentences; trip
-> model, booking writes, repair cascade, consent flow all untouched.
-
 ## Phase 34: Return-flight indication (verify-only, Tavily-backed — re-scoped 2026-07-16, no longer data-gated)
 
 A new read-only Concierge tool that answers "can I get back?" with a credible spoken indication that return flights exist on the traveler's return date — no booking, no options displayed, nothing bookable enters session state. **Re-scoped at the 2026-07-16 Phase 35 QA follow-up (settled with Josh): the data source is Tavily web search, not InstaFlights.** The requirement (from Josh's live-QA transcript, where the traveler asked "is there a way to get home" and hit the booked-trip guard): when someone books the outbound, the agent must give *some* indication a return exists — ideally with the date. The InstaFlights route is closed with high confidence (probes 2026-07-16, run from the real client's exact request path: reverse pair LAX→JFK honest-empty at every probed date +10 through +30 days; round-trip `returndate` searches 404 no-results at every date **including the anchor July 21→23** while the same-run one-way control returned 3 itineraries — round-trip needs both directions cached, so it inherits the empty reverse pair). Tavily's answer quality is proven with the deployed key through the shipped `_tavily_search`: *"Three airlines operate nonstop flights from LAX to JFK on July 26, 2026: JetBlue, American Airlines, and Delta Air Lines."* The phase is therefore **no longer data-gated** and can ship before July 18.
