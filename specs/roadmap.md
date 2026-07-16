@@ -20,12 +20,76 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Update 2026-07-15 (Phase 22 shipped, QA'd, archived):** the consolidated cascade dashboard (`GET /v1/cascade/` — repair surfaces, disruption score, downstream impact, on-page demo triggers, Phase 23 voice placeholder, item-H age expiry) is merged (PR #53), deployed, manually QA'd on Cloud Run the same day, and archived to [changelog.md](changelog.md). Its independent validation returned **FAIL on the acceptance package only** (DoD-B again: PR #53 placeholder description; report in the spec dir). **QA produced the Phase 23 demo contract** (settled with Josh 2026-07-15): booking by voice, consent-gated repairs read from the VB transcript, the timer anchored at the spoken yes, real-trip call scripts, and a results callback.
 
-**Update 2026-07-15 (evening — Phases 23 and 31 shipped and archived):** Phase 23 (live voice surfaces + the consent-gated demo flow, PR #54) and its same-day close-out Phase 31 (PR #55 — the `room_name` session join that unblocks Call 2, the different-flight rebooking guarantee, the re-trigger race, `trip_status` honesty, the `fix_trip` phone deferral, and the hardened PR-evidence guard) are merged, deployed, and archived to [changelog.md](changelog.md). **Manual QA closed the same evening (2026-07-15 PT): the live rerun PASSED** on the post-31 deploy (commit `2637754`) — booked by voice through the on-page orb, Call 1 asked consent from the real trip's data, the spoken yes granted and launched repairs with the timer anchored at the go-ahead, and **Call 2 arrived speaking a different rebooked flight**. Both phases are fully complete. Two same-evening riders shipped on `vb/dev` ahead of the rerun (commits `1ac2659`/`2637754`, both deployed): the Phase 31 validation's fixes (the missing `broken`-status trip_status test; the max-instances roadmap correction — the service-level cap was already `1`) and the **New trip clean-slate control** — the rerun's first attempt hit a client-side rebuild of the Phase 18 pin trap (the orb pins every fresh session to the displayed trip, making guided booking unreachable), fixed by a header control that clears the display, ends the live voice session, and re-adopts only a newly booked trip; README carries the operator run sheet. Open work: the one follow-up below, then **Phase 24**.
+**Update 2026-07-15 (evening — Phases 23 and 31 shipped and archived):** Phase 23 (live voice surfaces + the consent-gated demo flow, PR #54) and its same-day close-out Phase 31 (PR #55 — the `room_name` session join that unblocks Call 2, the different-flight rebooking guarantee, the re-trigger race, `trip_status` honesty, the `fix_trip` phone deferral, and the hardened PR-evidence guard) are merged, deployed, and archived to [changelog.md](changelog.md). **Manual QA closed the same evening (2026-07-15 PT): the live rerun PASSED** on the post-31 deploy (commit `2637754`) — booked by voice through the on-page orb, Call 1 asked consent from the real trip's data, the spoken yes granted and launched repairs with the timer anchored at the go-ahead, and **Call 2 arrived speaking a different rebooked flight**. Both phases are fully complete. Two same-evening riders shipped on `vb/dev` ahead of the rerun (commits `1ac2659`/`2637754`, both deployed): the Phase 31 validation's fixes (the missing `broken`-status trip_status test; the max-instances roadmap correction — the service-level cap was already `1`) and the **New trip clean-slate control** — the rerun's first attempt hit a client-side rebuild of the Phase 18 pin trap (the orb pins every fresh session to the displayed trip, making guided booking unreachable), fixed by a header control that clears the display, ends the live voice session, and re-adopts only a newly booked trip; README carries the operator run sheet. Open work: **Phase 24**.
 
 **Replan 2026-07-16 (constitution reconciled to the shipped one-page demo):** tech-stack now records what Phases 22–23/31 made true — `/v1/cascade/` is the demo's primary surface (the two-button `/v1/demo/` page is a kept backup, decision at this replan), the demo orchestrator is the consent-gated flow with the `room_name` session join, the Concierge carries `trip_status` / flight-identity stamping / the `fix_trip` phone deferral, the repair re-shop guarantees a different rebooked flight, the single-instance guarantee is the *service-level* Cloud Run cap, and `git_pull_dev.sh` is the PR-evidence guard (convention, not enforcement). Phase 24 gains four small items from this cycle's validation/QA findings (fast-fail `place_call`, `?code=` GET support on the gate, and the two invariant tests). `mission.md` unchanged — scope and audience didn't move.
 
-**Open follow-ups (from Phases 23/31, 2026-07-15):**
-- **PR #55 evidence**: the manual GitHub merge bypassed the new guard, so the description is still the unfilled template — backfill it with `gh pr edit 55 --body-file PR_BODY.md` (three sections: the mock/verification summary, the passing live-run notes with both call outcomes and the differing rebooked flight, and the pytest tail — currently 484 passed).
+*(The PR #55 evidence-backfill follow-up was dropped 2026-07-16 — the live-run evidence already lives in the Phase 23/31 spec dirs and changelog, and the pre-merge guard now covers future PRs; retroactively filling a merged PR's description recovers nothing.)*
+
+**Triage 2026-07-16 (TODO → roadmap):** the four items that accumulated in `TODO.md` after the live QA rerun all promoted, one phase each, settled at the triage interview: features land ahead of Phase 24 (which stays the final, largely event-day-gated readiness gate — its "pull ahead when ready" character unchanged). New order: **32 (repair result reflected on the page) → 33 (rich flight fields) → 34 (return-flight verify-only check) → 35 (Tavily destination info) → 24**. Phase 33 deliberately precedes Phase 34 — the rich fields are what make Phase 34's spoken return example credible. Phases 34 and 35 are the first to cut if the clock runs short (34 is explicitly data-gated and cuttable per its own scoping; 35 is a nice-to-have conversational garnish).
+
+## Phase 32: Repaired flight reflected on the cascade page [x] COMPLETE (implementation; manual QA pending)
+
+The one known bug in the otherwise-working demo flow: after the repair cascade rebooks the flight, the cascade page still displays the original flight instead of the rebooked one. The broken → fixed flip is the demo moment — it must show the *new* flight.
+
+> **TODO:** The demo flow works: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade. However, a few things to call out.
+>
+> 1. Once the flight is repaired, the flight that's repaired doesn't actually get reflected on the web site. It still shows the original.
+
+## Phase 33: Rich flight fields from the sabre_endpoints notebook
+
+Pull the already-coded notebook parsing through to production: airline name, flight number, cabin (economy or not), nonstop vs. connecting, and total duration — surfaced on the cascade page and available to the agent when speaking options to the traveler. Also feeds Phase 34's spoken example.
+
+> **TODO:** look at ./jupyter_notebooks/sabre_endpoints.ipynb - I coded up some features that we need to pull through. A couple of those are going to be the airline name that needs to be known and the flight number. Whether it's economy or not, and whether it's a non-stop or connecting flight. Total duration is also there. All of those metrics we need to bring into the cascade demo and have available on the web page for users to see and for the agent to talk to when they're working with the customers.
+
+## Phase 34: Return-flight availability check (verify-only)
+
+A new read-only Concierge tool that answers "can I get back?" without booking anything or leaking bookable options into session state. **Explicitly cuttable** if the reverse-pair cache or the clock doesn't cooperate.
+
+> **TODO:** Return-flight availability check in the guided booking flow — re-scoped
+> 2026-07-16 (settled with Josh, second pass): **verify-only — no return booking,
+> no return options displayed**. The flow: after the outbound is booked, the
+> agent asks when the traveler plans to come back; on their return date it
+> checks the **reverse pair** and speaks the answer — "yes, there are flights
+> back that day, including \<example\>" — or, if the cache is honest-empty for
+> that date, says so and offers to check a nearby date (retry adjacent dates).
+> Implementation shape: a **new read-only tool** (e.g. `check_return_flights
+> (return_date)`) that derives the swapped route from the pinned trip and calls
+> `instaflights_search` directly, returning only a speakable summary. Do NOT
+> reuse `search_flights` — it stores options in `_SESSION_FLIGHT_OPTIONS` /
+> `_LATEST_SEARCH`, which would make return options bookable (book_flight would
+> create a second new trip) and leak them onto the booking page's poll. Zero
+> changes to the trip model, `_booking_writes`, or the never-book-once-booked
+> rule; pairs with item 3 (rich fields make the spoken example credible —
+> airline, flight number, nonstop, time).
+> **Data pre-check (gating)**: InstaFlights caches are per-pair per-date-window —
+> outbound content does NOT imply return content. Before demo day, verify the
+> scripted pair has BOTH directions cached at the scripted dates (README
+> "Demo-day: check which flight pairs are live" curl loop); fold the reverse-pair
+> probe into the Phase 24 morning smoke. This item stays **explicitly cuttable**
+> if the data or the clock doesn't cooperate.
+
+## Phase 35: Tavily destination-info tool for the Concierge
+
+One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
+
+> **TODO:** Tavily destination-info tool for the Concierge — added 2026-07-16 (proof:
+> `jupyter_notebook/agent_search.ipynb`, working Agents SDK agent + `tavily_search`
+> function tool, same SDK/model/pattern as the Concierge). Scope settled with Josh:
+> **conversational only — no real hotel/dining/experience booking** (those APIs
+> aren't coming; `complete_trip`'s mocked build-out stays exactly as-is). Add ONE
+> new trip-aware tool (e.g. `destination_info(question)`) to `build_agent` that
+> appends the pinned trip's destination + dates to the query server-side and
+> answers "what's happening there / things to do during my trip" with live Tavily
+> results during the initial call. A second tool (weather / dining recs) is a
+> stretch goal only if the first rehearses reliably — every extra tool is another
+> mid-demo model choice. House rules: tool body try/excepts and returns a
+> speakable string on failure; condense results for voice (`include_answer=True`);
+> start with `search_depth='basic'` (advanced can take seconds inside a live
+> voice turn). Deployment surface: `tavily-python` in backend deps +
+> `TAVILY_API_KEY` on Cloud Run — the one piece code alone can't ship.
+> Blast radius otherwise: one tool registration + instruction sentences; trip
+> model, booking writes, repair cascade, consent flow all untouched.
 
 ## Phase 24: Pre-event readiness
 
@@ -38,6 +102,9 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   pairs are live" — the `/v1/web_call/query` curl loop; unique `session_name` per call).
   Phase 29 rider: per-pair cache windows shift hour-to-hour, so a green +30d sweep does
   not prove the demo date, and the scripted pair's **repair route** must be probed too.
+  Phase 34 rider (2026-07-16 triage, applies only if Phase 34 ships): probe the scripted
+  pair's **reverse direction** at the scripted return date too — outbound content does
+  not imply return content.
   Detects overnight credential resets and entitlement drift before the first rehearsal;
   append the dated output to the Phase 25 notes (this may also be what closes Phase 26's
   different-day repeatability item).

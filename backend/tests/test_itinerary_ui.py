@@ -296,6 +296,56 @@ def test_flight_repair_detail_signed_delta_costlier_and_zero():
     assert within["price_delta"] == "$0"  # inside the +/-$0.50 threshold
 
 
+# --- rebooked_from "was" line (Phase 32) — the old -> new treatment ------------
+
+
+def test_flight_repair_detail_rebooked_from_full_context():
+    raw = _flight_repair_raw()
+    raw["rebooked_from"] = {
+        "airline": "UA", "flight_number": 512, "depart_time": "08:05",
+        "arrive_time": "10:40", "price": 214.0, "currency": "USD",
+    }
+    detail = itinerary_ui_mod._flight_repair_detail(raw)
+    assert detail["rebooked_from"] == "Was United 512 · departed 8:05 AM PT · $214"
+
+
+def test_flight_repair_detail_rebooked_from_without_identity():
+    """Seed/pre-31 trips carry no flight identity — the line degrades to
+    times/price only, never crashes."""
+    raw = _flight_repair_raw()
+    raw["rebooked_from"] = {
+        "airline": None, "flight_number": None, "depart_time": "08:05",
+        "arrive_time": None, "price": 214.0, "currency": "USD",
+    }
+    detail = itinerary_ui_mod._flight_repair_detail(raw)
+    assert detail["rebooked_from"] == "Was the 8:05 AM PT departure · $214"
+    assert "None" not in detail["rebooked_from"]
+
+
+def test_flight_repair_detail_rebooked_from_omitted_when_nothing_usable():
+    """Pre-32 bookings (no rebooked_from block) and all-empty blocks omit the
+    key entirely — the page shows no was-line rather than an empty one."""
+    detail = itinerary_ui_mod._flight_repair_detail(_flight_repair_raw())
+    assert "rebooked_from" not in detail
+
+    raw = _flight_repair_raw()
+    raw["rebooked_from"] = {
+        "airline": None, "flight_number": None, "depart_time": None,
+        "arrive_time": None, "price": 0.0, "currency": "USD",
+    }
+    detail = itinerary_ui_mod._flight_repair_detail(raw)
+    assert "rebooked_from" not in detail
+
+
+def test_flight_repair_detail_rebooked_from_never_raises_on_garbage():
+    raw = _flight_repair_raw()
+    raw["rebooked_from"] = {"depart_time": "not-a-clock", "price": 100.0}
+    detail = itinerary_ui_mod._flight_repair_detail(raw)
+    # The malformed clock is swallowed; the detail block itself survives.
+    assert detail["why_chosen"]
+    assert detail.get("rebooked_from") is None
+
+
 def test_status_routes_flight_repair_booking_to_the_real_builder(bq):
     """The status endpoint dispatches a flight_repair booking to
     _flight_repair_detail, not the static _REPAIR_WHY fallback."""

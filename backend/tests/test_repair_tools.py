@@ -5,7 +5,9 @@ dispatcher in its default mock mode (no network). Assertions cover the DML
 the tools emit and the payload the agent reads back. Single-writer rule
 (Phase 9): repair tools write their bookings row ONLY — itinerary status
 transitions belong to the cascade unit; only the initial booking tool still
-flips its item (to `booked`).
+flips its item (to `booked`). Phase 32 adds one non-status write to the
+flight repair: the rebooked flight's fields land on the itinerary_items row
+(the cascade page renders that row), still never a status transition.
 """
 import asyncio
 import json
@@ -72,6 +74,21 @@ def assert_booking_insert_only(dml, item_id):
     assert_booking_insert(writes, item_id)
 
 
+def assert_booking_insert_then_flight_fields(dml, item_id):
+    """The Phase 32 flight-repair contract: the bookings insert, then the
+    item-row field write-back — still zero status transitions (the cascade
+    unit owns those). Returns the UPDATE's params for value assertions."""
+    writes = dml_writes(dml)
+    assert len(writes) == 2
+    assert_booking_insert(writes, item_id)
+    update_query, update_params = writes[1]
+    assert "UPDATE" in update_query and "updated_at = CURRENT_TIMESTAMP()" in update_query
+    assert "PARSE_JSON(@details)" in update_query
+    assert "status" not in update_params  # single-writer rule intact
+    assert update_params["item_id"] == item_id
+    return update_params
+
+
 def assert_booking_insert_then_status(dml, item_id, status):
     """The initial-booking contract: bookings insert, then the status flip."""
     writes = dml_writes(dml)
@@ -116,7 +133,8 @@ def test_rebook_flight_reshops_real_instaflights_and_writes_flight_repair(bq):
     """Phase 29: the re-shop parses real InstaFlights (the mock serves the
     same shape in SABRE_MODE=mock), stores the chosen option + the
     alternatives it beat + the original fare, and the PNR write stays mock —
-    still a single bookings insert (the cascade unit owns the status flip)."""
+    a bookings insert plus the Phase 32 item-row write-back (the cascade
+    unit still owns the status flip)."""
     bq.select.return_value = (True, [booking_row()], None)
 
     payload = asyncio.run(repair_tools._rebook_flight(
@@ -125,7 +143,7 @@ def test_rebook_flight_reshops_real_instaflights_and_writes_flight_repair(bq):
         original_arrive_time="10:05",
     ))
 
-    assert_booking_insert_only(bq.dml, "i-flight")  # single writer: no status DML
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
     assert payload["cancelled_ref"] == "GLEBNY"  # from the existing booking row
     assert payload["confirmation_ref"] != "GLEBNY"  # a new PNR
     assert "item_status" not in payload
@@ -145,6 +163,21 @@ def test_rebook_flight_reshops_real_instaflights_and_writes_flight_repair(bq):
     assert raw["rebooked"]["cancelled"]["booking"]["bookingId"] == "GLEBNY"
     assert raw["rebooked"]["created"]["confirmationId"] == payload["confirmation_ref"]
 
+    # Phase 32: the item-row write-back carries the CHOSEN flight — the
+    # cascade page renders this row, so times/price must be the rebooked
+    # flight's PT instants, and details re-stamps the new exclusion identity.
+    chosen = flight_options.FlightOption(**raw["option"])
+    start_ts, end_ts = flight_options.option_timestamps(chosen)
+    assert fields["start_ts"] == start_ts and fields["end_ts"] == end_ts
+    assert fields["price"] == chosen.price and fields["currency"] == chosen.currency
+    details = json.loads(fields["details"])
+    assert details["airline"] == payload["airline"]
+    assert details["flight_number"] == payload["flight_number"]
+    # ...and the original flight rides along for the old -> new treatment.
+    assert details["rebooked_from"]["price"] == 500.0
+    assert details["rebooked_from"]["arrive_time"] == "10:05"
+    assert raw["rebooked_from"] == details["rebooked_from"]
+
 
 def test_rebook_flight_chooses_a_different_flight_than_the_cancelled_one(bq):
     """Selection excludes the cancelled (airline, flight_number) when the
@@ -163,13 +196,50 @@ def test_rebook_flight_chooses_a_different_flight_than_the_cancelled_one(bq):
     raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
     assert (raw["option"]["airline"], raw["option"]["flight_number"]) != cancelled
 
+    # Phase 32: the re-stamped identity is the NEW flight's, so a second
+    # break -> repair excludes the flight the traveler is actually on now —
+    # and the cancelled one is preserved under rebooked_from.
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
+    details = json.loads(fields["details"])
+    assert (details["airline"], details["flight_number"]) != cancelled
+    assert details["flight_number"] == payload["flight_number"]
+    assert (details["rebooked_from"]["airline"],
+            details["rebooked_from"]["flight_number"]) == cancelled
+
 
 def test_rebook_flight_without_existing_booking_uses_placeholder_ref(bq):
+    """The walkthrough shape — no original-flight context at all — still
+    repairs, and rebooked_from degrades to identity-less (Phase 32)."""
     payload = asyncio.run(repair_tools._rebook_flight(
         "t-1", "i-flight", "MSP", "SFO", _DAY
     ))
     assert payload["cancelled_ref"] == "UNKNWN"
     assert payload["confirmation_ref"]
+
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
+    details = json.loads(fields["details"])
+    assert details["rebooked_from"]["airline"] is None
+    assert details["rebooked_from"]["flight_number"] is None
+    assert details["rebooked_from"]["depart_time"] is None
+
+
+def test_rebook_flight_failed_field_write_raises(bq):
+    """Phase 32 ordering guarantee: a failed item-row write-back raises, so
+    the cascade unit reports `error` instead of flipping `fixed` over stale
+    fields."""
+    bq.dml.side_effect = [(True, 1, None), (False, 0, "quota exceeded")]
+    with pytest.raises(RuntimeError, match="flight field write failed"):
+        asyncio.run(repair_tools._rebook_flight(
+            "t-1", "i-flight", "MSP", "SFO", _DAY
+        ))
+
+
+def test_rebook_flight_zero_row_field_write_raises(bq):
+    bq.dml.side_effect = [(True, 1, None), (True, 0, None)]
+    with pytest.raises(RuntimeError, match="matched no rows"):
+        asyncio.run(repair_tools._rebook_flight(
+            "t-1", "i-ghost", "MSP", "SFO", _DAY
+        ))
 
 
 # --- selection: closest arrival, exclude cancelled, tolerate the edges ----------
@@ -267,10 +337,14 @@ def test_empty_reshop_falls_back_to_mock_and_still_writes(bq, monkeypatch, caplo
         ))
 
     assert payload["from_mock_fallback"] is True
-    assert_booking_insert_only(bq.dml, "i-flight")  # a real booking row still lands
+    # A real booking row still lands, and the item-row write-back updates
+    # from the mock-chosen option exactly the same way (Phase 32).
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
     raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
     assert raw["from_mock_fallback"] is True
     assert raw["option"]["flight_number"] > 0  # the mock's option, parsed
+    assert fields["price"] == raw["option"]["price"]
+    assert json.loads(fields["details"])["flight_number"] == raw["option"]["flight_number"]
     assert f"MSP-SFO {_DAY}" in caplog.text and "using mock" in caplog.text
 
 

@@ -73,6 +73,16 @@ def test_page_contains_all_status_visual_hooks():
         assert f'[data-status="{status}"]' in text
 
 
+def test_page_has_the_rebooked_from_was_line():
+    """Phase 32: the old -> new treatment — the flight card carries a
+    struck-through, quiet was-line fed by the additive detail.rebooked_from
+    field (hidden when the field is absent)."""
+    text = page_text()
+    assert 'id="flight-was"' in text and "hidden" in text
+    assert "rebooked_from" in text
+    assert "line-through" in text
+
+
 def test_page_carries_the_mockup_frame():
     """The booking frame's surfaces survive the clone: app header with
     current traveler + status pill, left-rail traveler context, trip

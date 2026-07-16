@@ -29,6 +29,17 @@ def _basic_secret(user_id, password):
     return base64.b64encode(f"{encoded_user}:{encoded_password}".encode()).decode()
 
 
+def _stub_field_write(monkeypatch):
+    """Phase 32: _rebook_flight now writes the rebooked flight's fields onto
+    the itinerary_items row; stub the repository write so these scenarios
+    stay hermetic (and PNR-adjacent live runs never touch BigQuery)."""
+    field_write = MagicMock(return_value=(True, 1, None))
+    monkeypatch.setattr(
+        repair_tools.itinerary_items, "update_flight_fields", field_write
+    )
+    return field_write
+
+
 def _live_client(monkeypatch):
     user_id = os.environ.get("SABRE_API_USER_ID")
     password = os.environ.get("SABRE_API_SECRET")
@@ -100,6 +111,7 @@ def test_validator_real_mode_uses_mock_pnr_client_only(monkeypatch):
         monkeypatch.setattr(
             repair_tools, "_write_booking", AsyncMock(return_value="b-1")
         )
+        field_write = _stub_field_write(monkeypatch)
 
         result = await repair_tools._rebook_flight(
             "trip-validator",
@@ -114,6 +126,7 @@ def test_validator_real_mode_uses_mock_pnr_client_only(monkeypatch):
         real_search.assert_awaited_once()
         real_rebook.assert_not_awaited()
         mock_rebook_spy.assert_awaited_once()
+        field_write.assert_called_once()  # the Phase 32 item-row write-back
 
     asyncio.run(scenario())
 
@@ -140,6 +153,7 @@ def test_validator_empty_reshop_fallback_flips_fixed(monkeypatch, caplog):
         )
         write = AsyncMock(return_value="b-empty")
         monkeypatch.setattr(repair_tools, "_write_booking", write)
+        _stub_field_write(monkeypatch)
 
         async def repair():
             return await repair_tools._rebook_flight(
@@ -195,6 +209,7 @@ def test_validator_live_anchor_repair_uses_real_fares(monkeypatch):
         )
         write = AsyncMock(return_value="b-live")
         monkeypatch.setattr(repair_tools, "_write_booking", write)
+        _stub_field_write(monkeypatch)
 
         cancelled = None
         if len(offered) > 1:
@@ -293,6 +308,7 @@ def test_validator_live_empty_route_falls_back_without_stall(monkeypatch, caplog
         )
         write = AsyncMock(return_value="b-empty")
         monkeypatch.setattr(repair_tools, "_write_booking", write)
+        _stub_field_write(monkeypatch)
 
         async def repair():
             return await repair_tools._rebook_flight(

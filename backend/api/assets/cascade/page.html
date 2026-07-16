@@ -317,6 +317,12 @@
   .flight-route { font-size: 28px; font-weight: 800; letter-spacing: 0.01em; }
   .flight-price { font-size: 22px; font-weight: 700; color: var(--brand); margin-left: auto; }
   .flight-times { font-size: 16px; color: var(--ink-soft); margin-top: 6px; }
+  /* the old -> new treatment (Phase 32): the flight this card USED to show,
+     struck through and quiet — the rebooked flight above stays the hero */
+  .flight-was {
+    font-size: 14px; color: var(--ink-faint);
+    text-decoration: line-through; margin-top: 4px;
+  }
   .flight-meta { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
   .chip {
     font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
@@ -609,6 +615,7 @@
           <div class="flight-price" id="flight-price"></div>
         </div>
         <div class="flight-times" id="flight-times"></div>
+        <div class="flight-was" id="flight-was" hidden></div>
         <div class="flight-meta">
           <span class="chip" id="flight-chip">planned</span>
         </div>
@@ -1030,6 +1037,12 @@
     el("flight-times").textContent = fmtWhen(flight);
     el("flight-chip").textContent = flight.status;
     const detail = flight.detail;
+    // Old -> new (Phase 32): after a repair the card's headline fields are
+    // the REBOOKED flight (the server rewrote the item row); the original
+    // rides in as a struck-through "was ..." line.
+    const was = (detail && detail.rebooked_from) || "";
+    el("flight-was").hidden = !was;
+    el("flight-was").textContent = was;
     el("flight-detail").hidden = !detail;
     if (detail) {
       el("detail-why").textContent = detail.why_chosen || "";

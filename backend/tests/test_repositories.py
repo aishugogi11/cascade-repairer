@@ -212,6 +212,62 @@ def test_update_status_on_missing_item_is_noop_not_error(bq):
     assert (success, affected, error) == (True, 0, None)
 
 
+def test_update_flight_fields_parameterized_dml_stamps_updated_at(bq):
+    """Phase 32: the repair's write-back is query-job DML (never streaming),
+    every value rides a parameter, and updated_at refreshes in SQL."""
+    start = datetime(2026, 7, 18, 15, 5, tzinfo=timezone.utc)
+    end = datetime(2026, 7, 18, 23, 40, tzinfo=timezone.utc)
+    success, affected, error = itinerary_items.update_flight_fields(
+        "i-1",
+        start_ts=start,
+        end_ts=end,
+        price=214.0,
+        currency="USD",
+        details={"airline": "UA", "flight_number": 512},
+    )
+
+    assert (success, affected, error) == (True, 1, None)
+    query = bq.dml.call_args.args[0]
+    assert "UPDATE" in query
+    assert "updated_at = CURRENT_TIMESTAMP()" in query
+    assert "PARSE_JSON(@details)" in query
+    assert "UA" not in query  # values go through params, not interpolation
+
+    params = params_by_name(bq.dml)
+    assert params["item_id"].value == "i-1"
+    assert params["start_ts"].value == start
+    assert params["end_ts"].value == end
+    assert params["price"].value == 214.0
+    assert params["currency"].value == "USD"
+    assert '"flight_number": 512' in params["details"].value
+
+
+def test_update_flight_fields_on_missing_item_reports_zero_rows(bq):
+    bq.dml.return_value = (True, 0, None)
+    success, affected, error = itinerary_items.update_flight_fields(
+        "ghost",
+        start_ts=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        price=0.0,
+        currency="USD",
+        details=None,
+    )
+    assert (success, affected, error) == (True, 0, None)
+
+
+def test_update_flight_fields_surfaces_helper_failure(bq):
+    bq.dml.return_value = (False, 0, "quota exceeded")
+    success, affected, error = itinerary_items.update_flight_fields(
+        "i-1",
+        start_ts=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        price=1.0,
+        currency="USD",
+        details={},
+    )
+    assert success is False and error == "quota exceeded"
+
+
 def test_repair_lifecycle_sequence_issues_one_update_per_transition(bq):
     """The cascade contract in miniature: booked → broken → repairing → fixed."""
     for status in ["booked", "broken", "repairing", "fixed"]:

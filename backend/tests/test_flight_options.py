@@ -93,3 +93,35 @@ def test_arrive_date_defaults_to_depart_date():
         spoken="Option one.",
     )
     assert option.arrive_date == _DAY
+
+
+def test_option_timestamps_are_pacific_instants():
+    """Phase 32: the shared start_ts/end_ts derivation (extracted from
+    concierge._booking_writes) declares the option's clocks Pacific."""
+    option = flight_options.FlightOption(
+        option_number=1, airline="AA", flight_number=100, origin="MSP",
+        destination="SFO", depart_date=_DAY, depart_time="08:00",
+        arrive_time="10:05", stops=0, price=250.0, currency="USD",
+        spoken="Option one.",
+    )
+    start_ts, end_ts = flight_options.option_timestamps(option)
+    assert start_ts.tzinfo is flight_options._PACIFIC
+    assert (start_ts.hour, start_ts.minute) == (8, 0)
+    assert (end_ts.hour, end_ts.minute) == (10, 5)
+    assert start_ts.isoformat().startswith(_DAY)
+    assert end_ts > start_ts
+
+
+def test_option_timestamps_red_eye_lands_next_pt_day():
+    """A converted red-eye arrives on the next PT date — end_ts must never
+    precede start_ts."""
+    next_day = (date.fromisoformat(_DAY) + timedelta(days=1)).isoformat()
+    option = flight_options.FlightOption(
+        option_number=1, airline="AA", flight_number=200, origin="JFK",
+        destination="LAX", depart_date=_DAY, depart_time="22:30",
+        arrive_time="01:10", arrive_date=next_day, stops=0, price=180.0,
+        currency="USD", spoken="Option one.",
+    )
+    start_ts, end_ts = flight_options.option_timestamps(option)
+    assert end_ts > start_ts
+    assert end_ts.isoformat().startswith(next_day)

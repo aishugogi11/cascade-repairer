@@ -14,7 +14,7 @@ All dates and times a FlightOption carries are Pacific: converted from
 offset-less airport-local upstream in real mode, declared-Pacific fiction in
 mock mode (the Phase 19 discipline).
 """
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Set, Tuple
 from zoneinfo import ZoneInfo
 
@@ -64,6 +64,24 @@ class FlightOption(BaseModel):
         if not self.arrive_date:
             self.arrive_date = self.depart_date
         return self
+
+
+def option_timestamps(option: FlightOption) -> Tuple[datetime, datetime]:
+    """A chosen option's PT departure/arrival instants for an
+    itinerary_items row (start_ts/end_ts) — the arrival gets its own PT
+    date, not the departure's: a converted red-eye lands the next PT day,
+    and end_ts must never precede start_ts. Extracted from
+    concierge._booking_writes (Phase 32) so the repair write-back computes
+    the row exactly the way the original booking did."""
+    depart = date.fromisoformat(option.depart_date)
+    arrive = date.fromisoformat(option.arrive_date or option.depart_date)
+    dep_h, dep_m = int(option.depart_time[:2]), int(option.depart_time[3:5])
+    arr_h, arr_m = int(option.arrive_time[:2]), int(option.arrive_time[3:5])
+    start_ts = datetime(depart.year, depart.month, depart.day, dep_h, dep_m,
+                        tzinfo=_PACIFIC)
+    end_ts = datetime(arrive.year, arrive.month, arrive.day, arr_h, arr_m,
+                      tzinfo=_PACIFIC)
+    return start_ts, end_ts
 
 
 def _spoken_clock(time_str: str) -> str:
