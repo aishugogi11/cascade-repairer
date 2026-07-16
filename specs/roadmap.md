@@ -32,11 +32,35 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-16 (evening — Phase 32 close-out):** four decisions, all settled at the replan interview. (1) **PR evidence retires as a merge gate** — commit `933f8e8`'s removal of the `git_pull_dev.sh` guard is accepted, not restored: every validation since Phase 28 FAILed on exactly this paperwork while never catching a behavior defect, and the evidence already lives in each spec dir + changelog entry (tech-stack § Deployment records the convention; future `validation.md` files must not require PR-body evidence, retiring the recurring DoD-B). Phase 24's guard-test sub-item is deleted as moot. (2) The **Phase 32 write-back contract is recorded in tech-stack** (§ Backend): the repair rewrites the flight item's row wholesale — `details` included — which became a **Phase 33 scoping constraint** (honored: the shared stamp is a tested parity invariant). (3) The validator's **partial-write risk is accepted** (bookings insert precedes the field write; a failed field write strands an inert booking row while the repair honestly errors) — noted in tech-stack, no rollback machinery at demo scale. (4) `DEMO_FLOW.md`'s "current Phase 32 gap" paragraph is refreshed to the shipped behavior. `mission.md` unchanged.
 
-**Update 2026-07-16 (Phase 33 shipped, QA'd, archived):** rich flight fields (airline name, cabin, duration, layovers, next-day flag — through the parser, both `details` stamping paths, the spoken clause + on-request reference block, and the cascade card/candidates) are merged (PR #60), deployed, manually QA'd live the same day (real JFK→LAX CERT fares spoken with airline names), and archived to [changelog.md](changelog.md). Its independent validation returned **PARTIAL** — all automated criteria pass; the interactive walkthrough criteria were headless-untestable and closed by the operator's live QA (report in the spec dir). A same-day rider (PR #61) pinned the Concierge's first turn to a short greeting. Same-day probe reality check: the July 21 pair menu is **JFK→LAX only** (probe loop run 2026-07-16 — every other shortlist pair honest-empty, including the **reverse pair LAX→JFK**, so **Phase 34's data gate is currently dry**; re-check at the Phase 24 morning smoke before building or cutting 34). Open order: **34 → 35 → 24**.
+**Update 2026-07-16 (Phase 33 shipped, QA'd, archived):** rich flight fields (airline name, cabin, duration, layovers, next-day flag — through the parser, both `details` stamping paths, the spoken clause + on-request reference block, and the cascade card/candidates) are merged (PR #60), deployed, manually QA'd live the same day (real JFK→LAX CERT fares spoken with airline names), and archived to [changelog.md](changelog.md). Its independent validation returned **PARTIAL** — all automated criteria pass; the interactive walkthrough criteria were headless-untestable and closed by the operator's live QA (report in the spec dir). A same-day rider (PR #61) pinned the Concierge's first turn to a short greeting. Same-day probe reality check: the July 21 pair menu is **JFK→LAX only** (probe loop run 2026-07-16 — every other shortlist pair honest-empty, including the **reverse pair LAX→JFK**).
 
-## Phase 34: Return-flight availability check (verify-only)
+**Replan 2026-07-16 (Phase 33 close-out):** four decisions, all settled at the replan interview. (1) **Phase 35 moves ahead of Phase 34** — 34's gating data is dry today (the reverse pair LAX→JFK honest-empty at the scripted date) and it can't be rehearsed against an empty cache, while 35 is not data-gated; 34 stays alive as **build-only-if-data-returns** (its go/no-go signal is the reverse-pair probe, re-run at any later probe or the Phase 24 morning smoke). (2) The validator's **two-repair lifecycle test** (book → break → repair → second break → second repair over one item, each wholesale `details` write carrying the full shared stamp with the prior flight under `rebooked_from`) folds into **Phase 24** as a hermetic test item. (3) The **codeshare/mixed-cabin summarization risk is accepted** (first segment's carrier, first fare-info cabin — noted in tech-stack § Backend; demo pairs are nonstop-rich, no code change). (4) The optional **live CERT rich-field parse folds into Phase 24's cert-tripwire de-brittling** (assert rich fields parse present-or-cleanly-absent on the anchor pair). `mission.md` unchanged. New order: **35 → 34 (data-gated) → 24**.
 
-A new read-only Concierge tool that answers "can I get back?" without booking anything or leaking bookable options into session state. **Explicitly cuttable** if the reverse-pair cache or the clock doesn't cooperate.
+## Phase 35: Tavily destination-info tool for the Concierge
+
+One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
+
+> **TODO:** Tavily destination-info tool for the Concierge — added 2026-07-16 (proof:
+> `jupyter_notebook/agent_search.ipynb`, working Agents SDK agent + `tavily_search`
+> function tool, same SDK/model/pattern as the Concierge). Scope settled with Josh:
+> **conversational only — no real hotel/dining/experience booking** (those APIs
+> aren't coming; `complete_trip`'s mocked build-out stays exactly as-is). Add ONE
+> new trip-aware tool (e.g. `destination_info(question)`) to `build_agent` that
+> appends the pinned trip's destination + dates to the query server-side and
+> answers "what's happening there / things to do during my trip" with live Tavily
+> results during the initial call. A second tool (weather / dining recs) is a
+> stretch goal only if the first rehearses reliably — every extra tool is another
+> mid-demo model choice. House rules: tool body try/excepts and returns a
+> speakable string on failure; condense results for voice (`include_answer=True`);
+> start with `search_depth='basic'` (advanced can take seconds inside a live
+> voice turn). Deployment surface: `tavily-python` in backend deps +
+> `TAVILY_API_KEY` on Cloud Run — the one piece code alone can't ship.
+> Blast radius otherwise: one tool registration + instruction sentences; trip
+> model, booking writes, repair cascade, consent flow all untouched.
+
+## Phase 34: Return-flight availability check (verify-only — build only if the reverse-pair data returns)
+
+A new read-only Concierge tool that answers "can I get back?" without booking anything or leaking bookable options into session state. **Explicitly cuttable** if the reverse-pair cache or the clock doesn't cooperate. **Re-scoped at the 2026-07-16 Phase 33 close-out replan: build-only-if-data-returns** — the reverse pair (LAX→JFK at the scripted July 21 date) probed honest-empty that day, so Phase 35 moved ahead; pick this up only if a later probe or the Phase 24 morning smoke shows reverse-pair content.
 
 > **TODO:** Return-flight availability check in the guided booking flow — re-scoped
 > 2026-07-16 (settled with Josh, second pass): **verify-only — no return booking,
@@ -60,28 +84,6 @@ A new read-only Concierge tool that answers "can I get back?" without booking an
 > "Demo-day: check which flight pairs are live" curl loop); fold the reverse-pair
 > probe into the Phase 24 morning smoke. This item stays **explicitly cuttable**
 > if the data or the clock doesn't cooperate.
-
-## Phase 35: Tavily destination-info tool for the Concierge
-
-One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
-
-> **TODO:** Tavily destination-info tool for the Concierge — added 2026-07-16 (proof:
-> `jupyter_notebook/agent_search.ipynb`, working Agents SDK agent + `tavily_search`
-> function tool, same SDK/model/pattern as the Concierge). Scope settled with Josh:
-> **conversational only — no real hotel/dining/experience booking** (those APIs
-> aren't coming; `complete_trip`'s mocked build-out stays exactly as-is). Add ONE
-> new trip-aware tool (e.g. `destination_info(question)`) to `build_agent` that
-> appends the pinned trip's destination + dates to the query server-side and
-> answers "what's happening there / things to do during my trip" with live Tavily
-> results during the initial call. A second tool (weather / dining recs) is a
-> stretch goal only if the first rehearses reliably — every extra tool is another
-> mid-demo model choice. House rules: tool body try/excepts and returns a
-> speakable string on failure; condense results for voice (`include_answer=True`);
-> start with `search_depth='basic'` (advanced can take seconds inside a live
-> voice turn). Deployment surface: `tavily-python` in backend deps +
-> `TAVILY_API_KEY` on Cloud Run — the one piece code alone can't ship.
-> Blast radius otherwise: one tool registration + instruction sentences; trip
-> model, booking writes, repair cascade, consent flow all untouched.
 
 ## Phase 24: Pre-event readiness
 
@@ -114,6 +116,17 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   morning `pytest -m cert` step can false-alarm even when the code is healthy. De-brittle
   it: probe the verified anchor (JFK→LAX) and/or try several pairs, skip/xfail when all are
   drifted-empty, so a red means the code broke — not that the cache emptied.
+  Phase 33 rider (2026-07-16 close-out replan): while rewriting it, also assert the **rich
+  fields parse on real responses** — `ElapsedTime`/cabin present or cleanly absent (defaults,
+  never a skipped itinerary) on whatever anchor pair returns fares; closes the optional
+  cert spot-check the Phase 33 validator couldn't run.
+- **Two-repair rich-field lifecycle test** (2026-07-16 close-out replan, the Phase 33
+  validator's proposal): one hermetic test walking book → break → repair → second break →
+  second repair over a single flight item (mocked repositories, mock Sabre), asserting each
+  wholesale `details` write carries the full shared `details_from_option` stamp and preserves
+  the immediately prior flight under `rebooked_from` — the integrated guard for the exact
+  two-break sequence the live demo performs (today's coverage is compositional: parity +
+  per-path tests).
 - **Async test hygiene** (2026-07-14 replan, same report): the bare suite emits six
   unawaited-coroutine `RuntimeWarning`s across the concierge/repair tests (pre-Phase-26
   debt). Chase them to their fixtures/mocks and fix or properly close the coroutines —
