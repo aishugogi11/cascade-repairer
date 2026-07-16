@@ -36,7 +36,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Replan 2026-07-16 (Phase 33 close-out):** four decisions, all settled at the replan interview. (1) **Phase 35 moves ahead of Phase 34** — 34's gating data is dry today (the reverse pair LAX→JFK honest-empty at the scripted date) and it can't be rehearsed against an empty cache, while 35 is not data-gated; 34 stays alive as **build-only-if-data-returns** (its go/no-go signal is the reverse-pair probe, re-run at any later probe or the Phase 24 morning smoke). (2) The validator's **two-repair lifecycle test** (book → break → repair → second break → second repair over one item, each wholesale `details` write carrying the full shared stamp with the prior flight under `rebooked_from`) folds into **Phase 24** as a hermetic test item. (3) The **codeshare/mixed-cabin summarization risk is accepted** (first segment's carrier, first fare-info cabin — noted in tech-stack § Backend; demo pairs are nonstop-rich, no code change). (4) The optional **live CERT rich-field parse folds into Phase 24's cert-tripwire de-brittling** (assert rich fields parse present-or-cleanly-absent on the anchor pair). `mission.md` unchanged. New order: **35 → 34 (data-gated) → 24**.
 
-## Phase 35: Tavily destination-info tool for the Concierge
+## Phase 35: Tavily destination-info tool for the Concierge — [x] COMPLETE (implementation; manual QA pending)
 
 One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
 
