@@ -11,10 +11,12 @@ import asyncio
 import inspect
 import time
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 
 from api import concierge
+from api.helpers.bigquery_helper import bq_helper
 from api.repositories.models import ItineraryItem, Trip
 
 
@@ -136,6 +138,28 @@ def test_search_strips_urls_and_caps_length(monkeypatch):
     assert "https://" not in result and "example.com" not in result
     assert result.startswith("See for more.".split()[0])
     assert len(result) <= concierge._DESTINATION_INFO_MAX_CHARS
+    # The cap lands on a word boundary — a mid-word slice would be spoken.
+    assert result.split()[-1] == "word"
+
+
+def test_search_strips_bare_urls_and_markdown(monkeypatch):
+    """Phase 35 validation finding: bare www. URLs and Markdown passed the
+    original https?://-only pattern into a spoken string."""
+    _fake_client(
+        monkeypatch,
+        {"answer": (
+            "Try **CicLAvia** at www.example.com/events. "
+            "See [more events](https://la.com/x) _tonight_."
+        )},
+    )
+    result = concierge._tavily_search("q")
+    # The speakable content survives...
+    assert "CicLAvia" in result
+    assert "more events" in result and "tonight" in result
+    # ...the Markdown delimiters and every URL form do not.
+    assert "*" not in result and "_" not in result and "[" not in result
+    assert "www." not in result and "https://" not in result
+    assert "example.com" not in result and "la.com" not in result
 
 
 def test_search_raises_without_key_or_content(monkeypatch):
@@ -182,6 +206,32 @@ def test_empty_results_return_speakable_fallback(monkeypatch):
     _fake_client(monkeypatch, {"answer": "", "results": []})
     reply = asyncio.run(concierge.destination_info_impl("room-1", "things to do?"))
     assert reply == concierge._DESTINATION_INFO_FALLBACK
+
+
+def test_destination_info_does_not_mutate_booking_or_trip_state(monkeypatch):
+    """Phase 35 validation's proposed guard: the lookup is read-only — no
+    repository write, no options-slot touch, no pinned-context drift."""
+    _capture_search(monkeypatch)
+    _pin_trip()
+    monkeypatch.setattr(
+        concierge, "_SESSION_FLIGHT_OPTIONS", {"room-1": ["option-sentinel"]}
+    )
+    latest_sentinel = ("room-1", ["option-sentinel"], "recorded-at")
+    monkeypatch.setattr(concierge, "_LATEST_SEARCH", latest_sentinel)
+    dml, select = MagicMock(), MagicMock()
+    monkeypatch.setattr(bq_helper, "run_dml", dml)
+    monkeypatch.setattr(bq_helper, "run_select", select)
+    context_before = concierge._SESSION_TRIPS["room-1"].model_dump_json()
+    options_before = {"room-1": ["option-sentinel"]}
+
+    reply = asyncio.run(concierge.destination_info_impl("room-1", "things to do?"))
+
+    assert reply == "Plenty going on."
+    assert concierge._SESSION_TRIPS["room-1"].model_dump_json() == context_before
+    assert concierge._SESSION_FLIGHT_OPTIONS == options_before
+    assert concierge._LATEST_SEARCH is latest_sentinel
+    dml.assert_not_called()
+    select.assert_not_called()
 
 
 # --- registration & discipline ------------------------------------------------
