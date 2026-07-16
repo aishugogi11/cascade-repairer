@@ -28,11 +28,15 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Triage 2026-07-16 (TODO → roadmap):** the four items that accumulated in `TODO.md` after the live QA rerun all promoted, one phase each, settled at the triage interview: features land ahead of Phase 24 (which stays the final, largely event-day-gated readiness gate — its "pull ahead when ready" character unchanged). New order: **32 (repair result reflected on the page) → 33 (rich flight fields) → 34 (return-flight verify-only check) → 35 (Tavily destination info) → 24**. Phase 33 deliberately precedes Phase 34 — the rich fields are what make Phase 34's spoken return example credible. Phases 34 and 35 are the first to cut if the clock runs short (34 is explicitly data-gated and cuttable per its own scoping; 35 is a nice-to-have conversational garnish).
 
-**Update 2026-07-16 (Phase 32 shipped, QA'd, archived):** the repaired-flight fix is merged (PR #58), deployed, manually QA'd on the deployed service the same day (two break → repair cycles, was-line and exclusion re-stamp verified), and archived to [changelog.md](changelog.md) — the cascade page now shows the rebooked flight with the original struck through. Its independent validation returned **FAIL on the acceptance package only** (DoD-B, again: PR #58 merged with placeholder evidence sections; report and two adopted validator tests in the spec dir). One finding needs Phase 24's attention: **commit `933f8e8` removed the evidence-guard checks from `git_pull_dev.sh`** ("fix deploy script"), so the guard Phase 24's invariant-test bullet plans to make testable currently doesn't enforce anything — restore it there. Open order: **33 → 34 → 35 → 24**.
+**Update 2026-07-16 (Phase 32 shipped, QA'd, archived):** the repaired-flight fix is merged (PR #58), deployed, manually QA'd on the deployed service the same day (two break → repair cycles, was-line and exclusion re-stamp verified), and archived to [changelog.md](changelog.md) — the cascade page now shows the rebooked flight with the original struck through. Its independent validation returned **FAIL on the acceptance package only** (DoD-B, again: PR #58 merged with placeholder evidence sections; report and two adopted validator tests in the spec dir). Open order: **33 → 34 → 35 → 24**.
+
+**Replan 2026-07-16 (evening — Phase 32 close-out):** four decisions, all settled at the replan interview. (1) **PR evidence retires as a merge gate** — commit `933f8e8`'s removal of the `git_pull_dev.sh` guard is accepted, not restored: every validation since Phase 28 FAILed on exactly this paperwork while never catching a behavior defect, and the evidence already lives in each spec dir + changelog entry (tech-stack § Deployment records the convention; future `validation.md` files must not require PR-body evidence, retiring the recurring DoD-B). Phase 24's guard-test sub-item is deleted as moot. (2) The **Phase 32 write-back contract is recorded in tech-stack** (§ Backend): the repair rewrites the flight item's row wholesale — `details` included — which becomes a **Phase 33 scoping constraint** (see its block). (3) The validator's **partial-write risk is accepted** (bookings insert precedes the field write; a failed field write strands an inert booking row while the repair honestly errors) — noted in tech-stack, no rollback machinery at demo scale. (4) `DEMO_FLOW.md`'s "current Phase 32 gap" paragraph is refreshed to the shipped behavior. `mission.md` unchanged.
 
 ## Phase 33: Rich flight fields from the sabre_endpoints notebook
 
 Pull the already-coded notebook parsing through to production: airline name, flight number, cabin (economy or not), nonstop vs. connecting, and total duration — surfaced on the cascade page and available to the agent when speaking options to the traveler. Also feeds Phase 34's spoken example.
+
+**Scoping constraint from the Phase 32 close-out (2026-07-16 evening replan):** the repair write-back replaces the flight item's `details` JSON **wholesale** (`repair_tools._rebook_flight` → `itinerary_items.update_flight_fields`). Any rich field this phase adds to `details` must therefore ride through **both** stamping paths — `book_flight`'s item creation *and* the repair write-back — or the first repair wipes it from the card mid-demo.
 
 > **TODO:** look at ./jupyter_notebooks/sabre_endpoints.ipynb - I coded up some features that we need to pull through. A couple of those are going to be the airline name that needs to be known and the flight number. Whether it's economy or not, and whether it's a non-stop or connecting flight. Total duration is also there. All of those metrics we need to bring into the cascade demo and have available on the web page for users to see and for the agent to talk to when they're working with the customers.
 
@@ -139,13 +143,14 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   the code in the URL. Teach `access_gate.py` to also read `?code=` on GETs (+ tests,
   + a README note) — codes already ride in page URLs, so marginal exposure is nil for
   a shared demo secret, and phone/browser debugging on event day gets much easier.
-- **Two invariant tests** (2026-07-16 replan, the validator's proposals): an AST test
-  asserting no `await` sits between the consent grant (`consent.resolve(...GRANTED)`)
-  and `launch_trip_repairs` in `_watch_consent_then_repair` (the race fix's structural
-  property — source-inspected only today), and a non-mutating body-check mode for
-  `git_pull_dev.sh` (e.g. `CHECK_BODY_ONLY=1`) with a test covering
-  placeholder-fails / complete-body-passes, so the evidence guard is exercisable
-  without opening a real PR.
+- **Consent-launch invariant test** (2026-07-16 replan, the validator's proposal): an
+  AST test asserting no `await` sits between the consent grant
+  (`consent.resolve(...GRANTED)`) and `launch_trip_repairs` in
+  `_watch_consent_then_repair` (the race fix's structural property —
+  source-inspected only today). *(The companion `git_pull_dev.sh` evidence-guard
+  test was dropped at the 2026-07-16 evening replan — the guard itself was
+  deliberately removed by commit `933f8e8` and PR evidence retired as a merge
+  gate; see tech-stack § Deployment.)*
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the in-review binary
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge

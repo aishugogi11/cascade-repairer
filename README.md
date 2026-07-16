@@ -337,15 +337,15 @@ you present**, not the night before.
 > roadmap (Phases 24/29). A turnkey endpoint that sweeps this automatically is
 > planned but not yet built — until then, this curl loop is the day-of check.
 
-## Shipping a PR — evidence required
+## Shipping a PR
 
-`git_pull_dev.sh` (commit → push → PR → merge → sync) refuses to merge unless the
-PR description carries three evidence sections — `### Mock walkthrough`,
-`### Live run`, and `### Pytest` — with the auto-generated placeholder replaced
-(Phase 31: a non-empty-only check let four phases merge with placeholder bodies).
-Write the evidence into `PR_BODY.md` at the repo root (gitignored) and the script
-uses it as the description verbatim; `SKIP_EVIDENCE=1` bypasses the guard, loudly,
-for PRs with no runtime surface.
+`git_pull_dev.sh` (commit → push → PR → merge → sync) uses the commit message as
+the PR description by default; for a richer body, write `PR_BODY.md` at the repo
+root (gitignored) and the script uses it verbatim, never clobbering a
+hand-written description. The Phase 31 evidence guard was deliberately retired
+(commit `933f8e8`; decision recorded at the 2026-07-16 evening replan) — run
+evidence (mock walkthrough, live run, pytest output) lives in each phase's spec
+directory under `specs/` and in `specs/changelog.md`, not in PR descriptions.
 
 ## Create Sabre secret 
 set -a && . ./config/.env && set +a
