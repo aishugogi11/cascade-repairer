@@ -111,7 +111,15 @@ BASE_INSTRUCTIONS = (
     "trip; when they agree, call complete_trip and tell them the pieces are "
     "being added now. Never call search_flights or book_flight when a trip "
     "is already booked; offer fix_trip or answer questions about the "
-    "existing trip instead. When the traveler asks what's happening at "
+    "existing trip instead. When a traveler with a booked trip asks about "
+    "getting back or getting home ('is there a way to get home', 'flights "
+    "to get me back', any return question), call check_return_flights — "
+    "never search_flights, and never refuse the question. If they haven't "
+    "given a return date, ask for it in one short turn first — suggest the "
+    "trip's end date when there is one; if they decline or say whenever, "
+    "call the tool without a date. Relay its answer as an indication that "
+    "flights exist, never as fares or options they can book. "
+    "When the traveler asks what's happening at "
     "their destination or for things to do there, call destination_info "
     "with their question and relay its answer conversationally — don't "
     "offer it unprompted, and never read web addresses aloud. Your replies are spoken "
@@ -865,6 +873,77 @@ async def destination_info_impl(session_id: str, question: str) -> str:
         return _DESTINATION_INFO_FALLBACK
 
 
+# Phase 34 — the honesty framing every successful return indication starts
+# with, baked into the tool result (never left to the model): web schedule
+# info spoken as an indication, not searched fares or bookable inventory.
+_RETURN_FRAMING = "I can't book the return from here, but here's what I found: "
+
+
+def _return_fallback(route: Optional[str] = None) -> str:
+    """The honest soft fallback for a failed return lookup — route-aware when
+    the route is known, but never invented schedule facts (no airline names,
+    counts, or times; the honesty rule). Speakable, like every failure path."""
+    if route:
+        return (
+            "I couldn't check return schedules just now, but "
+            f"{route} is a well-traveled route — ask me again in a "
+            "minute and I'll take another look."
+        )
+    return (
+        "I couldn't check return schedules just now — ask me again in a "
+        "minute and I'll take another look."
+    )
+
+
+def _return_query_date(return_date: str) -> str:
+    """YYYY-MM-DD → 'July 26, 2026' for the Tavily query (the proven-quality
+    query shape from the Phase 34 re-scope probe; distinct from _spoken_date,
+    which formats date objects for speech). A malformed date passes through
+    as-is — Tavily copes, and the tool never raises on input shape."""
+    try:
+        parsed = datetime.strptime(return_date, "%Y-%m-%d")
+    except ValueError:
+        return return_date
+    return f"{parsed:%B} {parsed.day}, {parsed.year}"
+
+
+async def check_return_flights_impl(
+    session_id: str, return_date: Optional[str] = None
+) -> str:
+    """Verify-only "can I get back?" (Phase 34) — a spoken indication that
+    return flights exist on the traveler's return date, from Tavily web
+    schedule info. Deliberately NOT search_flights: this path stores nothing
+    — no _SESSION_FLIGHT_OPTIONS, no _LATEST_SEARCH, no repository writes —
+    so nothing bookable can enter the session and the never-book-once-booked
+    rule holds by construction. The reverse route derives from the pinned
+    trip (primary destination back to the origin); dateless calls ask about
+    the route generally. Every failure returns the speakable fallback — a
+    raising tool kills the turn."""
+    route = None
+    try:
+        context, _ = await ensure_trip_context(session_id)
+        if context is None:
+            return _NO_TRIP_SPOKEN
+        trip = context.trip
+        destination = trip.destinations[0] if trip.destinations else None
+        if not destination or not trip.origin:
+            return _return_fallback()
+        route = f"{destination} to {trip.origin}"
+        query = f"flights from {route}"
+        if return_date:
+            query += f" on {_return_query_date(return_date)}"
+        indication = await asyncio.wait_for(
+            asyncio.to_thread(_tavily_search, query),
+            timeout=_TAVILY_TIMEOUT_S,
+        )
+        return _RETURN_FRAMING + indication
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        logger.warning(
+            "check_return_flights failed for %s", session_id, exc_info=True
+        )
+        return _return_fallback(route)
+
+
 def _today_line() -> str:
     """Today's date for the instructions — without it the model cannot turn
     'leaving on Monday' into YYYY-MM-DD. Rendered fresh per build_agent call
@@ -921,6 +1000,14 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         asks about the place they're going; pass their question."""
         return await destination_info_impl(session_id, question)
 
+    async def _check_return_flights(return_date: str = "") -> str:
+        """Whether return flights exist for the traveler's booked trip — a
+        spoken indication from web schedule info, never bookable fares or
+        searched options. Use when a traveler with a booked trip asks about
+        getting back or getting home; pass their return date as YYYY-MM-DD
+        when they gave one, or leave it empty."""
+        return await check_return_flights_impl(session_id, return_date or None)
+
     trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
@@ -936,6 +1023,9 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
             function_tool(_complete_trip, name_override="complete_trip"),
             function_tool(_trip_status, name_override="trip_status"),
             function_tool(_destination_info, name_override="destination_info"),
+            function_tool(
+                _check_return_flights, name_override="check_return_flights"
+            ),
         ],
     )
 
