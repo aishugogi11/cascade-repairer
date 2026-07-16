@@ -187,6 +187,24 @@ def test_page_renders_the_consent_treatments():
     assert "repairs are starting now" not in text
 
 
+def test_page_has_the_new_trip_clean_slate_control():
+    """Phase 23 QA finding (the Phase 18 trap, rebuilt client-side): with a
+    trip on screen the orb pins every fresh session to it and guided
+    booking is unreachable. The New trip control clears the display, ends
+    the live voice session (server pins are per session), drops the
+    ?trip_id= pin, and keeps latestSeen so only a newly *booked* trip
+    re-adopts."""
+    text = page_text()
+    assert 'id="btn-new-trip"' in text
+    assert "function startNewTrip" in text
+    assert "window.cascadeVoiceDisconnect" in text  # both sides of the hook
+    assert 'searchParams.delete("trip_id")' in text
+    assert "state.latestSeen is\n  // deliberately kept" in text.replace(
+        "\r\n", "\n"
+    ) or "latestSeen is" in text
+    assert "tap the orb" in text  # the operator is told to reconnect
+
+
 def test_page_has_the_sabre_live_search_panel():
     text = page_text()
     assert "Sabre Live Search" in text

@@ -229,11 +229,14 @@ keep working):
 https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade/?code=cascade2026
 ```
 
-**2. Book by voice (free)** — tap the orb, allow the mic, and say e.g. *"Book a
-flight from New York to Los Angeles on July 17th"* → pick an option by number →
-say yes when the Concierge offers to **arrange the rest of the trip** (without
-this the cascade has only a flight to repair). The trip auto-appears on the
-page within ~4 s.
+**2. Book by voice (free)** — if the page already shows a trip, click **🆕 New
+trip** first: it clears the display AND ends any live voice session (sessions
+pin to the displayed trip, and a pinned session refuses to book — "you already
+have a trip"). Then tap the orb, allow the mic, and say e.g. *"Book a flight
+from New York to Los Angeles on July 17th"* → pick an option by number → say
+yes when the Concierge offers to **arrange the rest of the trip** (without
+this the cascade has only a flight to repair). The booked trip auto-appears on
+the page within ~4 s.
 
 **3. Cancel flight → cascade (Call 1)** — click it once. Expect: the screen
 turns red with **"waiting for the traveler's go-ahead"** and **no running

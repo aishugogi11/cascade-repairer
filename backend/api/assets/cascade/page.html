@@ -68,6 +68,7 @@
     transition: opacity 0.2s;
   }
   .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-new { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
   .btn-book { background: var(--brand); color: #fff; }
   .btn-cancel { background: var(--broken); color: #fff; }
 
@@ -518,6 +519,7 @@
     </div>
   </div>
   <div class="controls">
+    <button class="btn btn-new" id="btn-new-trip">🆕 New trip</button>
     <button class="btn btn-book" id="btn-book">📞 Book</button>
     <button class="btn btn-cancel" id="btn-cancel" disabled>⚠️ Cancel flight → cascade</button>
   </div>
@@ -748,6 +750,7 @@
   const template = el("item-template");
   const feed = el("feed"), feedEmpty = el("feed-empty");
   const btnBook = el("btn-book"), btnCancel = el("btn-cancel");
+  const btnNewTrip = el("btn-new-trip");
   const opStatus = el("op-status");
   const opStatusMark = el("op-status-mark"), opStatusText = el("op-status-text");
 
@@ -1227,8 +1230,7 @@
 
   // ---- trip pinning (the web_call/iOS contract) ----
 
-  function resetForTrip(tripId) {
-    state.tripId = tripId;
+  function clearTripState() {
     state.cards.clear();
     state.lastStatuses = null;
     state.timerStart = null;
@@ -1239,12 +1241,42 @@
     feedEmpty.hidden = false;
     el("feed-section").hidden = true;
     resetScore();
+  }
+
+  function resetForTrip(tripId) {
+    state.tripId = tripId;
+    clearTripState();
     const url = new URL(window.location);
     url.searchParams.set("trip_id", tripId);
     history.replaceState(null, "", url);
     markActiveTrip();
     updateControls();
     poll();
+  }
+
+  // "New trip" (Phase 23 QA finding): with a trip on screen, the orb pins
+  // every fresh voice session to it and guided booking becomes unreachable
+  // — the Phase 18 trap, rebuilt client-side. This clears the display so
+  // the next voice session starts unpinned. state.latestSeen is
+  // deliberately kept: the page will NOT re-adopt the trip it just
+  // cleared; only a *change* in latest_trip_id — i.e. the newly booked
+  // trip — repopulates the screen.
+  function startNewTrip() {
+    // The server pins trips per voice session, so a live session stays
+    // pinned no matter what the page displays — end it; the next tap of
+    // the orb mints a fresh, unpinned session.
+    try {
+      if (window.cascadeVoiceDisconnect) window.cascadeVoiceDisconnect();
+    } catch { /* an already-dead session is fine */ }
+    state.tripId = null;
+    state.disruptedTrip = null;
+    clearTripState();
+    const url = new URL(window.location);
+    url.searchParams.delete("trip_id");
+    history.replaceState(null, "", url);
+    markActiveTrip();
+    updateControls();
+    showAwaiting(null);
   }
 
   // The same contract as the web_call/mobile_voice pages: external control
@@ -1387,6 +1419,12 @@
       (state.disruptedTrip === state.tripId && !standDown);
   }
 
+  btnNewTrip.addEventListener("click", () => {
+    clearStatus();
+    startNewTrip();
+    showStatus("🆕", "Clean slate — tap the orb to connect a fresh session, then book by voice.", "live");
+  });
+
   btnBook.addEventListener("click", async () => {
     clearStatus();
     btnBook.disabled = true;   // place_call blocks ~10–16 s
@@ -1523,6 +1561,11 @@ function Orb({ tokenError, sessionRef }) {
   const busy = state === ConnectionState.Connecting ||
     state === ConnectionState.WaitingForAgent;
   const broken = Boolean(error || tokenError);
+
+  // The page's "New trip" control ends the live session through this hook
+  // — the server pins trips per session, so a clean slate needs a fresh
+  // session, not just a cleared display. Null when already disconnected.
+  window.cascadeVoiceDisconnect = disconnected ? null : disconnect;
   const orbClass = 'voice-orb' + (
     busy ? ' is-connecting' : broken ? ' is-error' : disconnected ? '' : ' is-live');
   const stateLabel = busy ? 'Connecting…'
