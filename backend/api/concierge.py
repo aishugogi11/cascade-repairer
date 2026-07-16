@@ -32,6 +32,7 @@ asyncio.to_thread.
 import asyncio
 import logging
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -110,7 +111,10 @@ BASE_INSTRUCTIONS = (
     "trip; when they agree, call complete_trip and tell them the pieces are "
     "being added now. Never call search_flights or book_flight when a trip "
     "is already booked; offer fix_trip or answer questions about the "
-    "existing trip instead. Your replies are spoken "
+    "existing trip instead. When the traveler asks what's happening at "
+    "their destination or for things to do there, call destination_info "
+    "with their question and relay its answer conversationally — don't "
+    "offer it unprompted, and never read web addresses aloud. Your replies are spoken "
     "aloud: one or two short, conversational sentences. No markdown, no "
     "lists, no stage directions, and never speak ids or tool names. "
 )
@@ -763,6 +767,84 @@ async def trip_status_impl(session_id: str) -> str:
     return f"Here's your trip right now: {summary}. Everything is on track."
 
 
+# Destination info (Phase 35): one trip-aware, read-only Tavily lookup —
+# conversational only, nothing enters session options, trip state, or
+# BigQuery. Diverges deliberately from the agent_search.ipynb proof:
+# basic depth (advanced can take seconds inside a live voice turn) and
+# Tavily's own condensed answer instead of raw result dicts.
+_DESTINATION_INFO_FALLBACK = (
+    "I couldn't look that up just now — ask me again in a moment."
+)
+_DESTINATION_INFO_MAX_CHARS = 600
+_TAVILY_TIMEOUT_S = 8.0
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _tavily_client():
+    """A fresh TavilyClient, or None without a key. The import and the key
+    read both happen at call time so importing this module — and the
+    hermetic suite — needs no TAVILY_API_KEY (the GCP-helpers convention)."""
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        return None
+    from tavily import TavilyClient
+
+    return TavilyClient(api_key=api_key)
+
+
+def _tavily_search(query: str) -> str:
+    """Synchronous Tavily search condensed for voice — callers run it off
+    the event loop via asyncio.to_thread (the standing blocking-call rule).
+    Prefers Tavily's own answer over raw results, strips URLs, and caps at
+    a speakable length. Raises on any failure — destination_info_impl owns
+    the speakable fallback."""
+    client = _tavily_client()
+    if client is None:
+        raise RuntimeError("TAVILY_API_KEY is not set")
+    response = client.search(
+        query,
+        search_depth="basic",
+        include_answer=True,
+        max_results=3,
+    )
+    answer = (response.get("answer") or "").strip()
+    if not answer:
+        snippets = (
+            (result.get("content") or "").strip()
+            for result in response.get("results", [])
+        )
+        answer = " ".join(s for s in snippets if s)
+    answer = " ".join(_URL_RE.sub("", answer).split())
+    if not answer:
+        raise RuntimeError("Tavily returned no usable content")
+    return answer[:_DESTINATION_INFO_MAX_CHARS]
+
+
+async def destination_info_impl(session_id: str, question: str) -> str:
+    """Live "what's happening there" answers during the call — the tool
+    body, kept a plain function for tests. The pinned trip's destination
+    and dates garnish the query server-side (cache-first — no BigQuery
+    read lands here after the pin); an unpinned session searches the
+    question as-is. Every failure — missing key, Tavily error, timeout —
+    returns the speakable fallback: a raising tool kills the turn."""
+    try:
+        query = question.strip()
+        context, _ = await ensure_trip_context(session_id)
+        if context is not None:
+            trip = context.trip
+            if trip.destinations:
+                query += f" in {', '.join(trip.destinations)}"
+            if trip.start_date and trip.end_date:
+                query += f" between {trip.start_date} and {trip.end_date}"
+        return await asyncio.wait_for(
+            asyncio.to_thread(_tavily_search, query),
+            timeout=_TAVILY_TIMEOUT_S,
+        )
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        logger.warning("destination_info failed for %s", session_id, exc_info=True)
+        return _DESTINATION_INFO_FALLBACK
+
+
 def _today_line() -> str:
     """Today's date for the instructions — without it the model cannot turn
     'leaving on Monday' into YYYY-MM-DD. Rendered fresh per build_agent call
@@ -813,6 +895,12 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         their trip or its repairs are going."""
         return await trip_status_impl(session_id)
 
+    async def _destination_info(question: str) -> str:
+        """Live info about what's happening at the traveler's destination —
+        events, things to do, local recommendations. Use when the traveler
+        asks about the place they're going; pass their question."""
+        return await destination_info_impl(session_id, question)
+
     trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
@@ -827,6 +915,7 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
             function_tool(_book_flight, name_override="book_flight"),
             function_tool(_complete_trip, name_override="complete_trip"),
             function_tool(_trip_status, name_override="trip_status"),
+            function_tool(_destination_info, name_override="destination_info"),
         ],
     )
 

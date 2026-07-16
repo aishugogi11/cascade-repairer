@@ -153,10 +153,11 @@ def test_agent_uses_fast_model_and_exposes_guided_toolset(monkeypatch):
     agent = concierge.build_agent("room-1")
     assert agent.model == "gpt-5.4-mini"
     # The Phase 17 guided flow replaces the Phase 16 magic utterance;
-    # Phase 23 adds the live trip_status read.
+    # Phase 23 adds the live trip_status read; Phase 35 the Tavily
+    # destination_info lookup (registered key or no key).
     assert {t.name for t in agent.tools} == {
         "fix_trip", "search_flights", "book_flight", "complete_trip",
-        "trip_status",
+        "trip_status", "destination_info",
     }
     # Without a pinned trip, the agent is told so instead of guessing.
     assert concierge._NO_TRIP_LINE in agent.instructions
