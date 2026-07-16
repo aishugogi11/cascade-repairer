@@ -46,6 +46,37 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **App Review replan 2026-07-16 (v1.0 (3), Submission `6945d2a4-5010-40d6-b283-e58e52ae75c6`):** Apple rejected the public iOS submission under Guideline 3.2 because the access-code-gated app serves a limited hackathon-event audience. Josh selected **Unlisted App Distribution**, which Apple explicitly supports for special events and limited audiences on unmanaged devices. The same final build can be resubmitted; no archive/upload or code change is required. This external recovery jumps the queue because the event is about 40 hours away, while Phase 24 remains the final engineering/readiness phase. Open order: **36 → 24**. The web demo and direct Xcode/TestFlight install remain the non-blocking event fallback; Apple-controlled approval time cannot become a hackathon success gate.
 
+**Promotion 2026-07-16 (iOS cascade demo tops the roadmap):** the already-written spec `specs/2026-07-16-ios-cascade-demo/` — requested as a focused iOS follow-up that deliberately did not schedule itself as a phase — is promoted as **Phase 37** at the very top, per Josh at the triage interview. All three interview decisions: (1) **it literally tops the file** — Phase 36's remaining substance is external filings that then wait on Apple, so the iOS demo is what engineering picks up next (`sdd-feature-spec` mechanics: first unmarked heading). (2) **One phase, spec as written** — its plan/requirements/validation already exist, so the phase skips the spec-authoring interview and goes straight to implementation on `vb/feature/ios-cascade-demo` (this promotion supersedes the requirements.md line deferring roadmap scheduling). (3) **Build now, E2E blocked** — the backlogged Phase 20 hard prerequisite (the `mobile_voice.py` TEMP latest-trip bridge removal) keeps its Apple-approval trigger unchanged; implementation, XCTests, simulator work, and the zero-quota rehearsal proceed immediately, while the booking-first end-to-end device validation is explicitly **blocked, not waived** (per the spec's own validation preconditions) until Phase 20 deploys. Open order: **37 → 36 → 24**.
+
+## Phase 37: Talk to My Trip — native cascade demo (iOS)
+
+Carry the proven `GET /v1/cascade/` flow into a clean native SwiftUI experience: book by
+voice → visible **Cancel flight** → Vocal Bridge consent call → approved live five-leg
+repair with the timer and rebooked-flight card → Vocal Bridge results call.
+
+- **Spec already written** — `specs/2026-07-16-ios-cascade-demo/` (plan.md, requirements.md,
+  validation.md). Implement directly on `vb/feature/ios-cascade-demo`; no new spec authoring.
+- Shape (from the spec): a two-tab shell (**Demo** default, existing `ContentView` preserved
+  as **Home**) over exactly one shared `VoiceManager`/`VoiceWebView`; clean-slate
+  baseline-and-adopt trip ownership; a pure lifecycle-state derivation off the existing
+  1.5-second status poll; server truth over optimistic animation; iOS-only — no backend,
+  prompt, endpoint, or call-script change.
+- **Phase 20 gate (decision at this triage):** the deployed `mobile_voice.py` TEMP bridge
+  would pin every fresh voice session to the old latest trip, and the spec forbids
+  client-side workarounds. Build, automated tests, and the zero-quota manual pass run now;
+  the full booking-first physical-device validation stays **blocked** until backlogged
+  Phase 20 ships (trigger: Phase 36's Apple approval). Leave the phase open on that
+  criterion rather than waiving it.
+- **Phase 36 interplay:** direct Xcode installs only — no archive, upload, or App Store
+  submission while the same-build unlisted recovery is active. Fix the
+  `LSApplicationCategoryType` → `public.app-category.travel` build setting now for the
+  *next* archive, whenever that becomes legal.
+- Quota: the yes-path device run consumes two outbound calls, the decline path one
+  (10/day, resets 00:00 UTC); zero-quota rehearsal comes first.
+
+> **TODO (Josh, 2026-07-16, promotion request verbatim):** use this and promote to top of
+> roadmap ./specs/2026-07-16-ios-cascade-demo
+
 ## Phase 36: Unlisted App Store recovery
 
 Recover the rejected v1.0 (3) submission as an unlisted final app without replacing the binary:
