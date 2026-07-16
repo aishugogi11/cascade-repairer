@@ -354,3 +354,6 @@ import base64, os
 b64 = lambda s: base64.b64encode(s.encode()).decode()
 print(b64(f"{b64(os.environ['SABRE_API_USER_ID'])}:{b64(os.environ['SABRE_API_SECRET'])}"))
 PY
+
+# Live URL
+https://talktomytrip.com/?code=cascade2026 (must include the ?code parm)
