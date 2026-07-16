@@ -228,6 +228,28 @@ def test_status_detail_for_voice_booked_flight(bq):
     assert "detail" not in hotel
 
 
+def test_status_carries_rich_flight_details(bq):
+    """Phase 33: the flight item's stamped rich fields ride the poll as-is
+    (item.model_dump() already serializes `details`) — the cascade page's
+    facts row renders exactly this dict."""
+    rich = {
+        "airline": "DL", "flight_number": 439, "airline_name": "Delta",
+        "cabin": "Economy", "duration_minutes": 305,
+        "layover_airports": ["DFW"], "arrives_next_day": False, "stops": 1,
+    }
+    rows = item_rows(("flight", "booked"))
+    rows[0]["details"] = rich
+    bq.select.side_effect = [
+        (True, [TRIP_ROW], None),
+        (True, rows, None),
+        (True, [], None),  # no bookings — details still ride
+    ]
+    with TestClient(app) as client:
+        body = client.get("/v1/itinerary/status/t-1").json()
+
+    assert body["items"][0]["details"] == rich
+
+
 def test_status_detail_for_repaired_item_and_latest_booking_wins(bq):
     bq.select.side_effect = [
         (True, [TRIP_ROW], None),
@@ -320,6 +342,23 @@ def test_flight_repair_detail_rebooked_from_without_identity():
     detail = itinerary_ui_mod._flight_repair_detail(raw)
     assert detail["rebooked_from"] == "Was the 8:05 AM PT departure · $214"
     assert "None" not in detail["rebooked_from"]
+
+
+def test_flight_repair_detail_prefers_stamped_airline_names():
+    """Phase 33: when the repair stamped airline_name (option and
+    rebooked_from), the why-chosen and was-line use it directly — table
+    lookup is only the older-row fallback (covered by the tests above)."""
+    raw = _flight_repair_raw()
+    raw["option"]["airline"] = "XX"  # not in the table
+    raw["option"]["airline_name"] = "Windward Air"
+    raw["rebooked_from"] = {
+        "airline": "ZZ", "flight_number": 512, "airline_name": "Zonal",
+        "depart_time": "08:05", "arrive_time": "10:40",
+        "price": 214.0, "currency": "USD",
+    }
+    detail = itinerary_ui_mod._flight_repair_detail(raw)
+    assert "Windward Air 2412" in detail["why_chosen"]
+    assert detail["rebooked_from"] == "Was Zonal 512 · departed 8:05 AM PT · $214"
 
 
 def test_flight_repair_detail_rebooked_from_omitted_when_nothing_usable():

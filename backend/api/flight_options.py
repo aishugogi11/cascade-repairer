@@ -33,6 +33,43 @@ _NUMBER_WORDS = {1: "one", 2: "two", 3: "three"}
 
 _MAX_SPOKEN_OPTIONS = 3
 
+# Airline code -> spoken/displayed name (Phase 33). Static table, never a
+# live lookup (the AIRPORT_TZ pattern): zero demo-day calls, works in mock
+# mode. Promoted here from itinerary_ui so there is exactly one copy —
+# itinerary_ui imports it. Carriers InstaFlights actually returns; an
+# unknown code falls back to the bare code via airline_name().
+AIRLINE_NAMES = {
+    "AA": "American", "DL": "Delta", "UA": "United", "B6": "JetBlue",
+    "WN": "Southwest", "AS": "Alaska", "NK": "Spirit", "F9": "Frontier",
+    "HA": "Hawaiian", "G4": "Allegiant",
+}
+
+# Booking-class letter -> conversational cabin name (Phase 33, from the
+# sabre_endpoints notebook). Unknown letters display as themselves —
+# degraded, not broken.
+CABIN_NAMES = {
+    "Y": "Economy", "S": "Economy", "B": "Economy", "M": "Economy",
+    "W": "Premium Economy",
+    "C": "Business", "J": "Business", "D": "Business", "I": "Business",
+    "F": "First Class", "A": "First Class", "P": "First Class",
+}
+
+
+def airline_name(code: str) -> str:
+    """Spoken/displayed carrier name for an IATA code; the bare code when
+    the table doesn't know it."""
+    return AIRLINE_NAMES.get((code or "").strip().upper(), code)
+
+
+def fmt_duration(minutes: int) -> str:
+    """349 -> '5h 49m'; whole hours drop the minutes ('2h')."""
+    hours, mins = minutes // 60, minutes % 60
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
+
 
 class FlightOption(BaseModel):
     """One speakable flight choice, parsed from an InstaFlights itinerary
@@ -58,12 +95,42 @@ class FlightOption(BaseModel):
     price: float
     currency: str
     spoken: str
+    # Rich fields (Phase 33) — all additive with safe defaults so stored
+    # booking payloads (raw_response.option) and pre-33 construction sites
+    # stay valid, the arrive_date precedent. Upstream fields missing from a
+    # real itinerary degrade to these defaults; the option is still offered.
+    airline_name: str = ""  # "Delta"; falls back to the code upstream
+    cabin: str = ""  # "Economy" / "Business" / ...; "" = unknown
+    duration_minutes: int = 0  # whole journey incl. layovers; 0 = unknown
+    layover_airports: List[str] = []  # via codes; [] when nonstop
+    arrives_next_day: bool = False  # PT arrival date past the PT depart date
 
     @model_validator(mode="after")
     def _arrive_date_defaults_to_depart_date(self):
         if not self.arrive_date:
             self.arrive_date = self.depart_date
         return self
+
+
+def details_from_option(option: FlightOption) -> dict:
+    """The flight item's `details` stamp, shared by the initial booking
+    (concierge._booking_writes) and the repair write-back
+    (repair_tools._rebook_flight) so the key sets cannot drift (Phase 33):
+    the repair replaces `details` WHOLESALE (Phase 32), so any key stamped
+    only at booking would be wiped from the card by the first repair.
+    `airline`/`flight_number` are the Phase 31 exclusion identity —
+    byte-identical to the pre-33 stamp. The repair path adds
+    `rebooked_from` on top of this dict."""
+    return {
+        "airline": option.airline,
+        "flight_number": option.flight_number,
+        "airline_name": option.airline_name or airline_name(option.airline),
+        "cabin": option.cabin,
+        "duration_minutes": option.duration_minutes,
+        "layover_airports": option.layover_airports,
+        "arrives_next_day": option.arrives_next_day,
+        "stops": option.stops,
+    }
 
 
 def option_timestamps(option: FlightOption) -> Tuple[datetime, datetime]:
@@ -93,15 +160,17 @@ def _spoken_clock(time_str: str) -> str:
     return f"{hour12}:{minute:02d} {ampm}" if minute else f"{hour12} {ampm}"
 
 
-def _spoken_option(option_number: int, stops: int, depart: str, arrive: str,
-                   price: float) -> str:
-    """One listenable clause: short, price rounded, no airline or fare codes
-    (the standing spoken-copy rule)."""
+def _spoken_option(option_number: int, carrier: str, stops: int, depart: str,
+                   arrive: str, price: float) -> str:
+    """One listenable clause: short, price rounded, airline NAME only —
+    codes and fare-class letters are never spoken (the standing spoken-copy
+    rule; Phase 33 added the name, nothing else — duration/cabin/layovers
+    stay on-request so three options don't kill the pacing)."""
     word = _NUMBER_WORDS.get(option_number, str(option_number))
     legs = "nonstop" if stops == 0 else ("one stop" if stops == 1 else f"{stops} stops")
     return (
-        f"Option {word}: {legs}, leaves at {_spoken_clock(depart)} and lands "
-        f"at {_spoken_clock(arrive)}, about {round(price)} dollars."
+        f"Option {word} on {carrier}: {legs}, leaves at {_spoken_clock(depart)} "
+        f"and lands at {_spoken_clock(arrive)}, about {round(price)} dollars."
     )
 
 
@@ -126,10 +195,11 @@ def _parse_instaflights_options(
     for itinerary in search.PricedItineraries:
         if len(options) >= _MAX_SPOKEN_OPTIONS:
             break
-        segments = (
+        od_option = (
             itinerary.AirItinerary.OriginDestinationOptions
-            .OriginDestinationOption[0].FlightSegment
+            .OriginDestinationOption[0]
         )
+        segments = od_option.FlightSegment
         if not segments:
             continue
         if any(
@@ -160,6 +230,17 @@ def _parse_instaflights_options(
         # Connections count as stops too: segment-internal StopQuantity
         # plus one per plane change.
         stops = sum(seg.StopQuantity for seg in segments) + len(segments) - 1
+        # Rich fields (Phase 33) — all degrade to defaults when the response
+        # omits them; a missing garnish field never skips an itinerary
+        # (contrast the timezone check above, which is correctness).
+        carrier = airline_name(first.MarketingAirline.Code)
+        cabin_letter = ""
+        fare_infos = itinerary.AirItineraryPricingInfo.FareInfos
+        if fare_infos and fare_infos.FareInfo:
+            tpa = fare_infos.FareInfo[0].TPA_Extensions
+            if tpa and tpa.Cabin:
+                cabin_letter = tpa.Cabin.Cabin.strip().upper()
+        cabin = CABIN_NAMES.get(cabin_letter, cabin_letter)
         number = len(options) + 1
         options.append(
             FlightOption(
@@ -176,8 +257,17 @@ def _parse_instaflights_options(
                 price=fare.Amount,
                 currency=fare.CurrencyCode,
                 spoken=_spoken_option(
-                    number, stops, depart_pt.strftime("%H:%M"),
+                    number, carrier, stops, depart_pt.strftime("%H:%M"),
                     arrive_pt.strftime("%H:%M"), fare.Amount,
+                ),
+                airline_name=carrier,
+                cabin=cabin,
+                duration_minutes=od_option.ElapsedTime or 0,
+                layover_airports=[
+                    seg.ArrivalAirport.LocationCode for seg in segments[:-1]
+                ],
+                arrives_next_day=(
+                    arrive_pt.date() != depart_pt.date()
                 ),
             )
         )

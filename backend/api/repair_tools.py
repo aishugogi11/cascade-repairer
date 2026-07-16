@@ -338,6 +338,12 @@ async def _rebook_flight(
     rebooked_from = {
         "airline": cancelled_flight[0] if cancelled_flight else None,
         "flight_number": cancelled_flight[1] if cancelled_flight else None,
+        # Phase 33: the spoken/displayed name too, so the was-line can name
+        # the old carrier without a code lookup at render time.
+        "airline_name": (
+            flight_options.airline_name(cancelled_flight[0])
+            if cancelled_flight else None
+        ),
         "depart_time": original_depart_time,
         "arrive_time": original_arrive_time,
         "price": original_price,
@@ -377,9 +383,12 @@ async def _rebook_flight(
         end_ts=new_end_ts,
         price=chosen.price,
         currency=chosen.currency,
+        # The shared stamp (Phase 33) keeps this write's key set identical
+        # to the booking stamp's — this replace is wholesale, so a drifted
+        # key set here silently strips fields from the card. rebooked_from
+        # rides on top, repair-only.
         details={
-            "airline": chosen.airline,
-            "flight_number": chosen.flight_number,
+            **flight_options.details_from_option(chosen),
             "rebooked_from": rebooked_from,
         },
     )

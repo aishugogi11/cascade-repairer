@@ -207,6 +207,53 @@ def test_rebook_flight_chooses_a_different_flight_than_the_cancelled_one(bq):
             details["rebooked_from"]["flight_number"]) == cancelled
 
 
+def test_flight_writeback_matches_the_booking_stamp_key_set(bq):
+    """The Phase 33 wipe guard: the repair's wholesale `details` replace
+    carries exactly the shared booking stamp's key set plus rebooked_from —
+    so no key stamped at booking can be wiped from the card by a repair,
+    and the rich fields are the CHOSEN option's real values, not defaults
+    (the mock now carries ElapsedTime/cabin)."""
+    bq.select.return_value = (True, [booking_row()], None)
+
+    asyncio.run(repair_tools._rebook_flight(
+        "t-1", "i-flight", "MSP", "SFO", _DAY,
+        original_price=500.0, original_arrive_time="10:05",
+    ))
+
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
+    details = json.loads(fields["details"])
+    raw = json.loads(dml_writes(bq.dml)[0][1]["raw_response"])
+    chosen = flight_options.FlightOption(**raw["option"])
+    booking_stamp = flight_options.details_from_option(chosen)
+
+    assert set(details) == set(booking_stamp) | {"rebooked_from"}
+    for key, value in booking_stamp.items():
+        assert details[key] == value
+    # Populated from the mock's rich fields, not degraded defaults.
+    assert details["airline_name"] == "American"
+    assert details["cabin"] in ("Economy", "Business")
+    assert details["duration_minutes"] > 0
+
+
+def test_rebooked_from_names_the_old_carrier(bq):
+    """Phase 33: rebooked_from gains airline_name so the was-line names the
+    old carrier without a render-time code lookup; identity-less repairs
+    degrade it to None like the other fields."""
+    bq.select.return_value = (True, [booking_row()], None)
+    options = _mock_options("MSP", "SFO", _DAY)
+    cancelled = ("DL", options[0].flight_number)
+
+    asyncio.run(repair_tools._rebook_flight(
+        "t-1", "i-flight", "MSP", "SFO", _DAY,
+        original_price=200.0, original_arrive_time=options[0].arrive_time,
+        cancelled_flight=cancelled,
+    ))
+
+    fields = assert_booking_insert_then_flight_fields(bq.dml, "i-flight")
+    details = json.loads(fields["details"])
+    assert details["rebooked_from"]["airline_name"] == "Delta"
+
+
 def test_rebook_flight_without_existing_booking_uses_placeholder_ref(bq):
     """The walkthrough shape — no original-flight context at all — still
     repairs, and rebooked_from degrades to identity-less (Phase 32)."""
@@ -220,6 +267,7 @@ def test_rebook_flight_without_existing_booking_uses_placeholder_ref(bq):
     details = json.loads(fields["details"])
     assert details["rebooked_from"]["airline"] is None
     assert details["rebooked_from"]["flight_number"] is None
+    assert details["rebooked_from"]["airline_name"] is None
     assert details["rebooked_from"]["depart_time"] is None
 
 

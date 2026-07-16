@@ -145,6 +145,89 @@ def test_airport_zone_lookup():
     assert airport_zone("") is None
 
 
+# --- rich-field shapes + mock emission (Phase 33) --------------------------------
+
+
+def test_shapes_parse_rich_fields_when_present():
+    """ElapsedTime and the FareInfos → TPA_Extensions → Cabin chain validate
+    when the response carries them (the notebook's observed paths)."""
+    payload = instaflights_payload()
+    itin = payload["PricedItineraries"][0]
+    itin["AirItinerary"]["OriginDestinationOptions"]["OriginDestinationOption"][0][
+        "ElapsedTime"
+    ] = 349
+    itin["AirItineraryPricingInfo"]["FareInfos"] = {
+        "FareInfo": [{"TPA_Extensions": {"Cabin": {"Cabin": "Y"}}}]
+    }
+    response = shapes.InstaFlightsResponse.model_validate(payload)
+    parsed = response.PricedItineraries[0]
+    option = parsed.AirItinerary.OriginDestinationOptions.OriginDestinationOption[0]
+    assert option.ElapsedTime == 349
+    fare_info = parsed.AirItineraryPricingInfo.FareInfos.FareInfo[0]
+    assert fare_info.TPA_Extensions.Cabin.Cabin == "Y"
+
+
+def test_shapes_parse_without_rich_fields():
+    """Degrade, never skip: a real itinerary missing every rich field still
+    validates — the captured pre-33 payload has neither ElapsedTime nor
+    FareInfos."""
+    response = shapes.InstaFlightsResponse.model_validate(instaflights_payload())
+    parsed = response.PricedItineraries[0]
+    option = parsed.AirItinerary.OriginDestinationOptions.OriginDestinationOption[0]
+    assert option.ElapsedTime is None
+    assert parsed.AirItineraryPricingInfo.FareInfos is None
+
+
+def test_mock_instaflights_carries_rich_fields_deterministically():
+    """Every mock itinerary carries ElapsedTime and a cabin letter; the
+    one-stop variant is a genuine two-segment connection through DFW with
+    endpoint clocks unchanged (the classic spread survives)."""
+    mock = MockSabreClient(latency_seconds=0)
+    response = asyncio.run(mock.instaflights_search(
+        shapes.InstaFlightsRequest(
+            origin="SFO", destination="JFK", departuredate=_DAY,
+        )
+    ))
+
+    itineraries = response.PricedItineraries
+    assert len(itineraries) == 3
+    elapsed = [
+        it.AirItinerary.OriginDestinationOptions.OriginDestinationOption[0].ElapsedTime
+        for it in itineraries
+    ]
+    assert elapsed == [125, 130, 305]
+    cabins = [
+        it.AirItineraryPricingInfo.FareInfos.FareInfo[0].TPA_Extensions.Cabin.Cabin
+        for it in itineraries
+    ]
+    assert cabins == ["Y", "J", "Y"]
+
+    connection = (
+        itineraries[2].AirItinerary.OriginDestinationOptions
+        .OriginDestinationOption[0].FlightSegment
+    )
+    assert len(connection) == 2
+    assert connection[0].ArrivalAirport.LocationCode == "DFW"
+    assert connection[1].DepartureAirport.LocationCode == "DFW"
+    assert connection[0].DepartureAirport.LocationCode == "SFO"
+    assert connection[1].ArrivalAirport.LocationCode == "JFK"
+
+
+def test_mock_connection_hub_swaps_when_dfw_is_an_endpoint():
+    """A DFW-touching pair can't connect via DFW — the hub falls to ORD."""
+    mock = MockSabreClient(latency_seconds=0)
+    response = asyncio.run(mock.instaflights_search(
+        shapes.InstaFlightsRequest(
+            origin="DFW", destination="LAX", departuredate=_DAY,
+        )
+    ))
+    connection = (
+        response.PricedItineraries[2].AirItinerary.OriginDestinationOptions
+        .OriginDestinationOption[0].FlightSegment
+    )
+    assert connection[0].ArrivalAirport.LocationCode == "ORD"
+
+
 # --- the parser: airport-local -> Pacific, red-eye, skip-not-mangle -------------
 
 
@@ -953,6 +1036,35 @@ def test_search_flights_end_to_end_on_the_mock():
     assert "AA" not in msg and "USD" not in msg
 
 
+def test_search_result_reference_block_carries_rich_facts():
+    """Phase 33: the tool result ends with a bracketed reference section —
+    airline name + flight number, cabin, duration, connections — so the
+    agent answers follow-ups without re-searching. The spoken body gains
+    the airline name only; every other rich fact stays out of it."""
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-1", "MSP", "SFO", _DAY)
+    )
+
+    body, bracket, reference = msg.partition(
+        "[Reference, don't read aloud unless asked:"
+    )
+    assert bracket  # the block exists
+    assert "American" in reference  # names, never codes
+    assert "Economy" in reference and "Business" in reference
+    assert "2h 5m" in reference and "5h 5m" in reference  # fmt_duration
+    assert "connects in DFW" in reference  # the mock's two-segment variant
+    # The spoken body: airline name yes, on-request facts no.
+    assert "on American" in body
+    assert "Economy" not in body and "2h" not in body and "DFW" not in body
+
+
+def test_instructions_carry_the_reference_block_clause():
+    """The other half of Phase 33 decision 2: the model is told the bracket
+    is reference, airline names are spoken, codes and fare letters never."""
+    assert "never airline codes or fare-class letters" in concierge.BASE_INSTRUCTIONS
+    assert "bracketed reference section" in concierge.BASE_INSTRUCTIONS
+
+
 def test_search_flights_real_mode_failure_serves_mock_silently(monkeypatch, caplog):
     """The event-day insurance, end to end: SABRE_MODE=real with a raising
     real client still speaks options — and the reply never mentions the
@@ -1138,10 +1250,11 @@ def test_all_unmappable_search_speaks_the_no_flights_line(monkeypatch):
     assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
 
 
-def test_pending_options_payload_is_the_phase_21_contract():
+def test_pending_options_payload_is_the_phase_21_contract_plus_rich_keys():
     """Byte-for-byte shape guard: exactly recorded_at + options[] of the
-    seven Phase 21 keys — arrive_date stays internal to FlightOption; the
-    booking page's contract does not grow."""
+    seven Phase 21 keys plus the two Phase 33 additions (airline_name,
+    duration — a deliberate, spec'd growth of the candidates-panel
+    contract); arrive_date stays internal to FlightOption."""
     asyncio.run(concierge.search_flights_impl("room-1", "MSP", "SFO", _DAY))
 
     block = concierge.pending_options_for_trip("any-trip")
@@ -1149,7 +1262,10 @@ def test_pending_options_payload_is_the_phase_21_contract():
     for option in block["options"]:
         assert set(option.keys()) == {
             "option_number", "route", "depart_date", "depart_time",
-            "arrive_time", "stops", "price",
+            "arrive_time", "stops", "price", "airline_name", "duration",
         }
         assert isinstance(option["price"], int)  # rounded whole dollars
         assert "M" in option["depart_time"]  # spoken 12-hour label
+        assert option["airline_name"] == "American"  # a name, never a code
+    durations = [o["duration"] for o in block["options"]]
+    assert durations == ["2h 5m", "2h 10m", "5h 5m"]  # the mock's spread

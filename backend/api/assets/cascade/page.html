@@ -317,6 +317,10 @@
   .flight-route { font-size: 28px; font-weight: 800; letter-spacing: 0.01em; }
   .flight-price { font-size: 22px; font-weight: 700; color: var(--brand); margin-left: auto; }
   .flight-times { font-size: 16px; color: var(--ink-soft); margin-top: 6px; }
+  /* rich flight fields (Phase 33): the carrier headline and the terse
+     facts row — each hidden entirely when the trip predates the fields */
+  .flight-airline { font-size: 16px; font-weight: 700; margin-top: 4px; }
+  .flight-facts { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
   /* the old -> new treatment (Phase 32): the flight this card USED to show,
      struck through and quiet — the rebooked flight above stays the hero */
   .flight-was {
@@ -614,7 +618,9 @@
           <div class="flight-route" id="flight-route">—</div>
           <div class="flight-price" id="flight-price"></div>
         </div>
+        <div class="flight-airline" id="flight-airline" hidden></div>
         <div class="flight-times" id="flight-times"></div>
+        <div class="flight-facts" id="flight-facts" hidden></div>
         <div class="flight-was" id="flight-was" hidden></div>
         <div class="flight-meta">
           <span class="chip" id="flight-chip">planned</span>
@@ -1026,6 +1032,12 @@
 
   // ---- center column: the trip ----
 
+  function fmtDuration(minutes) {
+    const h = Math.floor(minutes / 60), m = minutes % 60;
+    if (h && m) return `${h}h ${m}m`;
+    return h ? `${h}h` : `${m}m`;
+  }
+
   function renderFlight(items) {
     const flight = items.find((i) => i.type === "flight");
     el("flight-section").hidden = !flight;
@@ -1036,6 +1048,25 @@
     el("flight-price").textContent = fmtPrice(flight.price);
     el("flight-times").textContent = fmtWhen(flight);
     el("flight-chip").textContent = flight.status;
+    // Rich fields (Phase 33), straight off the item's details stamp — every
+    // part renders only when its field is present, so a pre-33 trip shows
+    // exactly the pre-33 card (no "undefined", no empty separators).
+    const d = flight.details || {};
+    const airline = d.airline_name
+      ? `${d.airline_name} ${d.flight_number || ""}`.trim() : "";
+    el("flight-airline").hidden = !airline;
+    el("flight-airline").textContent = airline;
+    const facts = [];
+    if (d.cabin) facts.push(d.cabin);
+    if (typeof d.stops === "number") {
+      const via = (d.layover_airports || []).join(", ");
+      facts.push(d.stops === 0 ? "Nonstop"
+        : `${d.stops} stop${d.stops > 1 ? "s" : ""}${via ? ` via ${via}` : ""}`);
+    }
+    if (d.duration_minutes) facts.push(fmtDuration(d.duration_minutes));
+    if (d.arrives_next_day) facts.push("arrives next day");
+    el("flight-facts").hidden = facts.length === 0;
+    el("flight-facts").textContent = facts.join(" · ");
     const detail = flight.detail;
     // Old -> new (Phase 32): after a repair the card's headline fields are
     // the REBOOKED flight (the server rewrote the item row); the original
@@ -1147,7 +1178,12 @@
       top.append(arrives, price);
       const sub = document.createElement("div");
       sub.className = "c-sub";
-      sub.textContent = `${stopsLine(o.stops)} · departs ${o.depart_time} PT`;
+      // Phase 33: carrier name + journey length join the line when the
+      // search carried them — names, never codes (the standing rule).
+      sub.textContent = [
+        o.airline_name, stopsLine(o.stops), o.duration,
+        `departs ${o.depart_time} PT`,
+      ].filter(Boolean).join(" · ");
       const route = document.createElement("div");
       route.className = "c-route";
       route.textContent = `${o.route} · ${o.depart_date}`;
