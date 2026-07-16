@@ -1,24 +1,26 @@
 //
-//  ContentView.swift
+//  ReferenceHomeView.swift
 //  TalkToMyTrip
 //
-//  The single main screen: voice orb on top, live trip timeline below.
-//  No visible demo controls — the stage triggers are hidden gestures on
-//  the orb (triple-tap disrupts, long-press picks a trip). The hidden
-//  VoiceWebView rides in the background — in the hierarchy (never
-//  detached), invisible.
+//  The original main screen, retained on the Home tab for reference and
+//  regression comparison: voice orb on top, live trip timeline below, the
+//  hidden gestures intact (triple-tap disrupts, long-press picks a trip).
+//  The voice manager and webview are owned by the shell now — this view
+//  only borrows the shared bridge.
 //
 
 import SwiftUI
 
-struct ContentView: View {
-    @State private var voiceManager = VoiceManager()
-    @State private var tripManager = TripManager()
+struct ReferenceHomeView: View {
+    let voiceManager: VoiceManager
+    let tripManager: TripManager
+
     @State private var showAbout = false
     @State private var showTripSelector = false
     @State private var showVoiceConsent = false
     /// Voice-data consent (guidelines 5.1.1/5.1.2): asked before the mic
-    /// ever activates, withdrawable from the About sheet.
+    /// ever activates, withdrawable from the About sheet. App-wide — the
+    /// same flag gates the Demo tab's orb.
     @AppStorage(voiceConsentKey) private var voiceConsentGranted = false
 
     var body: some View {
@@ -75,11 +77,6 @@ struct ContentView: View {
 
             TripTimelineView(tripManager: tripManager)
         }
-        .background(
-            VoiceWebView(voiceManager: voiceManager, tripId: tripManager.tripID)
-                .frame(width: 1, height: 1)
-                .opacity(0)
-        )
         .sheet(isPresented: $showAbout) {
             AboutSheetView(onWithdrawVoiceConsent: {
                 voiceManager.disconnect()
@@ -100,26 +97,13 @@ struct ContentView: View {
             tripManager.start()
         }
         .onDisappear {
-            // The access gate re-locked (401 → AccessManager) and this view
-            // is gone — without this, the poll task retains TripManager and
-            // polls a 401ing backend forever.
+            // Leaving the tab (or the gate re-locking) pauses this tab's
+            // polling; the shell owns voice teardown on tab changes.
             tripManager.stop()
-            voiceManager.disconnect()
-        }
-        .onChange(of: voiceManager.replyCount) {
-            // The agent may have just booked a trip — pick it up next poll.
-            tripManager.noteAgentReply()
-        }
-        .onChange(of: tripManager.tripID) { _, newValue in
-            // Every displayed-trip change (cold-start resolution landing,
-            // long-press selector) reaches the voice page, so the session
-            // pins the trip on screen — the URL param alone loses the race
-            // with the cold-start latest-trip resolution.
-            if let newValue { voiceManager.setTrip(newValue) }
         }
     }
 }
 
 #Preview {
-    ContentView()
+    ReferenceHomeView(voiceManager: VoiceManager(), tripManager: TripManager())
 }

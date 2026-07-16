@@ -117,8 +117,10 @@ struct RecommendationSheet: View {
                     detail: ItemDetail(
                         why_chosen: "Picked by voice from three options — nonstop, landing at 10:05.",
                         price_delta: "+$33",
-                        impact: "The rest of the itinerary anchors to this flight's dates and arrival time."
-                    )
+                        impact: "The rest of the itinerary anchors to this flight's dates and arrival time.",
+                        rebooked_from: nil
+                    ),
+                    details: nil
                 )
             )
         }

@@ -41,6 +41,29 @@ final class VoiceManager: NSObject {
 
     private(set) var webView: WKWebView?
     private var speakingResetTask: Task<Void, Never>?
+    private var interruptionObserver: NSObjectProtocol?
+
+    override init() {
+        super.init()
+        // A phone call (Call 1/2 of the demo) interrupts the audio session:
+        // end the webview session and leave the orb honestly idle — the
+        // user reconnects deliberately, never automatically.
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            guard let info = note.userInfo,
+                  let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
+            Task { @MainActor in self?.disconnect() }
+        }
+    }
+
+    deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+    }
 
     var isConnected: Bool {
         connectionState.lowercased().contains("connected")
@@ -93,10 +116,22 @@ final class VoiceManager: NSObject {
     /// server ignores it once a trip is pinned). Called on every displayed-
     /// trip change, which closes the race where the webview loads before the
     /// cold-start latest-trip resolution lands.
-    func setTrip(_ tripId: String) {
+    /// nil clears the page's pin (the clean-slate booking state —
+    /// vbSetTrip('') on the page). The id is sanitized to the characters a
+    /// trip id can contain before being interpolated into JavaScript.
+    func setTrip(_ tripId: String?) {
+        let safe = (tripId ?? "").filter {
+            $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_"
+        }
         webView?.evaluateJavaScript(
-            "window.vbSetTrip && window.vbSetTrip('\(tripId)')"
+            "window.vbSetTrip && window.vbSetTrip('\(safe)')"
         )
+    }
+
+    /// New trip: the demo's transcript starts clean without touching the
+    /// connection state machinery.
+    func clearTranscript() {
+        transcript.removeAll()
     }
 
     private func updateOrb(forState value: String) {
@@ -146,6 +181,12 @@ extension VoiceManager: WKScriptMessageHandler {
                 role: body["role"] as? String ?? "unknown",
                 text: body["text"] as? String ?? ""
             ))
+            // Bounded on purpose: the Demo tab shows only the last few
+            // turns, and `reply` never adds lines — agent text can't
+            // appear twice or grow without limit.
+            if transcript.count > 12 {
+                transcript.removeFirst(transcript.count - 12)
+            }
         case "reply":
             replyCount += 1
             flashSpeaking()

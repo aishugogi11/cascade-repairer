@@ -117,7 +117,7 @@ struct ItineraryCardView: View {
             item: ItineraryItem(
                 item_id: "1", trip_id: "t", type: "flight", status: "repairing",
                 location: "MSP-SFO", start_ts: nil, end_ts: nil,
-                price: 385, currency: "USD", detail: nil
+                price: 385, currency: "USD", detail: nil, details: nil
             ),
             justChanged: true
         )

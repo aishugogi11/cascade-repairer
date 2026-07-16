@@ -17,7 +17,7 @@ struct TalkToMyTripApp: App {
             // on any later call re-locks (see AccessManager), so a rotated
             // code lands the traveler back here instead of erroring out.
             if accessManager.isUnlocked {
-                ContentView()
+                MainTabView()
             } else {
                 AccessGateView(accessManager: accessManager)
             }
