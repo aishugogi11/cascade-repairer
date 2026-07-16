@@ -1217,6 +1217,16 @@ def test_all_metro_aliases_apply_as_origin_and_destination(
     assert "Option one" in msg
 
 
+def test_instructions_carry_the_first_turn_greeting_clause():
+    """Live finding (2026-07-16): Vocal Bridge fires an automatic first
+    agent turn on connect, and with a pinned trip in context the model
+    opened with 'Let me pull up the details—one moment' before its intro.
+    The instructions now pin the first turn to a short greeting, with
+    looking-something-up talk reserved for actual tool use."""
+    assert "very first turn" in concierge.BASE_INSTRUCTIONS
+    assert "never open by saying you're pulling" in concierge.BASE_INSTRUCTIONS
+
+
 def test_instructions_carry_the_airport_code_clause():
     """The other half of decision 4: the model is told airport codes, never
     metro/city codes, with the New York example — terse, riding every turn."""
