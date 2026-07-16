@@ -34,9 +34,11 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Update 2026-07-16 (Phase 33 shipped, QA'd, archived):** rich flight fields (airline name, cabin, duration, layovers, next-day flag — through the parser, both `details` stamping paths, the spoken clause + on-request reference block, and the cascade card/candidates) are merged (PR #60), deployed, manually QA'd live the same day (real JFK→LAX CERT fares spoken with airline names), and archived to [changelog.md](changelog.md). Its independent validation returned **PARTIAL** — all automated criteria pass; the interactive walkthrough criteria were headless-untestable and closed by the operator's live QA (report in the spec dir). A same-day rider (PR #61) pinned the Concierge's first turn to a short greeting. Same-day probe reality check: the July 21 pair menu is **JFK→LAX only** (probe loop run 2026-07-16 — every other shortlist pair honest-empty, including the **reverse pair LAX→JFK**).
 
+**Update 2026-07-16 (Phase 35 shipped and QA'd; Phase 34 re-scoped to Tavily):** the destination-info tool is merged (PR #64), deployed, live-QA'd the same day (operator run + independent validation — all behavior checks pass; evidence in the spec dir), with one validation finding fixed in the close-out: the voice sanitizer now strips bare `www.` URLs and Markdown, and caps on a word boundary (`vb/feature/phase-35-closeout`, with the validator's two proposed tests). The same day's QA transcript surfaced Josh's return-flight requirement, and the follow-up probes closed the InstaFlights route for good (reverse pair AND round-trip `returndate` both honest-empty at every probed date; one-way control healthy in the same run) — so **Phase 34 is re-scoped below to a Tavily-backed return indication and is no longer data-gated**. Order unchanged: **34 → 24**.
+
 **Replan 2026-07-16 (Phase 33 close-out):** four decisions, all settled at the replan interview. (1) **Phase 35 moves ahead of Phase 34** — 34's gating data is dry today (the reverse pair LAX→JFK honest-empty at the scripted date) and it can't be rehearsed against an empty cache, while 35 is not data-gated; 34 stays alive as **build-only-if-data-returns** (its go/no-go signal is the reverse-pair probe, re-run at any later probe or the Phase 24 morning smoke). (2) The validator's **two-repair lifecycle test** (book → break → repair → second break → second repair over one item, each wholesale `details` write carrying the full shared stamp with the prior flight under `rebooked_from`) folds into **Phase 24** as a hermetic test item. (3) The **codeshare/mixed-cabin summarization risk is accepted** (first segment's carrier, first fare-info cabin — noted in tech-stack § Backend; demo pairs are nonstop-rich, no code change). (4) The optional **live CERT rich-field parse folds into Phase 24's cert-tripwire de-brittling** (assert rich fields parse present-or-cleanly-absent on the anchor pair). `mission.md` unchanged. New order: **35 → 34 (data-gated) → 24**.
 
-## Phase 35: Tavily destination-info tool for the Concierge — [x] COMPLETE (implementation; manual QA pending)
+## Phase 35: Tavily destination-info tool for the Concierge — [x] COMPLETE
 
 One trip-aware `destination_info(question)` tool answering "what's happening there / things to do" with live Tavily results during the call — conversational only, no real hotel/dining/experience booking. Deployment surface: `tavily-python` dep + `TAVILY_API_KEY` on Cloud Run.
 
@@ -58,32 +60,32 @@ One trip-aware `destination_info(question)` tool answering "what's happening the
 > Blast radius otherwise: one tool registration + instruction sentences; trip
 > model, booking writes, repair cascade, consent flow all untouched.
 
-## Phase 34: Return-flight availability check (verify-only — build only if the reverse-pair data returns)
+## Phase 34: Return-flight indication (verify-only, Tavily-backed — re-scoped 2026-07-16, no longer data-gated)
 
-A new read-only Concierge tool that answers "can I get back?" without booking anything or leaking bookable options into session state. **Explicitly cuttable** if the reverse-pair cache or the clock doesn't cooperate. **Re-scoped at the 2026-07-16 Phase 33 close-out replan: build-only-if-data-returns** — the reverse pair (LAX→JFK at the scripted July 21 date) probed honest-empty that day, so Phase 35 moved ahead; pick this up only if a later probe or the Phase 24 morning smoke shows reverse-pair content.
+A new read-only Concierge tool that answers "can I get back?" with a credible spoken indication that return flights exist on the traveler's return date — no booking, no options displayed, nothing bookable enters session state. **Re-scoped at the 2026-07-16 Phase 35 QA follow-up (settled with Josh): the data source is Tavily web search, not InstaFlights.** The requirement (from Josh's live-QA transcript, where the traveler asked "is there a way to get home" and hit the booked-trip guard): when someone books the outbound, the agent must give *some* indication a return exists — ideally with the date. The InstaFlights route is closed with high confidence (probes 2026-07-16, run from the real client's exact request path: reverse pair LAX→JFK honest-empty at every probed date +10 through +30 days; round-trip `returndate` searches 404 no-results at every date **including the anchor July 21→23** while the same-run one-way control returned 3 itineraries — round-trip needs both directions cached, so it inherits the empty reverse pair). Tavily's answer quality is proven with the deployed key through the shipped `_tavily_search`: *"Three airlines operate nonstop flights from LAX to JFK on July 26, 2026: JetBlue, American Airlines, and Delta Air Lines."* The phase is therefore **no longer data-gated** and can ship before July 18.
 
-> **TODO:** Return-flight availability check in the guided booking flow — re-scoped
-> 2026-07-16 (settled with Josh, second pass): **verify-only — no return booking,
-> no return options displayed**. The flow: after the outbound is booked, the
-> agent asks when the traveler plans to come back; on their return date it
-> checks the **reverse pair** and speaks the answer — "yes, there are flights
-> back that day, including \<example\>" — or, if the cache is honest-empty for
-> that date, says so and offers to check a nearby date (retry adjacent dates).
-> Implementation shape: a **new read-only tool** (e.g. `check_return_flights
-> (return_date)`) that derives the swapped route from the pinned trip and calls
-> `instaflights_search` directly, returning only a speakable summary. Do NOT
-> reuse `search_flights` — it stores options in `_SESSION_FLIGHT_OPTIONS` /
+> **TODO (re-scoped 2026-07-16, Tavily-backed):** verify-only — no return booking,
+> no return options displayed, ever. The flow: after the outbound is booked, when
+> the traveler asks about getting back (or the agent asks their return date), a
+> **new read-only tool** (e.g. `check_return_flights(return_date)`) derives the
+> reverse route from the pinned trip and asks **Tavily** via the shipped
+> `_tavily_search` (Phase 35 plumbing reused wholesale — same speakable
+> condensing/sanitizer, same speakable-fallback posture, `TAVILY_API_KEY`
+> already on Cloud Run), speaking something like "I can't book the return from
+> here, but there are nonstop flights back that day on Delta, American, and
+> JetBlue." **Honesty rule:** it's web schedule info, spoken as an indication —
+> never presented as searched fares or bookable inventory. Do NOT reuse
+> `search_flights` — it stores options in `_SESSION_FLIGHT_OPTIONS` /
 > `_LATEST_SEARCH`, which would make return options bookable (book_flight would
-> create a second new trip) and leak them onto the booking page's poll. Zero
-> changes to the trip model, `_booking_writes`, or the never-book-once-booked
-> rule; pairs with item 3 (rich fields make the spoken example credible —
-> airline, flight number, nonstop, time).
-> **Data pre-check (gating)**: InstaFlights caches are per-pair per-date-window —
-> outbound content does NOT imply return content. Before demo day, verify the
-> scripted pair has BOTH directions cached at the scripted dates (README
-> "Demo-day: check which flight pairs are live" curl loop); fold the reverse-pair
-> probe into the Phase 24 morning smoke. This item stays **explicitly cuttable**
-> if the data or the clock doesn't cooperate.
+> create a second new trip) and leak them onto the booking page's poll; the
+> Tavily path stores nothing, which is the point. Zero changes to the trip
+> model, `_booking_writes`, or the never-book-once-booked rule. Instructions
+> must route the live-QA phrasings ("is there a way to get home", "flights to
+> get me back") to the new tool — the 2026-07-16 transcript shows the
+> booked-trip guard message firing on them today. The InstaFlights verify
+> variant is retired; if the reverse-pair cache ever returns (the Phase 24
+> morning-smoke probe still checks, informationally), speaking real cached
+> fares is a possible upgrade — but nothing gates on it.
 
 ## Phase 24: Pre-event readiness
 
@@ -96,9 +98,11 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   pairs are live" — the `/v1/web_call/query` curl loop; unique `session_name` per call).
   Phase 29 rider: per-pair cache windows shift hour-to-hour, so a green +30d sweep does
   not prove the demo date, and the scripted pair's **repair route** must be probed too.
-  Phase 34 rider (2026-07-16 triage, applies only if Phase 34 ships): probe the scripted
-  pair's **reverse direction** at the scripted return date too — outbound content does
-  not imply return content.
+  Phase 34 rider (2026-07-16 triage; softened by the same-day Tavily re-scope): probe the
+  scripted pair's **reverse direction** at the scripted return date too — outbound content
+  does not imply return content. Informational only now: Phase 34's return answer rides on
+  Tavily, so an empty reverse pair no longer gates or degrades it; a full one is a possible
+  real-fares upgrade.
   Detects overnight credential resets and entitlement drift before the first rehearsal;
   append the dated output to the Phase 25 notes (this may also be what closes Phase 26's
   different-day repeatability item).

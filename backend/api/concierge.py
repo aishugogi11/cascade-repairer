@@ -777,7 +777,24 @@ _DESTINATION_INFO_FALLBACK = (
 )
 _DESTINATION_INFO_MAX_CHARS = 600
 _TAVILY_TIMEOUT_S = 8.0
-_URL_RE = re.compile(r"https?://\S+")
+# Protocol or bare-www URLs — both arrive in real Tavily answers (the Phase
+# 35 validation caught www. forms passing the original https?:// pattern).
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+")
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_UNDERSCORE_RE = re.compile(r"\b_+([^_]+)_+\b")
+_MD_MARKS_RE = re.compile(r"[*`#]+")
+
+
+def _speakable(text: str) -> str:
+    """Strip web/Markdown artifacts a TTS voice would mangle: Markdown links
+    keep their text, URLs (protocol or bare www.) drop, emphasis/code/heading
+    marks drop, whitespace collapses. Order matters — links resolve to their
+    text before the URL pass so the label survives."""
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _URL_RE.sub("", text)
+    text = _MD_UNDERSCORE_RE.sub(r"\1", text)
+    text = _MD_MARKS_RE.sub("", text)
+    return " ".join(text.split())
 
 
 def _tavily_client():
@@ -814,10 +831,13 @@ def _tavily_search(query: str) -> str:
             for result in response.get("results", [])
         )
         answer = " ".join(s for s in snippets if s)
-    answer = " ".join(_URL_RE.sub("", answer).split())
+    answer = _speakable(answer)
     if not answer:
         raise RuntimeError("Tavily returned no usable content")
-    return answer[:_DESTINATION_INFO_MAX_CHARS]
+    if len(answer) > _DESTINATION_INFO_MAX_CHARS:
+        # Cap on a word boundary — a mid-word slice would be spoken as-is.
+        answer = answer[:_DESTINATION_INFO_MAX_CHARS].rsplit(" ", 1)[0]
+    return answer
 
 
 async def destination_info_impl(session_id: str, question: str) -> str:
