@@ -28,13 +28,7 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Triage 2026-07-16 (TODO → roadmap):** the four items that accumulated in `TODO.md` after the live QA rerun all promoted, one phase each, settled at the triage interview: features land ahead of Phase 24 (which stays the final, largely event-day-gated readiness gate — its "pull ahead when ready" character unchanged). New order: **32 (repair result reflected on the page) → 33 (rich flight fields) → 34 (return-flight verify-only check) → 35 (Tavily destination info) → 24**. Phase 33 deliberately precedes Phase 34 — the rich fields are what make Phase 34's spoken return example credible. Phases 34 and 35 are the first to cut if the clock runs short (34 is explicitly data-gated and cuttable per its own scoping; 35 is a nice-to-have conversational garnish).
 
-## Phase 32: Repaired flight reflected on the cascade page [x] COMPLETE (implementation; manual QA pending)
-
-The one known bug in the otherwise-working demo flow: after the repair cascade rebooks the flight, the cascade page still displays the original flight instead of the rebooked one. The broken → fixed flip is the demo moment — it must show the *new* flight.
-
-> **TODO:** The demo flow works: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade. However, a few things to call out.
->
-> 1. Once the flight is repaired, the flight that's repaired doesn't actually get reflected on the web site. It still shows the original.
+**Update 2026-07-16 (Phase 32 shipped, QA'd, archived):** the repaired-flight fix is merged (PR #58), deployed, manually QA'd on the deployed service the same day (two break → repair cycles, was-line and exclusion re-stamp verified), and archived to [changelog.md](changelog.md) — the cascade page now shows the rebooked flight with the original struck through. Its independent validation returned **FAIL on the acceptance package only** (DoD-B, again: PR #58 merged with placeholder evidence sections; report and two adopted validator tests in the spec dir). One finding needs Phase 24's attention: **commit `933f8e8` removed the evidence-guard checks from `git_pull_dev.sh`** ("fix deploy script"), so the guard Phase 24's invariant-test bullet plans to make testable currently doesn't enforce anything — restore it there. Open order: **33 → 34 → 35 → 24**.
 
 ## Phase 33: Rich flight fields from the sabre_endpoints notebook
 
