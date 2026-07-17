@@ -40,6 +40,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from api import call_purposes, consent, vb_cli
+from api.paypal_client import refund_fare_difference
 from api.disruption import break_trip_flight
 from api.itinerary_ui import _details_for
 from api.outbound_call import _missing_env, _scrub
@@ -97,6 +98,24 @@ async def _await_call_transcript(session_key: Optional[str]) -> Optional[str]:
     return None
 
 
+async def _maybe_refund_line(items) -> Optional[str]:
+    """PayPal fare-difference refund (sponsor award beat) — Pallavi G. When the repair
+    landed a cheaper flight, send the difference via sandbox Payouts and
+    return the one sentence Call 2 appends. Never raises (the client
+    guarantees it); returns None whenever there is nothing to say — no
+    flight, not fixed, no original fare, refund skipped/disabled."""
+    flight = next((i for i in items if i.type == "flight"), None)
+    if flight is None or flight.status != "fixed":
+        return None
+    original = (flight.details or {}).get("rebooked_from") or {}
+    refund = await refund_fare_difference(
+        old_fare=original.get("price"),
+        new_fare=flight.price,
+        currency=flight.currency or "USD",
+    )
+    return refund.spoken_line
+
+
 async def _call_back_with_results(trip_id: str, tasks) -> None:
     """The completion watcher → Call 2: wait for the repair tasks this
     backend launched, then place the results callback with a purpose
@@ -122,6 +141,9 @@ async def _call_back_with_results(trip_id: str, tasks) -> None:
         items = []
     details = await _details_for(trip_id, items)
     purpose = call_purposes.build_results_purpose(trip, items, details)
+    refund_line = await _maybe_refund_line(items)
+    if refund_line:
+        purpose = purpose + " " + refund_line
     ok, _call, error = await asyncio.to_thread(
         vb_cli.place_call, purpose, "demo-beat3-results"
     )
