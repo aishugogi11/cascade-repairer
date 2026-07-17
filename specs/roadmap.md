@@ -48,34 +48,17 @@ Phases appear in **execution order** — the first heading not marked `[x] COMPL
 
 **Promotion 2026-07-16 (iOS cascade demo tops the roadmap):** the already-written spec `specs/2026-07-16-ios-cascade-demo/` — requested as a focused iOS follow-up that deliberately did not schedule itself as a phase — is promoted as **Phase 37** at the very top, per Josh at the triage interview. All three interview decisions: (1) **it literally tops the file** — Phase 36's remaining substance is external filings that then wait on Apple, so the iOS demo is what engineering picks up next (`sdd-feature-spec` mechanics: first unmarked heading). (2) **One phase, spec as written** — its plan/requirements/validation already exist, so the phase skips the spec-authoring interview and goes straight to implementation on `vb/feature/ios-cascade-demo` (this promotion supersedes the requirements.md line deferring roadmap scheduling). (3) **Build now, E2E blocked** — the backlogged Phase 20 hard prerequisite (the `mobile_voice.py` TEMP latest-trip bridge removal) keeps its Apple-approval trigger unchanged; implementation, XCTests, simulator work, and the zero-quota rehearsal proceed immediately, while the booking-first end-to-end device validation is explicitly **blocked, not waived** (per the spec's own validation preconditions) until Phase 20 deploys. Open order: **37 → 36 → 24**.
 
-## Phase 37: Talk to My Trip — native cascade demo (iOS)
-
-Carry the proven `GET /v1/cascade/` flow into a clean native SwiftUI experience: book by
-voice → visible **Cancel flight** → Vocal Bridge consent call → approved live five-leg
-repair with the timer and rebooked-flight card → Vocal Bridge results call.
-
-- **Spec already written** — `specs/2026-07-16-ios-cascade-demo/` (plan.md, requirements.md,
-  validation.md). Implement directly on `vb/feature/ios-cascade-demo`; no new spec authoring.
-- Shape (from the spec): a two-tab shell (**Demo** default, existing `ContentView` preserved
-  as **Home**) over exactly one shared `VoiceManager`/`VoiceWebView`; clean-slate
-  baseline-and-adopt trip ownership; a pure lifecycle-state derivation off the existing
-  1.5-second status poll; server truth over optimistic animation; iOS-only — no backend,
-  prompt, endpoint, or call-script change.
-- **Phase 20 gate (decision at this triage):** the deployed `mobile_voice.py` TEMP bridge
-  would pin every fresh voice session to the old latest trip, and the spec forbids
-  client-side workarounds. Build, automated tests, and the zero-quota manual pass run now;
-  the full booking-first physical-device validation stays **blocked** until backlogged
-  Phase 20 ships (trigger: Phase 36's Apple approval). Leave the phase open on that
-  criterion rather than waiving it.
-- **Phase 36 interplay:** direct Xcode installs only — no archive, upload, or App Store
-  submission while the same-build unlisted recovery is active. Fix the
-  `LSApplicationCategoryType` → `public.app-category.travel` build setting now for the
-  *next* archive, whenever that becomes legal.
-- Quota: the yes-path device run consumes two outbound calls, the decline path one
-  (10/day, resets 00:00 UTC); zero-quota rehearsal comes first.
-
-> **TODO (Josh, 2026-07-16, promotion request verbatim):** use this and promote to top of
-> roadmap ./specs/2026-07-16-ios-cascade-demo
+**Update 2026-07-16 (Phase 37 implementation complete, archived; Josh's call):** the native
+cascade demo is implemented on `vb/feature/ios-cascade-demo` and archived to
+[changelog.md](changelog.md) as **implementation complete, manual QA pending** — the two-tab
+shell over one shared voice bridge, the pure lifecycle derivation, clean-slate trip adoption,
+the visible Cancel → consent → live-repair presentation, the travel-category build-setting
+fix, and a new 30-test XCTest target all pass the spec's automated validation (build +
+simulator test run green the same day). The residuals ride where they were already scoped:
+the zero-quota rehearsal and physical-device call paths sit with **Phase 24's Device QA**
+bullet, and the booking-first device validation remains **blocked, not waived** on backlogged
+Phase 20's TEMP-bridge removal (trigger: Phase 36's Apple approval) — per the promotion
+decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 ## Phase 36: Unlisted App Store recovery
 
@@ -174,5 +157,10 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
 - **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
   physical iPhone via Xcode install — does not touch the Phase 36 same-build unlisted recovery
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
-  cases (Phase 17 validation.md § 7).
+  cases (Phase 17 validation.md § 7). **Phase 37 rider (2026-07-16, archived to the
+  changelog as implementation-complete):** the iOS cascade demo's manual passes ride here —
+  the zero-quota rehearsal (tabs, clean-slate booking, accessibility, offline/resume) plus
+  the yes-path (2 calls) and decline-path (1 call) device runs per
+  `specs/2026-07-16-ios-cascade-demo/validation.md`; the booking-first device validation
+  stays blocked on backlogged Phase 20's TEMP-bridge removal.
 - Review the hardcoded dev Cloud Run URL in `APIConfig.swift`.
