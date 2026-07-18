@@ -74,7 +74,7 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Drop 2026-07-18 (Phase 36 cancelled — the Apple path is closed, Josh's call, event-day morning):** the unlisted App Store recovery is **removed unshipped** — Apple did not approve, and chasing re-review on event day is not worth it. No filings from the phase's punch list are pursued and no replacement binary goes up. This costs the demo nothing: `mission.md` #4 already made App Store presence a bonus, never a criterion, and the demo paths remain the web surfaces plus direct Xcode/TestFlight installs. Downstream effect: BACKLOG Phase 20's trigger (the TEMP-bridge removal "on Apple approval") no longer has an arming event — it stays backlogged until distribution is ever revisited, and Phase 37's booking-first device validation stays blocked behind it (its zero-quota rehearsal and device runs still ride Phase 24's Device QA bullet unchanged). Open order: **24** — the roadmap's last phase.
 
-## [x] COMPLETE (implementation; manual QA pending) Phase 41: Airline-diverse flight options
+## [x] COMPLETE Phase 41: Airline-diverse flight options
 
 > **TODO:** take a look at the demo results from the original API, start with instead of three options, pick 15 options.  and only pick one airline each.  For example for JFK -> LAX, have the api return up to 15 results (see below).  The results provided to the agent to talk to the customer, would be 1 Jet Blue and one AA. If there was also for example Delta on that list, would also included delta.
 >
