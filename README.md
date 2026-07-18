@@ -368,37 +368,4 @@ PY
 https://talktomytrip.com/?code=cascade2026 (must include the ?code parm)
 
 ## Resend 
-```dns
-Fill in your DNS Records
-Add the following DNS records in your domain provider.
-Domain Verification
-DKIM
-Type	Name	Content	TTL
-TXT	
-resend._domainkey
-p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC8K3ztd7/lhrHtOpz9+qVIFW7HOQcqpaEjP6Yr67PRrSk1j6S06Ak6jmRL5WZL0LeS/07zMzD9OHS/AmLZvoisLSpSd22PKt71dEkGyde2PEC0XOhhvb1ZaA0oBahTRjG7sng7oekYprLEOvdg6Qco7efgnDmOWR+PwHv+S2lpxwIDAQAB
-Auto
-Enable Sending
-
-
-SPF
-Type	Name	Content	TTL	Priority
-MX	
-send
-feedback-smtp.us-east-1.amazonses.com
-Auto	10
-TXT	
-send
-v=spf1 include:amazonses.com ~all
-Auto	
-DMARC
-(Optional)
-Type	Name	Content	TTL	Priority
-TXT	
-_dmarc
-v=DMARC1; p=none;
-Auto	
-Enable Receiving
-
-
-```
+curl -i -X POST 'https://api.resend.com/emails' -H "Authorization: Bearer $RESEND_API_KEY" -H 'Content-Type: application/json' -d '{"from":"Vocal Bridge <hello@talktomytrip.com>","to":"joshjanzen@gmail.com","subject":"Resend is live","html":"<p>Domain verified and sending.</p>"}'
