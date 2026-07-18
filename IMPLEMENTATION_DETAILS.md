@@ -23,3 +23,11 @@ OAuth token flow plus InstaFlights (Flight Search API v1) on CERT, returning rea
 ## ROADMAP
 
 The repair engine is disruption-agnostic: delays, gate changes, and hotel failures fire the same consent call, parallel repair, and callback. Next: real inventory for the remaining trip legs (ground transport, dining, experiences), full PayPal checkout on booking with true same-transaction refunds, automated check-in, and company-scale group trips.
+
+## VOCAL BRIDGE CALL SESSION ID
+
+83ce8523-b676-4925-9637-3408b1927500
+
+Outbound call placed by our assistant (the results callback from the demo video, 2026-07-18): 34 seconds, completed, recording available — it speaks the rebooked JetBlue flight, the $80 fare difference already refunded to PayPal, and the email offer.
+
+Vocal Bridge call session ID: 83ce8523-b676-4925-9637-3408b1927500 (Call 2 — results callback, 34s, recorded, from today's video run)

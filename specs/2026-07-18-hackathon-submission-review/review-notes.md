@@ -78,6 +78,20 @@ piece for the single form field.
 **Not published**: the `?code=` access parameter (deliberately absent from
 the submission text).
 
+## Submission field: Vocal Bridge call session ID (verified 2026-07-18)
+
+The form also requires a VB call session ID (assistant-placed, ≥15s, with a
+recording). Verified via `vb logs list` in the container (caller agent
+pinned) — the two newest sessions are the submitted video's run, transcripts
+matching the video verbatim:
+
+- **Submitted: `83ce8523-b676-4925-9637-3408b1927500`** — Call 2, the results
+  callback (2026-07-18 20:11 UTC, outbound, 34 s, completed; recording
+  confirmed downloadable via `vb logs download`, 391 KB MP3). Speaks the
+  JetBlue rebooking, the $80 PayPal refund, and the email offer.
+- Alternate: `b5ab30a0-85e9-4418-a259-0de52e7f69fc` — Call 1, the consent
+  call (20:10 UTC, outbound, 38 s, completed).
+
 ## Typos and garble fixed
 
 reservaration, Conceirage, iteratry, altnative, communciates, asycio,
