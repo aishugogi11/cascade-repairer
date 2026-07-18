@@ -106,7 +106,9 @@ def test_itinerary_email_speaks_the_rich_flight():
         _trip(), [_rich_flight()] + _build_out_items()
     )
 
-    assert content.subject == "Your trip to Los Angeles"
+    # The departure date rides in the subject (live-QA finding 2026-07-18:
+    # same-city trips produced three identical subjects in one inbox).
+    assert content.subject == "Your trip to Los Angeles — July 21"
     for variant in (content.html, content.text):
         assert "Delta 439" in variant
         assert "DL" not in variant  # names, never codes
@@ -136,15 +138,28 @@ def test_itinerary_email_builds_from_a_bare_seed_row():
     # line is omitted, nothing raises.
     bare = ItineraryItem(trip_id="t-1", type="flight", status="booked")
     content = email_content.build_itinerary_email(
-        _trip(title="The Complete Trip", origin=None, destinations=[]),
+        _trip(title="The Complete Trip", origin=None, destinations=[],
+              start_date=None, end_date=None),
         [bare],
     )
 
+    # No route, no dates anywhere — the subject degrades to the title with
+    # no date suffix, and nothing raises.
     assert content.subject == "Your trip: The Complete Trip"
     assert "Flight" in content.text
     assert "None" not in content.text
     assert "None" not in content.html
     _assert_email_register(content)
+
+
+def test_subject_date_falls_back_to_the_flight_row():
+    # A trip header without dates still gets the subject date from the
+    # flight's PT departure day.
+    content = email_content.build_itinerary_email(
+        _trip(start_date=None, end_date=None), [_rich_flight()]
+    )
+
+    assert content.subject == "Your trip to Los Angeles — July 21"
 
 
 def test_itinerary_email_connection_and_next_day_lines():
@@ -185,7 +200,7 @@ def test_repair_email_speaks_the_rebooked_flight_with_the_was_line():
         "difference back to your PayPal — it's on its way now."
     )
 
-    assert content.subject == "Your trip to Los Angeles is fixed"
+    assert content.subject == "Your trip to Los Angeles is fixed — July 21"
     for variant in (content.html, content.text):
         assert "JetBlue 615" in variant
         assert "Was Delta 439" in variant
@@ -225,7 +240,7 @@ def test_repair_email_unfixed_flight_is_honest():
     )
 
     # Never "fixed" in the subject while the repair is still in flight.
-    assert content.subject == "Update on your trip to Los Angeles"
+    assert content.subject == "Update on your trip to Los Angeles — July 21"
     assert "where the repair stands" in content.text
     _assert_email_register(content)
 

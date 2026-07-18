@@ -117,7 +117,7 @@ def test_confirmed_address_stores_and_sends_the_itinerary(monkeypatch):
     assert trip_emails.get("t-1") == "josh@example.com"
     assert len(sends) == 1
     assert sends[0]["to"] == "josh@example.com"
-    assert sends[0]["subject"] == "Your trip to Los Angeles"
+    assert sends[0]["subject"] == "Your trip to Los Angeles — July 21"
     assert sends[0]["html"].strip() and sends[0]["text"].strip()
     assert "Delta 439" in sends[0]["text"]
 
@@ -225,3 +225,9 @@ def test_instructions_carry_the_offer_and_confirm_contract():
     assert "read it back" in concierge.BASE_INSTRUCTIONS
     assert "never guess or invent an address" in concierge.BASE_INSTRUCTIONS
     assert "don't offer again" in concierge.BASE_INSTRUCTIONS
+    # The spell-back rule (live-QA finding 2026-07-18: a doubled letter
+    # passed a plainly spoken read-back and the email bounced) and the
+    # what's-on-file / correction flow.
+    assert "spelling the part" in concierge.BASE_INSTRUCTIONS
+    assert "what email is on file" in concierge.BASE_INSTRUCTIONS
+    assert "newest confirmed address replaces" in concierge.BASE_INSTRUCTIONS

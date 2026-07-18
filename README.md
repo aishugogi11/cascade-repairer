@@ -246,12 +246,20 @@ candidates panel and nothing becomes bookable.
 
 **2c. Email offer (free; Phase 40)** — after the booking the Concierge offers
 once: *"Would you like me to send this to your email?"*. Say yes, **speak a
-real address you can open on stage**, and answer plainly when it reads the
-address back — only a clear yes stores and sends (a garbled address gets a
-re-ask, never a guess). The itinerary email arrives from `Cascade
-<info@talktomytrip.com>` (the Phase 39 Gmail smoke is the deliverability
-check). The address is kept in memory per trip for Call 2's offer; declining
-stores nothing and the offer isn't repeated.
+real address you can open on stage**, and listen to the read-back: the agent
+**spells the part before the @ letter by letter** (live-QA lesson 2026-07-18:
+"janzen" and "janzzen" sound identical spoken plainly, and the bounced email
+is invisible on stage) — confirm only if every letter is right; a correction
+or garbled answer gets a re-ask, never a guess. You can also ask *"what email
+do you have on file?"* or give a corrected address any time — the newest
+confirmed address replaces the old one and the itinerary is re-sent. The
+email arrives from `Cascade <info@talktomytrip.com>` with the **departure
+date in the subject** ("Your trip to Los Angeles — July 21") so lookalike
+runs can't be confused. The address is kept in memory per trip for Call 2's
+offer; declining stores nothing and the offer isn't repeated. **Delivery
+validator: the Resend dashboard** (resend.com → Emails) shows every send
+with recipient and delivered/bounced status — check it if an email seems
+missing.
 
 **3. Cancel flight → cascade (Call 1)** — click it once. Expect: the screen
 turns red with **"waiting for the traveler's go-ahead"** and **no running
