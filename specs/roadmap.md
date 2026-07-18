@@ -70,7 +70,35 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Update 2026-07-18 (Phase 40 shipped, QA'd, archived):** the agent email offers are merged (PR #76) with a same-morning close-out (PR #77 — spell-back address confirmation, departure-dated subjects, the on-file/correction flow), deployed, and **QA-closed on the deployed service** (spelled read-back verified live; "Your trip to Los Angeles — July 21" **delivered** in the Resend log; the first live run proved the Call 2 offer → watcher → send leg while exposing the doubled-letter bounce the close-out fixes); archived to [changelog.md](changelog.md). Standing operator note: the **Resend dashboard is the delivery validator** (README run sheet, step 2c). Open order: **36 → 24**.
 
+**Triage 2026-07-18 (TODO → roadmap, third of the day — airline-diverse flight options):** the one inbox item — fetch up to 15 InstaFlights itineraries per search and present the Concierge **one option per distinct airline** (e.g. one JetBlue + one American + one Delta when present) instead of today's top-3 — promoted as **Phase 41** at the very top per Josh at the triage interview (promote now, ahead of Phase 24, one phase: one seam — the search fetch ceiling plus an airline-diversity selection — independently shippable). Motivating observation preserved in the phase blockquote: a real JFK→LAX pull returned 14 priced itineraries, twelve of them JetBlue, so the current top-3 speaks a single-carrier menu even when the cache holds three airlines. Open order: **41 → 24**.
+
 **Drop 2026-07-18 (Phase 36 cancelled — the Apple path is closed, Josh's call, event-day morning):** the unlisted App Store recovery is **removed unshipped** — Apple did not approve, and chasing re-review on event day is not worth it. No filings from the phase's punch list are pursued and no replacement binary goes up. This costs the demo nothing: `mission.md` #4 already made App Store presence a bonus, never a criterion, and the demo paths remain the web surfaces plus direct Xcode/TestFlight installs. Downstream effect: BACKLOG Phase 20's trigger (the TEMP-bridge removal "on Apple approval") no longer has an arming event — it stays backlogged until distribution is ever revisited, and Phase 37's booking-first device validation stays blocked behind it (its zero-quota rehearsal and device runs still ride Phase 24's Device QA bullet unchanged). Open order: **24** — the roadmap's last phase.
+
+## Phase 41: Airline-diverse flight options
+
+> **TODO:** take a look at the demo results from the original API, start with instead of three options, pick 15 options.  and only pick one airline each.  For example for JFK -> LAX, have the api return up to 15 results (see below).  The results provided to the agent to talk to the customer, would be 1 Jet Blue and one AA. If there was also for example Delta on that list, would also included delta.
+>
+> *(The "see below" sample is condensed here, per the pasted-output precedent of the 2026-07-18 email triage — the raw dump lives in this triage's `TODO.md` git history: `HTTP 200 | route JFK -> LAX on 2026-08-01 — 14 priced itineraries`, twelve JetBlue — nonstops at $198.40 and FLL one-stops at $246.20 — plus two American nonstops at $278.40.)*
+
+Today `search_flights` keeps the top 2–3 parsed itineraries, so a JetBlue-heavy cache
+(the observed pull above) speaks a single-carrier menu even when other airlines have
+priced content further down. Scope, one seam:
+
+- **Raise the fetch/parse ceiling to ~15**: let up to 15 priced itineraries survive the
+  InstaFlights parse (dedupe, timezone-skip, and rich-field rules unchanged) before
+  selection happens.
+- **Airline-diversity selection**: from that pool, present the Concierge **one option per
+  distinct airline** — each carrier's best representative (cheapest, tie-break earliest
+  departure) — so JFK→LAX offers "one JetBlue and one American," plus one Delta the moment
+  Delta appears in the pool. A single-carrier pool degrades to today's behavior (top
+  options of that carrier, so the traveler still gets a numbered choice).
+- **Downstream unchanged**: the spoken numbered summary (speakable rules intact — airline
+  *names*, rounded prices), `_SESSION_FLIGHT_OPTIONS`, the `_LATEST_SEARCH` /
+  `pending_options` candidates panel, the `book_flight(option_number)` path, and the
+  `details_from_option` stamp all consume the diverse list as-is.
+- **Mock parity**: `SABRE_MODE=mock` must exercise the multi-airline selection — the mock
+  client's three deterministic itineraries need at least two distinct carriers so hermetic
+  tests and zero-quota rehearsals see the diversity rule fire.
 
 ## Phase 24: Pre-event readiness
 
