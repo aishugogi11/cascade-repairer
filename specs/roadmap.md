@@ -64,6 +64,35 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Update 2026-07-18 (Phase 38 archived):** the PayPal-refund documentation reconciliation is complete — both edits landed with PR #73 (`d6db635`, merge `71d88a0`): the changelog entry (with spec dir `specs/2026-07-18-paypal-refund-docs/`) and the tech-stack § Backend reference, plus a README run-sheet step; archived to [changelog.md](changelog.md). Open order: **36 → 24**.
 
+**Triage 2026-07-18 (TODO → roadmap, second of the day — outbound email):** the one inbox item — outbound-only transactional email from `info@talktomytrip.com` with an agent email-offer beat on both demo calls — promoted as **two phases at the very top per Josh at the triage interview** (promote now, ahead of everything, two-phase split): **Phase 39** is the deliverability foundation (Resend + DNS + a guarded send module; no agent surface), **Phase 40** is the agent tool (email capture per trip, the two spoken offers, itinerary/repair email content). Triage finding worth flagging early: the domain's current Squarespace "Email Security" preset records (`v=spf1 -all`, DMARC `p=reject; sp=reject; adkim=s; aspf=s`, an empty DKIM key) hard-fail **all** mail from the domain today and directly conflict with the planned records — Phase 39 must replace them, not add alongside. Open order: **39 → 40 → 36 → 24**.
+
+## Phase 39: Outbound email foundation — talktomytrip.com (Resend + DNS + send module)
+
+> **TODO (verbatim):** # Email Spec — talktomytrip.com
+>
+> **Scope:** Outbound-only transactional email. Send from `info@talktomytrip.com`, triggered by the FastAPI Cloud Run service. No inbound mail, no reply handling.
+
+The deliverability foundation, no agent surface — shippable and verifiable on its own (a test send that passes SPF + DKIM):
+
+- **Provider decision (from the TODO, verbatim):** transactional ESP, **not** Google Workspace SMTP — **Resend** (runs on AWS SES; ~3,000 emails/month free, async HTTP API, ~10-min setup). SES direct is the at-volume alternative (adds AWS account + sandbox friction).
+- **DNS at Squarespace (planned records, from the TODO):** DKIM TXT (provided by Resend) · SPF TXT on `@`: `v=spf1 include:amazonses.com ~all` · DMARC TXT on `_dmarc`: `v=DMARC1; p=none;` · null MX on `@`: `0 .`. One SPF record only; leave the existing A records (`@`/`www` → `35.192.205.215`, the nginx SSL proxy → Cascade app) untouched; never accept a Squarespace "reset DNS to defaults" prompt.
+- **Replace, don't add:** the existing Squarespace Email Security preset (`v=spf1 -all` on `@`, `_dmarc` `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s`, `_domainkey` `v=DKIM1; p=` with an empty key) currently hard-fails all mail and must be removed/replaced by the records above — two SPF TXTs on `@` is itself a failure mode.
+- **Send module (from the TODO):** ESP HTTP API via async httpx — not SMTP (Cloud Run blocks port 25 and SMTP doesn't fit request-scoped lifecycles); API key in Secret Manager mounted as an env var, never in the image; `From: Cascade <info@talktomytrip.com>`, optional `Reply-To`; try/except guard — log failures, never 500 the request (a failed email must not kill a successful booking); move to a background task/Cloud Tasks if sends block the response.
+- **Rollout checklist (from the TODO):** create Resend account, add `talktomytrip.com`, trigger verification → add DKIM + SPF + DMARC + null MX at Squarespace → confirm domain verified in Resend → key to Secret Manager, wire to Cloud Run env → implement the guarded send module → test send to a personal inbox, confirm SPF + DKIM pass in headers → (later, at volume) tighten DMARC `p=none` → `p=quarantine` → `p=reject`.
+- Completion: the domain is verified in Resend and a test send from the deployed service lands in a personal inbox with SPF and DKIM passing — the agent says nothing about email yet.
+
+## Phase 40: Agent email offers — capture per trip, itinerary and repair emails
+
+> **TODO (verbatim):** And this is a tool for that initial demo call that the agent can say, "Would you like me to send this to your email?" and then that person has to provide their email address. Also, on the repair trip part, have the agent say, "Hey, would you like an email of this?" and then be able to pull that email address from the initial booking. So each trip ID, if they provide an email address, has to be stored, Or if the transcript is stored, then just parse out the email again for when you send an update. It doesn't have to be exactly this way, but this is what I'm thinking.
+
+The conversational surface on top of Phase 39's send module:
+
+- An email-offer beat on the **initial booking call** ("Would you like me to send this to your email?") that collects and confirms the address by voice, and on the **repair results callback** ("Would you like an email of this?") that reuses the stored address — no re-ask when one is on file.
+- **Email address stored per trip ID** (the TODO's preferred shape; transcript re-parse is the noted fallback, not the plan) — exact storage seam decided at the `sdd-feature-spec` interview against the existing trip repositories.
+- Email content: the booked itinerary (booking call) and the repair summary with the rebooked flight — consistent with what Call 2 speaks, including the PayPal refund sentence when one fired.
+- Voice-safe handling of spoken addresses (the demo's known STT hazard) — confirm back before storing; a declined or ambiguous answer means no email, never a guessed address.
+- Completion: both offers work on the deployed service end-to-end (spoken yes → email arrives; spoken no → nothing sent, nothing stored beyond the decline).
+
 ## Phase 36: Unlisted App Store recovery
 
 Recover the rejected v1.0 (3) submission as an unlisted final app without replacing the binary:
