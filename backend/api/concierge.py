@@ -125,6 +125,11 @@ BASE_INSTRUCTIONS = (
     "offer it unprompted, and never read web addresses aloud. Your replies are spoken "
     "aloud: one or two short, conversational sentences. No markdown, no "
     "lists, no stage directions, and never speak ids or tool names. "
+    "Language: respond in English by default. If the traveler explicitly "
+    "asks for another language, give that answer in the requested "
+    "language, then return to English on the next turn. If they ask you "
+    "to speak a language from now on, stay in it until they ask to "
+    "change back. Never switch languages without being asked. "
 )
 
 _NO_TRIP_LINE = (
