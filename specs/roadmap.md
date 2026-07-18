@@ -68,7 +68,7 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Update 2026-07-18 (Phase 39 shipped, QA'd, archived):** the outbound-email foundation is merged (PR #75), deployed, and QA-closed the same morning — domain **Verified** in Resend after the Squarespace preset replacement, and the deployed gated `POST /v1/email/test` landed in the operator's Gmail from `Cascade <info@talktomytrip.com>`; archived to [changelog.md](changelog.md) with dated evidence in the spec dir (`send-evidence.md`). Three accepted residuals recorded there: the planned apex SPF and null MX are unapplied (sending authenticates via DKIM + Resend's `send.` subdomain SPF; the null MX stays recommended hygiene), and `RESEND_API_KEY` rides as a plain env var rather than the spec-decided Secret Manager mount. Phase 40 builds its spoken offers on this module. Open order: **40 → 36 → 24**.
 
-## Phase 40: Agent email offers — capture per trip, itinerary and repair emails
+## Phase 40: Agent email offers — capture per trip, itinerary and repair emails [x] COMPLETE (implementation; manual QA pending)
 
 > **TODO (verbatim):** And this is a tool for that initial demo call that the agent can say, "Would you like me to send this to your email?" and then that person has to provide their email address. Also, on the repair trip part, have the agent say, "Hey, would you like an email of this?" and then be able to pull that email address from the initial booking. So each trip ID, if they provide an email address, has to be stored, Or if the transcript is stored, then just parse out the email again for when you send an update. It doesn't have to be exactly this way, but this is what I'm thinking.
 

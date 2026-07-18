@@ -140,25 +140,60 @@ _CLASSIFIER_INSTRUCTIONS = (
 )
 
 
+# Phase 40 — the same yes/no/ambiguous seam, pointed at Call 2's email
+# offer instead of Call 1's repair consent. Same honesty posture: only an
+# unambiguous yes sends anything.
+_EMAIL_OFFER_INSTRUCTIONS = (
+    "You judge one phone-call transcript. Near the end of the call the AI "
+    "travel agent offered to email the traveler a summary of their "
+    "repaired trip — for example 'Would you like an email of this?'. The "
+    "transcript interleaves AGENT: and USER: turns. Judge ONLY what the "
+    "traveler (USER) said in answer to that offer. Reply with exactly one "
+    "word — yes, no, or ambiguous. Say 'yes' only if the traveler clearly "
+    "wanted the email (for example 'yes please', 'sure', 'send it'). Say "
+    "'no' if they clearly declined. Say 'ambiguous' if they never "
+    "answered, the answer is unclear, or there are no USER turns."
+)
+
+
 def _consent_model() -> str:
     return os.environ.get("CONSENT_LLM_MODEL", DEFAULT_CONSENT_MODEL)
 
 
-async def classify_consent(transcript_text: str) -> str:
-    """yes / no / ambiguous from Call 1's transcript_text. Any failure —
-    API error, empty transcript, an off-script answer — reads as
-    'ambiguous', which stands down: never launch on an unread go-ahead."""
+async def _classify_transcript(
+    transcript_text: str, instructions: str, name: str
+) -> str:
+    """The shared classifier body: yes / no / ambiguous from a transcript.
+    Any failure — API error, empty transcript, an off-script answer —
+    reads as 'ambiguous', which stands down: never act on an unread
+    answer."""
     if not (transcript_text or "").strip():
         return "ambiguous"
     try:
         agent = Agent(
-            name="ConsentClassifier",
+            name=name,
             model=_consent_model(),
-            instructions=_CLASSIFIER_INSTRUCTIONS,
+            instructions=instructions,
         )
         result = await Runner.run(agent, transcript_text, max_turns=1)
         verdict = str(result.final_output).strip().lower().strip(".!'\"")
         return verdict if verdict in ("yes", "no") else "ambiguous"
     except Exception:  # noqa: BLE001 — a failed read must stand down, not raise
-        logger.warning("consent classification failed", exc_info=True)
+        logger.warning("%s classification failed", name, exc_info=True)
         return "ambiguous"
+
+
+async def classify_consent(transcript_text: str) -> str:
+    """yes / no / ambiguous from Call 1's transcript_text — only an
+    unambiguous yes launches repairs."""
+    return await _classify_transcript(
+        transcript_text, _CLASSIFIER_INSTRUCTIONS, "ConsentClassifier"
+    )
+
+
+async def classify_email_offer(transcript_text: str) -> str:
+    """yes / no / ambiguous from Call 2's transcript_text (Phase 40) —
+    only an unambiguous yes sends the repair email."""
+    return await _classify_transcript(
+        transcript_text, _EMAIL_OFFER_INSTRUCTIONS, "EmailOfferClassifier"
+    )
