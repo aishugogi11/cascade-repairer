@@ -46,13 +46,17 @@ Make eval results trustworthy enough to gate on: settle the three open Phase 11 
 
 ## Phase 20: v1.0.1 post-approval update — remove the TEMP latest-trip bridge
 
-**Trigger: App Review approves v1.0 (3) through the Phase 36 unlisted recovery** (originally
-submitted 2026-07-11; rejected 2026-07-16 under Guideline 3.2) — do not start before; uploading
-anything while the same-build unlisted resubmission is active restarts the review queue. One small phase, one release:
+**Trigger: a future decision to reopen iOS distribution** *(re-armed 2026-07-18: the original
+trigger — App Review approving v1.0 (3) through the Phase 36 unlisted recovery — is gone; the
+Apple path was dropped unshipped that morning, see the roadmap drop note and tech-stack § iOS
+app; v1.0 (3) history: submitted 2026-07-11, rejected 2026-07-16 under Guideline 3.2)*. One
+small phase, one release, only if distribution is ever reopened:
 bump the app to v1.0.1 (the native `vbSetTrip` wiring is already merged — Phase 19), archive →
-upload → release per `IOS_DEPLOY.md`, then delete the backend bridge block and its page tests
-in the same phase. Until this ships, the known accepted gap stands: the old binary's voice
-session pins the backend's globally newest trip, not a user-scoped one.
+upload → release per `IOS_DEPLOY.md` (historical runbook), then delete the backend bridge block
+and its page tests in the same phase. Until this ships, the known accepted gap stands: any
+older binary's voice session pins the backend's globally newest trip, not a user-scoped one
+(direct Xcode installs carry the current `vbSetTrip` build, so the gap only bites stale
+installs).
 
 > **TODO (Phase 19, 2026-07-12):** Remove the mobile_voice page's TEMP latest-trip bridge:
 > the page self-fetches `/v1/sabre_tools/latest_trip_id` as its lowest-precedence `trip_id`

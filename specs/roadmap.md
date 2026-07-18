@@ -68,29 +68,9 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Update 2026-07-18 (Phase 39 shipped, QA'd, archived):** the outbound-email foundation is merged (PR #75), deployed, and QA-closed the same morning — domain **Verified** in Resend after the Squarespace preset replacement, and the deployed gated `POST /v1/email/test` landed in the operator's Gmail from `Cascade <info@talktomytrip.com>`; archived to [changelog.md](changelog.md) with dated evidence in the spec dir (`send-evidence.md`). Three accepted residuals recorded there: the planned apex SPF and null MX are unapplied (sending authenticates via DKIM + Resend's `send.` subdomain SPF; the null MX stays recommended hygiene), and `RESEND_API_KEY` rides as a plain env var rather than the spec-decided Secret Manager mount. Phase 40 builds its spoken offers on this module. Open order: **40 → 36 → 24**.
 
-## Phase 40: Agent email offers — capture per trip, itinerary and repair emails [x] COMPLETE (implementation; manual QA pending)
+**Update 2026-07-18 (Phase 40 shipped, QA'd, archived):** the agent email offers are merged (PR #76) with a same-morning close-out (PR #77 — spell-back address confirmation, departure-dated subjects, the on-file/correction flow), deployed, and **QA-closed on the deployed service** (spelled read-back verified live; "Your trip to Los Angeles — July 21" **delivered** in the Resend log; the first live run proved the Call 2 offer → watcher → send leg while exposing the doubled-letter bounce the close-out fixes); archived to [changelog.md](changelog.md). Standing operator note: the **Resend dashboard is the delivery validator** (README run sheet, step 2c). Open order: **36 → 24**.
 
-> **TODO (verbatim):** And this is a tool for that initial demo call that the agent can say, "Would you like me to send this to your email?" and then that person has to provide their email address. Also, on the repair trip part, have the agent say, "Hey, would you like an email of this?" and then be able to pull that email address from the initial booking. So each trip ID, if they provide an email address, has to be stored, Or if the transcript is stored, then just parse out the email again for when you send an update. It doesn't have to be exactly this way, but this is what I'm thinking.
-
-The conversational surface on top of Phase 39's send module:
-
-- An email-offer beat on the **initial booking call** ("Would you like me to send this to your email?") that collects and confirms the address by voice, and on the **repair results callback** ("Would you like an email of this?") that reuses the stored address — no re-ask when one is on file.
-- **Email address stored per trip ID** (the TODO's preferred shape; transcript re-parse is the noted fallback, not the plan) — exact storage seam decided at the `sdd-feature-spec` interview against the existing trip repositories.
-- Email content: the booked itinerary (booking call) and the repair summary with the rebooked flight — consistent with what Call 2 speaks, including the PayPal refund sentence when one fired.
-- Voice-safe handling of spoken addresses (the demo's known STT hazard) — confirm back before storing; a declined or ambiguous answer means no email, never a guessed address.
-- Completion: both offers work on the deployed service end-to-end (spoken yes → email arrives; spoken no → nothing sent, nothing stored beyond the decline).
-
-## Phase 36: Unlisted App Store recovery
-
-Recover the rejected v1.0 (3) submission as an unlisted final app without replacing the binary:
-
-- Keep **Pricing and Availability → App Distribution Methods** set to **Public** while applying; Apple's unlisted workflow starts from a public app record and changes the method to Unlisted only when the request is approved. Do not switch to Private/Custom App distribution.
-- Edit App Review Notes to say the app is a final limited-audience special-event release intended for Unlisted App Distribution (not a beta/TestFlight substitute), retain the non-expiring reviewer access code and complete test script, then resubmit the existing iOS 1.0 (3) item. **Do not upload a new build.**
-- Reply to the Guideline 3.2 message: agree that unlisted is the correct distribution method; explain that users are hackathon participants/judges on personal unmanaged devices rather than employees or clients of one Apple Business Manager organization; state that the unlisted request is being filed; include Apple ID `6789972026` and the submission ID above.
-- Submit Apple's authenticated **Unlisted App Distribution** request immediately after the app is resubmitted. State that the app is a final release for the event, distributed only by direct link, and protected by its access-code mechanism.
-- Submit an **expedited App Review request** for the resubmitted version immediately afterward. This qualifies as Apple's documented event-related case: name the DeepLearning.AI Voice AI Hackathon, its July 18, 2026 date and Mountain View location, the team's direct participation, and the live-demo requirement; include both Apple ID and submission ID and mention that the separate unlisted request is already filed.
-- Keep `DEMO_ACCESS_CODE` and the backend stable throughout re-review, monitor App Review messages, and answer any question immediately. On approval, verify the generated direct link on a clean device, record it in the runbook, and share it only with the event audience.
-- Completion means both the app version and unlisted request are approved and the direct App Store link installs successfully. If Apple does not finish before the event, leave the phase open and use TestFlight/Xcode plus the web demo; do not weaken the access gate or upload a replacement binary to chase the deadline.
+**Drop 2026-07-18 (Phase 36 cancelled — the Apple path is closed, Josh's call, event-day morning):** the unlisted App Store recovery is **removed unshipped** — Apple did not approve, and chasing re-review on event day is not worth it. No filings from the phase's punch list are pursued and no replacement binary goes up. This costs the demo nothing: `mission.md` #4 already made App Store presence a bonus, never a criterion, and the demo paths remain the web surfaces plus direct Xcode/TestFlight installs. Downstream effect: BACKLOG Phase 20's trigger (the TEMP-bridge removal "on Apple approval") no longer has an arming event — it stays backlogged until distribution is ever revisited, and Phase 37's booking-first device validation stays blocked behind it (its zero-quota rehearsal and device runs still ride Phase 24's Device QA bullet unchanged). Open order: **24** — the roadmap's last phase.
 
 ## Phase 24: Pre-event readiness
 
@@ -174,13 +154,15 @@ The residuals that survived Phase 17's completion, re-scoped at the 2026-07-13 e
   test was dropped at the 2026-07-16 evening replan — the guard itself was
   deliberately removed by commit `933f8e8` and PR evidence retired as a merge
   gate; see tech-stack § Deployment.)*
-- **Device QA** (kept as a pre-event item at the 2026-07-12 replan): the three acts on a
-  physical iPhone via Xcode install — does not touch the Phase 36 same-build unlisted recovery
+- **Device QA** (kept as a pre-event item at the 2026-07-12 replan; Xcode install is now
+  the app's *only* distribution path — the Apple/unlisted route was dropped 2026-07-18,
+  see the drop note above): the three acts on a physical iPhone via Xcode install
   (`SABRE_MODE=mock`; one run = 2 outbound calls, 10/day quota), sheet & gestures, edge
   cases (Phase 17 validation.md § 7). **Phase 37 rider (2026-07-16, archived to the
   changelog as implementation-complete):** the iOS cascade demo's manual passes ride here —
   the zero-quota rehearsal (tabs, clean-slate booking, accessibility, offline/resume) plus
   the yes-path (2 calls) and decline-path (1 call) device runs per
   `specs/2026-07-16-ios-cascade-demo/validation.md`; the booking-first device validation
-  stays blocked on backlogged Phase 20's TEMP-bridge removal.
+  stays blocked on backlogged Phase 20's TEMP-bridge removal (whose Apple-approval
+  trigger is gone with the drop — it waits on any future distribution decision).
 - Review the hardcoded dev Cloud Run URL in `APIConfig.swift`.
