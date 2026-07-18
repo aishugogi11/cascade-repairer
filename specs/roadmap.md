@@ -60,6 +60,23 @@ bullet, and the booking-first device validation remains **blocked, not waived** 
 Phase 20's TEMP-bridge removal (trigger: Phase 36's Apple approval) — per the promotion
 decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
+**Triage 2026-07-18 (TODO → roadmap, event-day morning):** the single inbox item — record Pallavi's shipped PayPal fare-difference refund (PR #71, commit `b31f594`, merged and live-verified 2026-07-17: sandbox payout batch `LJ4CP8V52G7RN`, 13 hermetic tests, full suite 572 green) in the changelog and constitution — promoted as **Phase 38**, one phase covering both edits, at the very top per Josh at the triage interview: it is fast, purely documentation, and the constitution should describe the demo the judges see today (Call 2 now speaks a refund sentence when the repair lands a cheaper fare). The phase's actual edits run through `sdd-changelog` (the changelog entry) and `sdd-replan` (the tech-stack reference) — this triage only schedules them. Open order: **38 → 36 → 24**.
+
+## [x] COMPLETE — Phase 38: Record the PayPal refund (changelog + constitution reference)
+
+> **TODO:** Look at this update to the app on integrating PayPal in the demo that my team member put together, and I want you to put it into the changelog and reference it in the constitution.
+> ```
+>  backend/api/demo.py                 |  22 +++++++++++++
+>  backend/api/paypal_client.py        | 136 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+>  backend/tests/test_paypal_client.py
+> ```
+
+Documentation-only reconciliation of already-shipped, already-QA'd work — no code changes:
+
+- **Changelog entry** (via `sdd-changelog` conventions): archive the PayPal fare-difference refund as a completed entry — PR #71 (`b31f594`, Pallavi G, merged 2026-07-17): when the repair lands a cheaper flight, the difference is sent via PayPal sandbox Payouts after repairs settle and one instruction sentence is appended to Call 2's purpose; the client never raises (a PayPal failure reports pending and the callback always fires); absent env vars = feature silently off, demo byte-identical (kill switch); one seam touched (`_call_back_with_results` in `demo.py`, +22 lines) with consent, concurrency, and repair paths untouched; live-verified (sandbox payout batch `LJ4CP8V52G7RN`), 13 hermetic tests, full suite 572 green.
+- **Constitution reference** (via `sdd-replan`): a tech-stack § Backend entry for `paypal_client.py` and the refund-on-callback behavior, including the env-var kill switch and the never-raises contract, so the demo orchestrator's description matches what Call 2 actually says today.
+- Completion means both files describe the shipped behavior and this phase is marked complete; nothing here touches `backend/`.
+
 ## Phase 36: Unlisted App Store recovery
 
 Recover the rejected v1.0 (3) submission as an unlisted final app without replacing the binary:

@@ -52,7 +52,7 @@ Run the test suite the same way CI does — inside the built container:
 
 ```bash
 docker compose build backend
-docker run --rm vocal-bridge-training-backend python -m pytest tests/ -v
+docker run --rm hackathon-vocal-bridge-backend python -m pytest tests/ -v
 ```
 
 Tests are hermetic: no GCP credentials or `OPENAI_API_KEY` required. The agent endpoints (`/v1/hello/agents*`) do need `OPENAI_API_KEY` set in the environment to return live results.
@@ -259,7 +259,10 @@ go-ahead, not at the break), cards animate broken → repairing → fixed, and t
 the flight card).
 
 **6. Call 2 arrives** (~35 s after consent) speaking the actual rebooked
-details and price delta.
+details and price delta. If the rebooked flight is **cheaper**, it also says
+the difference was already refunded to the traveler's PayPal (sandbox payout,
+PR #71). No refund sentence means the fare was equal/pricier — or the
+`PAYPAL_*` env vars are unset (the kill switch).
 
 **The "no" path** (second run, if quota allows): answer "no" on Call 1 —
 no repairs launch, the page shows the stand-down message, the Cancel button
