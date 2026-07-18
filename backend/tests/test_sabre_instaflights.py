@@ -434,7 +434,9 @@ def test_mock_west_to_east_preserves_pacific_wall_clock_order():
     """The criterion-14 regression: mock-mode SFO→JFK used to emit Pacific
     fiction clocks that the parser re-read as JFK-local, so arrivals landed
     'before' departures. The mock now speaks airport-local; the parsed PT
-    round trip is the classic spread, arrivals strictly after departures."""
+    round trip is the classic spread, arrivals strictly after departures.
+    Since Phase 41 the menu is diversity-selected cheapest-first: option one
+    is the UA $155 one-stop (06:15–11:20)."""
     options = _searched_options("SFO", "JFK")
 
     assert len(options) == 3
@@ -442,21 +444,23 @@ def test_mock_west_to_east_preserves_pacific_wall_clock_order():
         depart = _pt_instant(option.depart_date, option.depart_time)
         arrive = _pt_instant(option.arrive_date, option.arrive_time)
         assert arrive > depart
-    assert options[0].depart_time == "08:00"
-    assert options[0].arrive_time == "10:05"
-    assert "leaves at 8 AM and lands at 10:05 AM" in options[0].spoken
+    assert options[0].depart_time == "06:15"
+    assert options[0].arrive_time == "11:20"
+    assert "leaves at 6:15 AM and lands at 11:20 AM" in options[0].spoken
 
 
 def test_mock_east_to_west_parses_to_the_same_pt_spread():
     """Direction independence: the reverse pair round-trips to the identical
-    classic PT spread — the fiction is the instant, not the string."""
+    classic PT spread — the fiction is the instant, not the string. The
+    order is the Phase 41 diversity order (cheapest representative first:
+    UA $155, AA $187.60, DL $242), identical in both directions."""
     east_west = _searched_options("JFK", "SFO")
     concierge._SESSION_FLIGHT_OPTIONS.pop("room-1", None)
     west_east = _searched_options("MSP", "SFO")
 
     for options in (east_west, west_east):
         assert [(o.depart_time, o.arrive_time) for o in options] == [
-            ("08:00", "10:05"), ("11:30", "13:40"), ("06:15", "11:20"),
+            ("06:15", "11:20"), ("08:00", "10:05"), ("11:30", "13:40"),
         ]
         assert all(o.depart_date == _DAY for o in options)
         assert all(o.arrive_date == _DAY for o in options)
@@ -1276,6 +1280,9 @@ def test_pending_options_payload_is_the_phase_21_contract_plus_rich_keys():
         }
         assert isinstance(option["price"], int)  # rounded whole dollars
         assert "M" in option["depart_time"]  # spoken 12-hour label
-        assert option["airline_name"] == "American"  # a name, never a code
+    # Names, never codes — one per carrier in the Phase 41 diversity order
+    # (cheapest representative first).
+    names = [o["airline_name"] for o in block["options"]]
+    assert names == ["United", "American", "Delta"]
     durations = [o["duration"] for o in block["options"]]
-    assert durations == ["2h 5m", "2h 10m", "5h 5m"]  # the mock's spread
+    assert durations == ["5h 5m", "2h 5m", "2h 10m"]  # the mock's spread

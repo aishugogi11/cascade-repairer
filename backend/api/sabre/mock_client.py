@@ -141,11 +141,16 @@ class MockSabreClient:
     # rich fields — cabin letter and whole-journey ElapsedTime minutes
     # (consistent with the fiction clocks) — and the one-stop variant is a
     # genuine two-segment connection through a hub, so layover_airports has
-    # mock data to exercise: (depart, arrive, stops, price, cabin, elapsed).
+    # mock data to exercise:
+    # (depart, arrive, stops, price, cabin, elapsed, carrier).
+    # Phase 41: three distinct carriers so the airline-diversity selection
+    # (select_airline_diverse) fires deterministically in mock mode — the
+    # hermetic suite and zero-quota rehearsals see a multi-airline menu,
+    # reordered cheapest-representative first (UA $155, AA $187.60, DL $242).
     _INSTA_VARIANTS = [
-        ("08:00:00", "10:05:00", 0, 187.6, "Y", 125),
-        ("11:30:00", "13:40:00", 0, 242.0, "J", 130),
-        ("06:15:00", "11:20:00", 1, 155.0, "Y", 305),
+        ("08:00:00", "10:05:00", 0, 187.6, "Y", 125, "AA"),
+        ("11:30:00", "13:40:00", 0, 242.0, "J", 130, "DL"),
+        ("06:15:00", "11:20:00", 1, 155.0, "Y", 305, "UA"),
     ]
 
     # The connecting variant's Pacific-fiction leg clocks: origin→hub,
@@ -169,14 +174,15 @@ class MockSabreClient:
         return fiction.astimezone(zone).strftime("%Y-%m-%dT%H:%M:%S")
 
     def _segment(self, day: str, depart: str, arrive: str, dep_airport: str,
-                 arr_airport: str, flight_number: int) -> "shapes.FlightSegment":
+                 arr_airport: str, flight_number: int,
+                 carrier: str = "AA") -> "shapes.FlightSegment":
         return shapes.FlightSegment(
             DepartureAirport=shapes.SegmentAirport(LocationCode=dep_airport),
             ArrivalAirport=shapes.SegmentAirport(LocationCode=arr_airport),
             DepartureDateTime=self._airport_local(day, depart, dep_airport),
             ArrivalDateTime=self._airport_local(day, arrive, arr_airport),
             FlightNumber=flight_number,
-            MarketingAirline=shapes.MarketingAirline(Code="AA"),
+            MarketingAirline=shapes.MarketingAirline(Code=carrier),
             StopQuantity=0,
         )
 
@@ -194,21 +200,21 @@ class MockSabreClient:
         hub = "DFW" if "DFW" not in (origin, dest) else "ORD"
         flight_number = int(hashlib.sha256(f"{origin}{dest}".encode()).hexdigest(), 16) % 900 + 100
         itineraries = []
-        for i, (depart, arrive, stops, price, cabin, elapsed) in enumerate(
+        for i, (depart, arrive, stops, price, cabin, elapsed, carrier) in enumerate(
             self._INSTA_VARIANTS
         ):
             if stops == 0:
                 segments = [
                     self._segment(day, depart, arrive, origin, dest,
-                                  flight_number + i * 7)
+                                  flight_number + i * 7, carrier)
                 ]
             else:
                 (leg1_dep, leg1_arr), (leg2_dep, leg2_arr) = self._CONNECTION_LEGS
                 segments = [
                     self._segment(day, leg1_dep, leg1_arr, origin, hub,
-                                  flight_number + i * 7),
+                                  flight_number + i * 7, carrier),
                     self._segment(day, leg2_dep, leg2_arr, hub, dest,
-                                  flight_number + i * 7 + 1),
+                                  flight_number + i * 7 + 1, carrier),
                 ]
             itineraries.append(
                 shapes.PricedItinerary(
