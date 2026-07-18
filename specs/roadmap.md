@@ -74,6 +74,116 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Drop 2026-07-18 (Phase 36 cancelled — the Apple path is closed, Josh's call, event-day morning):** the unlisted App Store recovery is **removed unshipped** — Apple did not approve, and chasing re-review on event day is not worth it. No filings from the phase's punch list are pursued and no replacement binary goes up. This costs the demo nothing: `mission.md` #4 already made App Store presence a bonus, never a criterion, and the demo paths remain the web surfaces plus direct Xcode/TestFlight installs. Downstream effect: BACKLOG Phase 20's trigger (the TEMP-bridge removal "on Apple approval") no longer has an arming event — it stays backlogged until distribution is ever revisited, and Phase 37's booking-first device validation stays blocked behind it (its zero-quota rehearsal and device runs still ride Phase 24's Device QA bullet unchanged). Open order: **24** — the roadmap's last phase.
 
+**Triage 2026-07-18 (TODO → roadmap, fourth of the day — hackathon submission review):** the one inbox item — honestly review the "version 1" hackathon submission text (with the submitted video's transcript as evidence), fix it up as needed, and save the result as `IMPLEMENTATION_DETAILS.md` at the repo root for the judging form — promoted as **Phase 42** at the very top per Josh at the triage interview (promote now, ahead of Phase 24, one phase: one deliverable, one pass — the review and the file are not worth splitting). It is judging-facing on submission day, so it outranks the time-gated readiness gate the same way Phases 38–41 did. The original TODO text — including the full version-1 draft and video transcript — is preserved verbatim in the phase's blockquote and collapsed blocks below (`TODO.md` is gitignored; the roadmap is the only durable copy). Open order: **42 → 24**.
+
+## [x] COMPLETE (implementation; manual QA pending) Phase 42: Hackathon submission review (IMPLEMENTATION_DETAILS.md)
+
+> **TODO:** submitting the demo to the Hackathon now. Two artifacts for you to review: version 1 and transtript.  The goal is to give honest, effective, review of version 1, and fix up as needed. Implementation details to the submission for the Hackathon judging.  Save this a IMPLEMENATION_DETAILS.md in the root.  If version 1 is effective enough, great!  If need tweaks, update.
+>
+> ```
+> for judging details
+> Project Description : IDEA , Implementation details and how you incorporated vocal bridge and sabre
+> ```
+
+<details>
+<summary>Version 1 submission draft from the TODO item (verbatim — the text under review)</summary>
+
+```
+Cascade Repairer — Team PAJA — https://talktomytrip.com/
+IDEA
+Trips don't fail because of one disruption. They fail because travelers are left to coordinate everything that follows. One cancelled flight silently breaks the rest of the trip. Cascade Repairer is a voice agent that notices the break, calls the traveler first, asks permission, and repairs the trip while they're still on the phone: the flight is rebooked on live Sabre inventory, the hotel is rechecked against the new flight, and the agent calls back with the new flight, the fare difference, and a PayPal refund already sent when the new fare is cheaper. No app opened, nothing changed without a spoken yes.
+IMPLEMENTATION
+A traveler books a real flight by voice through a WebRTC orb on the live dashboard (https://talktomytrip.com/). When the flight is cancelled, the system places an outbound phone call BEFORE touching any data: the agent names the exact cancelled flight, confirms nothing has been changed, and asks one question. A consent classifier reads the answer from the live call transcript; anything short of a clear yes stands down and touches nothing. On yes, repairs launch as parallel background tasks: the flight re shops live inventory with a guarantee the replacement is a different flight. The dashboard flips reservaration card from broken to repairing to fixed in real time, with the original flight struck through beside its replacement. When repairs settle, the agent calls back, speaks the new flight and the fare difference, and if the rebooked fare is cheaper, the difference has already been refunded to the traveler's PayPal via the Payouts API (sandbox), spoken on the call and visible in the account. The agent also handles explicit language switching mid conversation, e.g. summarizing the trip in Japanese on request, then returning to English. Stack: FastAPI on GCP Cloud Run with containerized CI/CD, BigQuery status lifecycle driving both the agent and the live screen, and a full hermetic test suite (570+ tests).
+HOW WE USED VOCAL BRIDGE
+Vocal Bridge is the entire voice surface: the WebRTC booking orb, and two proactive outbound phone calls placed by the backend: the disruption call that captures spoken consent from the live transcript, and the results callback that speaks the true post repair state. The agent runs the Concierge hybrid pattern: a fast conversational foreground with background reasoning and tools, so it keeps answering questions while repairs run. Multilingual switching is inherited from the platform and gated by explicit request in our prompt.
+HOW WE USED SABRE
+OAuth token flow plus InstaFlights Search on CERT, returning real priced itineraries with airline, cabin, and duration. The repair path re shops live Sabre inventory and guarantees a different flight than the cancelled one. Flight shopping and re shopping are live.
+ROADMAP
+The repair engine is disruption agnostic: delays, gate changes, and hotel failures fire the same consent call, parallel repair, and callback. Next: the remaining trip legs (ground transport, dining, experiences), full PayPal checkout on booking with true same transaction refunds, automated check in, and company scale group trips.
+
+The code is 100% deployed to the Cloud (docker container) in GCP.  Domain name purchased www.talktomytrip.com, and email working for iteratry. Technologies used (docker, html/javascript, python, fastapi)
+
+Sabre API (InstaFlights (Flight Search API v1) )
+
+During call, agent using OpenAI SDK "Conceirage Agent" with tool calling  (search_flights(), book_flight(), complete_trip(), trip_status(), destination_info(), check_return_flights()) to do everything from booking to what to do in the destination city.
+
+Customer verifies or not if they are open to alternate flights, transcript get classified using OpenAI SDK "ConsentClassifier" Agent. If confirms "yes", backend calls to Sabre API (InstaFlights (Flight Search API v1) ) to find altnative.
+
+
+State sequence booked → broken + awaiting_consent → granted → repairing ×5 → fixed → results callback
+
+1. Make a web call (browser microphone WebRTC) using VB <insert pattern here (1, 2, or 3)> to find flights using Sabre API (InstaFlights (Flight Search API v1) ).  Of the flight options the VB agent communciates, the customer picks the one they want.  During call, agent using OpenAI SDK "Conceirage Agent" with tool calling  (search_flights(), book_flight(), complete_trip(), trip_status(), destination_info(), check_return_flights()) to do everything from booking to what to do in the destination city.  Booking is show on webpage.
+
+2. Trigger issue with the flight via the webpage.  VB (VB ClI) calls the customer letting them know.  Customer verifies or not if they are open to alternate flights, transcript get classified using OpenAI SDK "ConsentClassifier" Agent. If confirms "yes", backend calls to Sabre API (InstaFlights (Flight Search API v1) ) to find altnative.
+
+3. Live updates on web page of trip repairs (concurrency via asycio event loop for all).  When successful, VB (VB ClI) call the customer letting them know.  Mock concurrecy calls for Hotel, Ground, Dining, Experience.  ** The cancelled flight is removed from possible list of rebooked flights.  ** Picks the closest time flight to original *** Calculates price delta.  Paypal intergration and credited is price savings.  Emails available wired up and working for initial booking and the fixing.
+```
+
+</details>
+
+<details>
+<summary>Transcript of the submitted video (verbatim — the evidence artifact)</summary>
+
+```
+0:000 secondsCascade Repair. Trips don't fail because of one disruption. They fail because travelers are left to coordinate everything that follows. Watch this one break and fix itself.
+0:2222 secondsHi there. How can I help you today?
+0:2424 secondsI'd like to book a trip from JFK to LAX on August 1st.
+0:3131 secondsLet me pull up those flight details for you. I found two solid options for you.
+0:3737 secondsJetBlue has a non-stop flight leaving at 2:45 in the afternoon and arriving at 5:57 p.m. for about $198.
+0:4545 secondsOr American has a non-stop at 3:00 a.m.
+0:4747 secondsin the morning, arriving around 9:01 a.m. for about $278. I'd like the American airline flight.
+0:5757 secondsGot it. Let me lock that in for you.
+1:041 minute, 4 secondsYour flight is all set. Would you like me to help with the rest? Maybe a hotel, a ride, dinner plans. Can you email me the itinerary?
+1:131 minute, 13 secondsSure thing. Let me get that sorted for you. I can do that. Could you share the email address you'd like me to use?
+1:191 minute, 19 secondsJ O H J A N Zengmail.com.
+1:271 minute, 27 secondsI'll send it over now. Just a moment.
+1:301 minute, 30 secondsJust to confirm, the email is josh janzen@gmail.com. Did I get that right?
+1:361 minute, 36 secondsThat is correct. Also, could you repeat the itinerary in Japanese so my team can understand it?
+1:451 minute, 45 secondsGot it. I'm on it. Please hold while I gather that info.
+1:521 minute, 52 secondsJFK.
+1:591 minute, 59 secondsThank you. That sounds good. Sayara, glad I could help. Sayanara, to you, too. I'll end our call now.
+2:112 minutes, 11 secondsNow, we're going to simulate.
+2:132 minutes, 13 secondsFirst of all, let's take a look at the email we just received. And there it is.
+2:182 minutes, 18 secondsNow, we're going to simulate a flight cancellation.
+2:402 minutes, 40 secondstravel agent calling. Your flight from New York to Los Angeles on August 1st has been cancelled and I haven't started any rebooking yet. Would you like me to
+2:482 minutes, 48 secondshandle that for you? Oh yes, please re please rebook my flight.
+2:542 minutes, 54 secondsGot it. I'm starting the rebbooking right now. You can watch your itinerary update in real time and I'll give you a call back when it's all set.
+3:013 minutes, 1 secondThank you. Thank you. No problem. I'll get started now.
+3:093 minutes, 9 secondsOkay. Now, in the back end, there should be some API calls, and it's going to attempt to fix the flight or find a
+3:183 minutes, 18 secondsrebooking for us. And I should get a phone call back if everything works correctly. And we can watch it online happen as well. You
+3:273 minutes, 27 secondscan see it's repairing and it found another flight with a different airline. Let's see if Vocal Bridge gives us a call here.
+3:433 minutes, 43 secondsThis is your travel agent calling back.
+3:453 minutes, 45 secondsYour new flight's all set. Jeff non-stop to LA, landing a 557 and is even $80 cheaper. I've already refunded the
+3:533 minutes, 53 secondsdifference to your PayPal. The live itinerary screen has all the details. Would you like an email summary as well?
+3:583 minutes, 58 secondsOh yeah, send an email. And that's great that we actually saved money. Thank you so much for your help.
+4:044 minutes, 4 secondsHappy to help. Email's on its way to the address he gave. Have a fantastic trip and take care.
+4:124 minutes, 12 secondsAll right, let's check out PayPal.
+4:154 minutes, 15 secondsSo, I'm going to go ahead and refresh this to see if our update happened.
+4:244 minutes, 24 secondsAnd there it is right there for $80 refund. So, that's good.
+4:314 minutes, 31 secondsAnd let's see if the repaired trip came through as well. And there we go. There's the repaired trip. So that's it.
+4:394 minutes, 39 secondsYou saw the whole thing from start to finish. Booking and fixing um using Vocal Bridge, Saber, and PayPal. Hope you enjoyed it. Thank you.
+```
+
+</details>
+
+The judging form asks for one Project Description: *"IDEA, Implementation details and how you
+incorporated vocal bridge and sabre."* Scope, one pass:
+
+- **Honest review of version 1** against the shipped system (tech-stack, changelog, README)
+  and the video transcript: verify every factual claim (test count, tool list — the shipped
+  Concierge has *eight* tools including `email_itinerary`; the state sequence; "hotel is
+  rechecked" vs. the mock category repairs; "live Sabre inventory" phrasing vs. the real
+  shopping / mock PNR-write reality), fix typos and garbled phrases ("reservaration",
+  "Conceirage", "iteratry", "altnative"), and resolve the literal
+  `<insert pattern here (1, 2, or 3)>` placeholder using the README's course-integration-
+  pattern analysis (closest to Pattern 2, voice for an existing agent, on the booking orb).
+- **Produce `IMPLEMENTATION_DETAILS.md` at the repo root** — the final submission text,
+  structured for the judging rubric (IDEA / implementation / how Vocal Bridge was used /
+  how Sabre was used / roadmap), honest about what is real vs. mocked.
+- **Verdict recorded**: if version 1 is effective as-is, say so and ship it with minimal
+  fixes; if it needs tweaks, the file carries the improved version. Either way the review's
+  reasoning is captured in the phase's spec directory.
+
 ## [x] COMPLETE Phase 41: Airline-diverse flight options
 
 > **TODO:** take a look at the demo results from the original API, start with instead of three options, pick 15 options.  and only pick one airline each.  For example for JFK -> LAX, have the api return up to 15 results (see below).  The results provided to the agent to talk to the customer, would be 1 Jet Blue and one AA. If there was also for example Delta on that list, would also included delta.
