@@ -74,11 +74,140 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Drop 2026-07-18 (Phase 36 cancelled — the Apple path is closed, Josh's call, event-day morning):** the unlisted App Store recovery is **removed unshipped** — Apple did not approve, and chasing re-review on event day is not worth it. No filings from the phase's punch list are pursued and no replacement binary goes up. This costs the demo nothing: `mission.md` #4 already made App Store presence a bonus, never a criterion, and the demo paths remain the web surfaces plus direct Xcode/TestFlight installs. Downstream effect: BACKLOG Phase 20's trigger (the TEMP-bridge removal "on Apple approval") no longer has an arming event — it stays backlogged until distribution is ever revisited, and Phase 37's booking-first device validation stays blocked behind it (its zero-quota rehearsal and device runs still ride Phase 24's Device QA bullet unchanged). Open order: **24** — the roadmap's last phase.
 
-## Phase 41: Airline-diverse flight options
+## [x] COMPLETE (implementation; manual QA pending) Phase 41: Airline-diverse flight options
 
 > **TODO:** take a look at the demo results from the original API, start with instead of three options, pick 15 options.  and only pick one airline each.  For example for JFK -> LAX, have the api return up to 15 results (see below).  The results provided to the agent to talk to the customer, would be 1 Jet Blue and one AA. If there was also for example Delta on that list, would also included delta.
 >
-> *(The "see below" sample is condensed here, per the pasted-output precedent of the 2026-07-18 email triage — the raw dump lives in this triage's `TODO.md` git history: `HTTP 200 | route JFK -> LAX on 2026-08-01 — 14 priced itineraries`, twelve JetBlue — nonstops at $198.40 and FLL one-stops at $246.20 — plus two American nonstops at $278.40.)*
+> *(The "see below" sample, condensed: `HTTP 200 | route JFK -> LAX on 2026-08-01 — 14 priced itineraries`, twelve JetBlue — nonstops at $198.40 and FLL one-stops at $246.20 — plus two American nonstops at $278.40. `TODO.md` is gitignored, so the raw dump is preserved verbatim in the collapsed block below, not in git history.)*
+
+<details>
+<summary>Raw sample response from the TODO item (verbatim)</summary>
+
+```
+HTTP 200 | route JFK -> LAX on 2026-08-01 
+
+14 priced itineraries
+
+Jetblue Airways Corporation (B6) flight 3988
+  Depart:   Sat Aug 1, 5:45 PM  JFK
+  Arrive:   Sat Aug 1, 5:57 PM  LAX
+  Duration: 3h 12m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3997
+  Depart:   Sat Aug 1, 5:50 PM  JFK
+  Arrive:   Sat Aug 1, 5:59 PM  LAX
+  Duration: 3h 9m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3990
+  Depart:   Sat Aug 1, 5:50 PM  JFK
+  Arrive:   Sat Aug 1, 5:59 PM  LAX
+  Duration: 3h 9m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3992
+  Depart:   Sat Aug 1, 5:55 PM  JFK
+  Arrive:   Sat Aug 1, 6:00 PM  LAX
+  Duration: 3h 5m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3994
+  Depart:   Sat Aug 1, 6:00 PM  JFK
+  Arrive:   Sat Aug 1, 6:10 PM  LAX
+  Duration: 3h 10m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3705
+  Depart:   Sat Aug 1, 6:00 PM  JFK
+  Arrive:   Sat Aug 1, 7:00 PM  LAX
+  Duration: 4h 0m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3707
+  Depart:   Sat Aug 1, 6:30 PM  JFK
+  Arrive:   Sat Aug 1, 7:30 PM  LAX
+  Duration: 4h 0m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3708
+  Depart:   Sat Aug 1, 6:45 PM  JFK
+  Arrive:   Sat Aug 1, 7:00 PM  LAX
+  Duration: 3h 15m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3709
+  Depart:   Sat Aug 1, 7:00 PM  JFK
+  Arrive:   Sat Aug 1, 7:50 PM  LAX
+  Duration: 3h 50m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     198.4 USD
+
+Jetblue Airways Corporation (B6) flight 3226
+  Depart:   Sat Aug 1, 7:30 PM  JFK
+  Arrive:   Sat Aug 1, 8:00 PM  LAX
+  Duration: 3h 30m
+  Stops:    1 stop(s) via FLL
+    - B63226 JFK->FLL dep Sat Aug 1, 7:30 PM
+    - B63664 FLL->LAX dep Sat Aug 1, 10:30 PM
+  Cabin:    Economy ('Y')
+  Fare:     246.2 USD
+
+Jetblue Airways Corporation (B6) flight 3223
+  Depart:   Sat Aug 1, 7:30 PM  JFK
+  Arrive:   Sat Aug 1, 8:00 PM  LAX
+  Duration: 3h 30m
+  Stops:    1 stop(s) via FLL
+    - B63223 JFK->FLL dep Sat Aug 1, 7:30 PM
+    - B63664 FLL->LAX dep Sat Aug 1, 10:30 PM
+  Cabin:    Economy ('Y')
+  Fare:     246.2 USD
+
+Jetblue Airways Corporation (B6) flight 3225
+  Depart:   Sat Aug 1, 7:40 PM  JFK
+  Arrive:   Sat Aug 1, 8:00 PM  LAX
+  Duration: 3h 20m
+  Stops:    1 stop(s) via FLL
+    - B63225 JFK->FLL dep Sat Aug 1, 7:40 PM
+    - B63664 FLL->LAX dep Sat Aug 1, 10:30 PM
+  Cabin:    Economy ('Y')
+  Fare:     246.2 USD
+
+American Airlines (AA) flight 171
+  Depart:   Sat Aug 1, 6:00 AM  JFK
+  Arrive:   Sat Aug 1, 9:01 AM  LAX
+  Duration: 6h 1m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     278.4 USD
+
+American Airlines (AA) flight 33
+  Depart:   Sat Aug 1, 7:05 AM  JFK
+  Arrive:   Sat Aug 1, 10:07 AM  LAX
+  Duration: 6h 2m
+  Stops:    Non-stop
+  Cabin:    Economy ('Y')
+  Fare:     278.4 USD
+```
+
+</details>
 
 Today `search_flights` keeps the top 2–3 parsed itineraries, so a JetBlue-heavy cache
 (the observed pull above) speaks a single-carrier menu even when other airlines have

@@ -59,6 +59,7 @@ from api.flight_options import (  # noqa: F401 — re-export surface
     FlightOption,
     fmt_duration,
     option_timestamps,
+    select_airline_diverse,
 )
 from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
@@ -384,12 +385,21 @@ _UNSUPPORTED_MARKET_LINE = (
     "one, something like San Francisco to New York?"
 )
 
+# Phase 41: the guided-booking fetch/parse ceiling — a pool wide enough for
+# select_airline_diverse to find every carrier the cache holds. Deliberately
+# a concierge-local policy: shapes.InstaFlightsRequest.limit keeps its
+# default (10) so the repair re-shop's request is byte-identical to pre-41.
+_SEARCH_POOL_SIZE = 15
+
 
 async def search_flights_impl(
     session_id: str, origin: str, destination: str, depart_date: str
 ) -> str:
-    """Search flights and offer 2–3 options by voice — the tool body, kept a
-    plain function for tests (the fix_trip_impl pattern). Stores the options
+    """Search flights and offer up to three options by voice — one per
+    distinct airline when the cache holds several (Phase 41: a 15-itinerary
+    pool through select_airline_diverse; a single-carrier pool degrades to
+    the classic response-order top three). The tool body, kept a plain
+    function for tests (the fix_trip_impl pattern). Stores the options
     per session so book_flight can resolve 'option one'. Every failure path
     returns a speakable string — a raising tool kills the spoken turn."""
     origin = (origin or "").strip().upper()
@@ -428,9 +438,13 @@ async def search_flights_impl(
                 origin=origin,
                 destination=destination,
                 departuredate=depart_date,
+                limit=_SEARCH_POOL_SIZE,
             )
         )
-        options = _parse_instaflights_options(search, origin, destination)
+        pool = _parse_instaflights_options(
+            search, origin, destination, max_options=_SEARCH_POOL_SIZE
+        )
+        options = select_airline_diverse(pool)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         _clear_search_state()
         return _SEARCH_ERROR_LINE

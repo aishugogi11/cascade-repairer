@@ -15,7 +15,7 @@ offset-less airport-local upstream in real mode, declared-Pacific fiction in
 mock mode (the Phase 19 discipline).
 """
 from datetime import date, datetime
-from typing import List, Set, Tuple
+from typing import Dict, List, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, model_validator
@@ -176,9 +176,12 @@ def _spoken_option(option_number: int, carrier: str, stops: int, depart: str,
 
 def _parse_instaflights_options(
     search: shapes.InstaFlightsResponse, origin: str, destination: str,
+    max_options: int = _MAX_SPOKEN_OPTIONS,
 ) -> List[FlightOption]:
-    """Walk PricedItineraries in response order into at most
-    _MAX_SPOKEN_OPTIONS speakable options.
+    """Walk PricedItineraries in response order into at most `max_options`
+    speakable options (default _MAX_SPOKEN_OPTIONS — the repair re-shop's
+    unchanged contract; the concierge passes a larger pool ceiling and
+    applies select_airline_diverse on the result, Phase 41).
 
     InstaFlights times are offset-less airport-local, so each end is
     localized to its own airport's zone and converted to Pacific before
@@ -193,7 +196,7 @@ def _parse_instaflights_options(
     options: List[FlightOption] = []
     offered: Set[Tuple] = set()
     for itinerary in search.PricedItineraries:
-        if len(options) >= _MAX_SPOKEN_OPTIONS:
+        if len(options) >= max_options:
             break
         od_option = (
             itinerary.AirItinerary.OriginDestinationOptions
@@ -272,3 +275,44 @@ def _parse_instaflights_options(
             )
         )
     return options
+
+
+def _fare_depart_key(option: FlightOption) -> Tuple[float, str, str]:
+    """Cheapest-first, tie-break earliest PT departure. The date/time
+    strings are zero-padded PT, so lexicographic compare is chronological."""
+    return (option.price, option.depart_date, option.depart_time)
+
+
+def select_airline_diverse(
+    options: List[FlightOption], max_airlines: int = _MAX_SPOKEN_OPTIONS,
+) -> List[FlightOption]:
+    """Phase 41: from a parsed pool, one option per distinct airline — each
+    carrier's cheapest itinerary (tie: earliest PT departure), spoken
+    cheapest-representative first, at most `max_airlines` airlines. Applied
+    only by the guided-booking search (concierge); the repair re-shop never
+    calls this — its closest-arrival pick is a different contract.
+
+    A single-carrier pool degrades to the pre-41 behavior exactly: the
+    first `max_airlines` options in response order, numbering untouched.
+    Selected options are renumbered 1..N with `spoken` regenerated so
+    'option one/two' always matches the offered list; every other field
+    carries over unchanged."""
+    if len({option.airline for option in options}) <= 1:
+        return options[:max_airlines]
+    best: Dict[str, FlightOption] = {}
+    for option in options:
+        current = best.get(option.airline)
+        if current is None or _fare_depart_key(option) < _fare_depart_key(current):
+            best[option.airline] = option
+    representatives = sorted(best.values(), key=_fare_depart_key)[:max_airlines]
+    selected = []
+    for number, option in enumerate(representatives, start=1):
+        carrier = option.airline_name or airline_name(option.airline)
+        selected.append(option.model_copy(update={
+            "option_number": number,
+            "spoken": _spoken_option(
+                number, carrier, option.stops, option.depart_time,
+                option.arrive_time, option.price,
+            ),
+        }))
+    return selected
