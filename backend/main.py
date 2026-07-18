@@ -23,6 +23,7 @@ from api.legal import legal
 from api.mobile_voice import mobile_voice
 from api.access_gate import access_gate_middleware
 from api.auth import auth
+from api.email_api import email_api
 
 
 app = FastAPI(
@@ -121,6 +122,12 @@ app.include_router(
     auth,
     prefix="/v1/auth",
     tags=["auth"],
+)
+
+app.include_router(
+    email_api,
+    prefix="/v1/email",
+    tags=["email"],
 )
 
 if __name__ == "__main__":
