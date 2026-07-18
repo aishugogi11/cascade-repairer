@@ -66,7 +66,7 @@ decision above, that gate outlives the phase heading. Open order: **36 → 24**.
 
 **Triage 2026-07-18 (TODO → roadmap, second of the day — outbound email):** the one inbox item — outbound-only transactional email from `info@talktomytrip.com` with an agent email-offer beat on both demo calls — promoted as **two phases at the very top per Josh at the triage interview** (promote now, ahead of everything, two-phase split): **Phase 39** is the deliverability foundation (Resend + DNS + a guarded send module; no agent surface), **Phase 40** is the agent tool (email capture per trip, the two spoken offers, itinerary/repair email content). Triage finding worth flagging early: the domain's current Squarespace "Email Security" preset records (`v=spf1 -all`, DMARC `p=reject; sp=reject; adkim=s; aspf=s`, an empty DKIM key) hard-fail **all** mail from the domain today and directly conflict with the planned records — Phase 39 must replace them, not add alongside. Open order: **39 → 40 → 36 → 24**.
 
-## Phase 39: Outbound email foundation — talktomytrip.com (Resend + DNS + send module)
+## Phase 39: Outbound email foundation — talktomytrip.com (Resend + DNS + send module) [x] COMPLETE (implementation; manual QA pending)
 
 > **TODO (verbatim):** # Email Spec — talktomytrip.com
 >
