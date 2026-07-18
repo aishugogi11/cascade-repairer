@@ -42,7 +42,9 @@ from pydantic import BaseModel
 
 from api import concurrency_core as core
 from api import consent
+from api import trip_emails
 from api.concurrency_agent import session_snapshot
+from api.email_client import send_email
 # Re-exported so concierge.FlightOption / concierge._parse_instaflights_options
 # (and every existing caller and test) keep resolving after the Phase 29
 # extract into the shared, cycle-free flight_options module (decision 1).
@@ -109,7 +111,16 @@ BASE_INSTRUCTIONS = (
     "choose, call book_flight with that option number and confirm the "
     "booking in one short sentence, then offer to arrange the rest of the "
     "trip; when they agree, call complete_trip and tell them the pieces are "
-    "being added now. Never call search_flights or book_flight when a trip "
+    "being added now. After a booking is confirmed, offer exactly once: "
+    "'Would you like me to send this to your email?' If they want it, have "
+    "them say their email address, turn the spoken form into a standard "
+    "written address — 'at' becomes the at sign, 'dot' becomes a period — "
+    "then read it back and ask if you got it right. Only when they clearly "
+    "confirm the address, call email_itinerary with it. If they decline "
+    "the offer, or never clearly confirm the address, drop the subject — "
+    "never guess or invent an address, never call email_itinerary with an "
+    "unconfirmed one, and don't offer again. "
+    "Never call search_flights or book_flight when a trip "
     "is already booked; offer fix_trip or answer questions about the "
     "existing trip instead. When a traveler with a booked trip asks about "
     "getting back or getting home ('is there a way to get home', 'flights "
@@ -949,6 +960,87 @@ async def check_return_flights_impl(
         return _return_fallback(route)
 
 
+# --- email offers (Phase 40) — the booking-call itinerary email ---------------
+
+# A conservative shape check — the code backstop behind the instructions'
+# read-back-and-confirm contract (validity is code, adherence is
+# instructions — the Phase 34 split). Anything it rejects gets a spoken
+# re-ask, never a stored guess: spoken email capture is the demo's known
+# STT hazard.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+
+_EMAIL_REASK_LINE = (
+    "I want to get that address exactly right — could you say it once "
+    "more, maybe spelling out the part before the at sign?"
+)
+_EMAIL_SENT_LINE = "Done — your itinerary is on its way to your inbox."
+_EMAIL_SEND_FAILED_LINE = (
+    "I've saved your address, but the email didn't go through just now — "
+    "ask me to try again in a minute."
+)
+_EMAIL_ERROR_LINE = (
+    "Something went wrong sending that email — give me a second and ask "
+    "me again."
+)
+
+
+async def email_itinerary_impl(session_id: str, email_address: str) -> str:
+    """Store the traveler's confirmed address for their trip and email the
+    booked itinerary — the tool body, kept a plain function for tests.
+
+    Voice-safe by contract: the instructions make the agent read the
+    address back and get an explicit yes BEFORE calling this; the shape
+    check here is the code backstop, and a malformed capture gets a
+    re-ask, never a stored guess. The address stores before the send
+    (decision 3) so the repair callback can reuse it even when this send
+    fails, and the send status is spoken honestly — never "sent" when the
+    module said otherwise. Nothing bookable is touched and nothing is
+    written to the repositories. Failures return speakable strings — a
+    raising tool kills the spoken turn."""
+    try:
+        context, speakable_error = await ensure_trip_context(session_id)
+        if speakable_error:
+            return speakable_error
+        address = (email_address or "").strip().lower()
+        if not _EMAIL_RE.match(address):
+            return _EMAIL_REASK_LINE
+        trip = context.trip
+        trip_emails.store(trip.trip_id, address)
+        # Fresh items read (the trip_status rule): build-out legs land
+        # after the pin, and the email carries whatever exists at send
+        # time. The pinned items are the fallback — the pin guarantees
+        # they exist, so a failed read still makes an honest email.
+        items = context.items
+        try:
+            success, fresh, _error = await asyncio.to_thread(
+                itinerary_items.list_items_for_trip, trip.trip_id
+            )
+            if success and fresh:
+                items = fresh
+        except Exception:  # noqa: BLE001 — cached items still make an email
+            pass
+        # Call-time import: email_content imports call_purposes, which
+        # imports this module — top-importing it here would be a cycle
+        # (the _tavily_client call-time-import precedent).
+        from api import email_content
+
+        content = email_content.build_itinerary_email(trip, items)
+        result = await send_email(
+            to=address,
+            subject=content.subject,
+            html=content.html,
+            text=content.text,
+        )
+        if result.get("status") == "sent":
+            return _EMAIL_SENT_LINE
+        return _EMAIL_SEND_FAILED_LINE
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        logger.warning(
+            "email_itinerary failed for %s", session_id, exc_info=True
+        )
+        return _EMAIL_ERROR_LINE
+
+
 def _today_line() -> str:
     """Today's date for the instructions — without it the model cannot turn
     'leaving on Monday' into YYYY-MM-DD. Rendered fresh per build_agent call
@@ -1005,6 +1097,13 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         asks about the place they're going; pass their question."""
         return await destination_info_impl(session_id, question)
 
+    async def _email_itinerary(email_address: str) -> str:
+        """Email the traveler's booked itinerary to them and remember the
+        address for later trip updates. Call ONLY after the traveler asked
+        for the email, you read the address back to them, and they clearly
+        confirmed it is right."""
+        return await email_itinerary_impl(session_id, email_address)
+
     async def _check_return_flights(return_date: str = "") -> str:
         """Whether return flights exist for the traveler's booked trip — a
         spoken indication from web schedule info, never bookable fares or
@@ -1031,6 +1130,7 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
             function_tool(
                 _check_return_flights, name_override="check_return_flights"
             ),
+            function_tool(_email_itinerary, name_override="email_itinerary"),
         ],
     )
 

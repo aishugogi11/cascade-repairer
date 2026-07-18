@@ -39,7 +39,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from api import call_purposes, consent, vb_cli
+from api import call_purposes, consent, email_content, trip_emails, vb_cli
+from api.email_client import send_email
 from api.paypal_client import refund_fare_difference
 from api.disruption import break_trip_flight
 from api.itinerary_ui import _details_for
@@ -116,13 +117,71 @@ async def _maybe_refund_line(items) -> Optional[str]:
     return refund.spoken_line
 
 
+# The Call 2 email-offer beat (Phase 40) — appended to the results purpose
+# only when an address is on file for the trip (the booking-call beat
+# stored it). No address means no offer sentence and no watcher: Call 2 is
+# byte-identical to the pre-40 callback.
+_EMAIL_OFFER_PURPOSE = (
+    "Before you wrap up, offer exactly once: you can email them this "
+    "summary — ask 'Would you like an email of this?'. If they say yes, "
+    "tell them it's on its way to the address they gave when they booked; "
+    "if they decline, move on warmly without pushing."
+)
+
+
+async def _watch_email_offer(
+    trip_id: str,
+    session_key: Optional[str],
+    address: str,
+    trip,
+    items,
+    details,
+    refund_line: Optional[str],
+) -> None:
+    """The Phase 40 email watcher, one background task per Call 2 placed
+    with an address on file: wait for the call's transcript (the consent
+    watcher's machinery), classify the traveler's answer to the email
+    offer, and send the repair email only on an unambiguous yes. Every
+    other outcome — no, ambiguous, timeout, missing session key — sends
+    nothing (the consent honesty posture). Never raises, and by
+    construction never touches Call 2 itself, the cascade, or consent
+    state: the call is already placed when this task is born, and the
+    email content is the same loaded data the call's purpose spoke."""
+    try:
+        transcript = await _await_call_transcript(session_key)
+        if transcript is None:
+            return
+        verdict = await consent.classify_email_offer(transcript)
+        if verdict != "yes":
+            return
+        content = email_content.build_repair_email(
+            trip, items, details, refund_line
+        )
+        result = await send_email(
+            to=address,
+            subject=content.subject,
+            html=content.html,
+            text=content.text,
+        )
+        logger.info(
+            "repair email %s for trip %s", result.get("status"), trip_id
+        )
+    except Exception:  # noqa: BLE001 — background task must never propagate
+        logger.warning(
+            "email offer watcher failed for trip %s", trip_id, exc_info=True
+        )
+
+
 async def _call_back_with_results(trip_id: str, tasks) -> None:
     """The completion watcher → Call 2: wait for the repair tasks this
     backend launched, then place the results callback with a purpose
     composed from the actual post-repair state — the phone agent speaks
     the true fixed state because its script *is* the live data. Best-effort
     end to end: a failed read degrades the script, a failed call logs — a
-    background task must never take down the loop holding the conversation."""
+    background task must never take down the loop holding the conversation.
+    With an address on file (Phase 40) the purpose gains the email offer
+    and an email watcher follows the call; a failed email path can never
+    affect the call itself."""
     if tasks:
         # Repair tasks capture their own failures into completion events
         # (concurrency_core._record); return_exceptions is belt and braces.
@@ -144,11 +203,31 @@ async def _call_back_with_results(trip_id: str, tasks) -> None:
     refund_line = await _maybe_refund_line(items)
     if refund_line:
         purpose = purpose + " " + refund_line
-    ok, _call, error = await asyncio.to_thread(
+    email_address = trip_emails.get(trip_id)
+    if email_address:
+        purpose = purpose + " " + _EMAIL_OFFER_PURPOSE
+    ok, call, error = await asyncio.to_thread(
         vb_cli.place_call, purpose, "demo-beat3-results"
     )
     if not ok:
         logger.warning("results callback call failed: %s", _scrub(error))
+        return
+    if email_address:
+        # The same session-log join key as the consent watcher (Phase 31):
+        # room_name first, call_id as the legacy fallback. A payload with
+        # neither spawns a watcher that times out quietly — no email, and
+        # never a failed callback.
+        session_key = None
+        if isinstance(call, dict):
+            session_key = call.get("room_name") or call.get("call_id")
+        task = asyncio.create_task(
+            _watch_email_offer(
+                trip_id, session_key, email_address,
+                trip, items, details, refund_line,
+            )
+        )
+        _WATCHER_TASKS.add(task)
+        task.add_done_callback(_WATCHER_TASKS.discard)
 
 
 async def _watch_consent_then_repair(

@@ -244,6 +244,15 @@ Tavily-backed indication that return flights exist ("I can't book the return
 from here, but…"). Web schedule info, not fares — nothing appears in the
 candidates panel and nothing becomes bookable.
 
+**2c. Email offer (free; Phase 40)** — after the booking the Concierge offers
+once: *"Would you like me to send this to your email?"*. Say yes, **speak a
+real address you can open on stage**, and answer plainly when it reads the
+address back — only a clear yes stores and sends (a garbled address gets a
+re-ask, never a guess). The itinerary email arrives from `Cascade
+<info@talktomytrip.com>` (the Phase 39 Gmail smoke is the deliverability
+check). The address is kept in memory per trip for Call 2's offer; declining
+stores nothing and the offer isn't repeated.
+
 **3. Cancel flight → cascade (Call 1)** — click it once. Expect: the screen
 turns red with **"waiting for the traveler's go-ahead"** and **no running
 clock**, and the phone rings (~15–30 s). Call 1 must describe the trip you just
@@ -262,7 +271,11 @@ the flight card).
 details and price delta. If the rebooked flight is **cheaper**, it also says
 the difference was already refunded to the traveler's PayPal (sandbox payout,
 PR #71). No refund sentence means the fare was equal/pricier — or the
-`PAYPAL_*` env vars are unset (the kill switch).
+`PAYPAL_*` env vars are unset (the kill switch). If you gave an email in
+step 2c, Call 2 also offers *"Would you like an email of this?"* — answer
+plainly; a clear yes sends the repair summary (rebooked flight, struck-through
+original, the refund sentence when one fired) to the stored address, anything
+else sends nothing. No email in step 2c means Call 2 makes no email offer.
 
 **The "no" path** (second run, if quota allows): answer "no" on Call 1 —
 no repairs launch, the page shows the stand-down message, the Cancel button
