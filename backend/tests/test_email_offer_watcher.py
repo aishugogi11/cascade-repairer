@@ -265,7 +265,7 @@ def test_yes_sends_the_repair_email_to_the_stored_address(monkeypatch):
 
     assert len(sends) == 1
     assert sends[0]["to"] == "josh@example.com"
-    assert sends[0]["subject"] == "Your trip to Los Angeles is fixed"
+    assert sends[0]["subject"] == "Your trip to Los Angeles is fixed — July 21"
     assert "JetBlue 615" in sends[0]["text"]
     assert "Was Delta 439" in sends[0]["text"]
     assert REFUND_LINE in sends[0]["text"]

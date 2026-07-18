@@ -189,6 +189,26 @@ def _destination_city(trip: Trip, flight: Optional[ItineraryItem]) -> Optional[s
     return _city(dest) if dest else None
 
 
+def _subject_date(trip: Trip, flight: Optional[ItineraryItem]) -> Optional[str]:
+    """'August 8' — the departure date for the subject line, so same-city
+    emails from different trips can never be mistaken for one another
+    (live-QA finding, 2026-07-18: three 'Your trip to Los Angeles' subjects
+    in one inbox within four minutes). Trip header first, the flight row's
+    PT date as fallback, None when neither carries a date."""
+    if trip.start_date:
+        return f"{trip.start_date:%B} {trip.start_date.day}"
+    if flight is not None and flight.start_ts:
+        return _pt_date(flight.start_ts).rsplit(",", 1)[0]
+    return None
+
+
+def _dated_subject(
+    base: str, trip: Trip, flight: Optional[ItineraryItem]
+) -> str:
+    when = _subject_date(trip, flight)
+    return f"{base} — {when}" if when else base
+
+
 def _render(
     subject: str,
     intro: str,
@@ -254,7 +274,10 @@ def build_itinerary_email(trip: Trip, items: List[ItineraryItem]) -> EmailConten
     (a yes spoken right after book_flight may email just the flight)."""
     flight = next((i for i in items if i.type == "flight"), None)
     dest = _destination_city(trip, flight)
-    subject = f"Your trip to {dest}" if dest else f"Your trip: {trip.title}"
+    subject = _dated_subject(
+        f"Your trip to {dest}" if dest else f"Your trip: {trip.title}",
+        trip, flight,
+    )
 
     when = ""
     if trip.start_date and trip.end_date:
@@ -293,14 +316,18 @@ def build_repair_email(
     # The subject stays honest with the live state — never "fixed" over a
     # repair still in flight (the trip_status all-clear rule, applied here).
     if fixed:
-        subject = f"Your trip to {dest} is fixed" if dest else "Your trip is fixed"
+        subject = _dated_subject(
+            f"Your trip to {dest} is fixed" if dest else "Your trip is fixed",
+            trip, flight,
+        )
         intro = (
             "Your flight was cancelled, and your trip is repaired — "
             "here's where everything landed."
         )
     else:
-        subject = (
-            f"Update on your trip to {dest}" if dest else "Update on your trip"
+        subject = _dated_subject(
+            f"Update on your trip to {dest}" if dest else "Update on your trip",
+            trip, flight,
         )
         intro = (
             "Your flight was cancelled — here's where the repair stands "
