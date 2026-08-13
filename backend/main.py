@@ -24,6 +24,11 @@ from api.mobile_voice import mobile_voice
 from api.access_gate import access_gate_middleware
 from api.auth import auth
 from api.email_api import email_api
+from api.ml_api import ml_api
+from api.trip_builder_api import trip_builder_api
+from api.build_ui import build_ui
+from api.whatsapp_ui import whatsapp_ui
+from api.whatsapp_demo import whatsapp_demo
 
 
 app = FastAPI(
@@ -128,6 +133,36 @@ app.include_router(
     email_api,
     prefix="/v1/email",
     tags=["email"],
+)
+
+app.include_router(
+    ml_api,
+    prefix="/v1/ml",
+    tags=["ml"],
+)
+
+app.include_router(
+    trip_builder_api,
+    prefix="/v1/trip_builder",
+    tags=["trip_builder"],
+)
+
+app.include_router(
+    build_ui,
+    prefix="/v1/build",
+    tags=["build"],
+)
+
+app.include_router(
+    whatsapp_ui,
+    prefix="/v1/whatsapp",
+    tags=["whatsapp"],
+)
+
+app.include_router(
+    whatsapp_demo,
+    prefix="/v1/whatsapp",
+    tags=["whatsapp"],
 )
 
 if __name__ == "__main__":

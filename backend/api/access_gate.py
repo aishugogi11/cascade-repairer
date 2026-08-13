@@ -29,7 +29,7 @@ _PUBLIC_POSTS = {"/v1/auth/validate"}
 # 307 redirect to the canonical path stays reachable too).
 _PUBLIC_PAGES = {
     "/v1/web_call", "/v1/mobile_voice", "/v1/itinerary", "/v1/demo",
-    "/v1/booking", "/v1/cascade",
+    "/v1/booking", "/v1/cascade", "/v1/build", "/v1/whatsapp",
 }
 
 _warned_open = False

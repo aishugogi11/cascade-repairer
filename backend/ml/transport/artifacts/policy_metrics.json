@@ -1,0 +1,97 @@
+{
+  "n_train_rows": 20000,
+  "n_test_rows": 5000,
+  "n_train_states": 2000,
+  "n_test_states": 500,
+  "n_features": 25,
+  "features": [
+    "distance_miles",
+    "estimated_travel_time",
+    "walking_distance",
+    "rideshare_eta",
+    "traffic_level",
+    "pickup_congestion",
+    "dropoff_congestion",
+    "schedule_buffer",
+    "time_of_day",
+    "day_of_week",
+    "time_until_next_activity",
+    "number_of_previous_stops",
+    "route_backtracking_distance",
+    "delta_travel",
+    "delta_walk",
+    "delta_eta",
+    "delta_congestion",
+    "delta_buffer",
+    "pickup_is_alt",
+    "remaining_stops",
+    "min_buffer_needed",
+    "action_type",
+    "transportation_mode",
+    "venue_type",
+    "priority"
+  ],
+  "target": "action_utility",
+  "target_description": "Predicted improvement vs keeping the current hop plan. The optimizer executes the feasible action with the highest score.",
+  "model": "RandomForestRegressor",
+  "production_model": "RandomForestRegressor",
+  "dataset": "synthetic_action_utility",
+  "dataset_disclaimer": "Initial model trained on a synthetic transportation dataset designed around realistic travel constraints. The architecture is designed to be retrained on real-world trip outcomes.",
+  "comparison": {
+    "RulesBaseline": {
+      "action_accuracy": 0.192,
+      "mae": null,
+      "r2": null
+    },
+    "LinearRegression": {
+      "mae": 0.04881914096568572,
+      "rmse": 0.0824068617354669,
+      "r2": 0.4816352644303886,
+      "action_accuracy": 0.588
+    },
+    "RandomForestRegressor": {
+      "mae": 0.020430622564406375,
+      "rmse": 0.027569251776314228,
+      "r2": 0.9419825472620218,
+      "action_accuracy": 0.69
+    }
+  },
+  "mae": 0.020430622564406375,
+  "rmse": 0.027569251776314228,
+  "r2": 0.9419825472620218,
+  "action_accuracy": 0.69,
+  "top_features": [
+    {
+      "feature": "delta_walk",
+      "importance": 0.635809855204121
+    },
+    {
+      "feature": "delta_travel",
+      "importance": 0.08014782280372836
+    },
+    {
+      "feature": "distance_miles",
+      "importance": 0.0531866221244434
+    },
+    {
+      "feature": "estimated_travel_time",
+      "importance": 0.052351299924129645
+    },
+    {
+      "feature": "time_of_day",
+      "importance": 0.041471421615826495
+    },
+    {
+      "feature": "walking_distance",
+      "importance": 0.01759572539972748
+    },
+    {
+      "feature": "transportation_mode_transit",
+      "importance": 0.017543580673138895
+    },
+    {
+      "feature": "action_type_CHANGE_TRANSPORTATION_MODE",
+      "importance": 0.01607872711292811
+    }
+  ]
+}

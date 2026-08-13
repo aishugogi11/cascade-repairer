@@ -2,8 +2,9 @@
 
 Serves the itinerary page and the JSON endpoints it polls: trip status
 (all itinerary items with their repair-lifecycle statuses) and recent trips
-for the selector. Read-only — disruption and repair are driven elsewhere
-(/v1/disruption, /v1/sabre_tools, the concierge agent).
+for the selector. Disruption and repair are driven elsewhere
+(/v1/disruption, /v1/sabre_tools, the concierge agent). Optimization
+recommendations are additive on this router and never auto-apply.
 
 Handlers are async and wrap the blocking repository reads in
 asyncio.to_thread, keeping BigQuery off the event loop (tech-stack rule).
@@ -17,8 +18,9 @@ from typing import Optional, get_args
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
-from api import concierge, consent, flight_options
+from api import cascade_optimize, concierge, consent, flight_options, memory_trips
 from api.repositories import bookings as bookings_repo
 from api.repositories import trips
 from api.repositories.models import Booking, ItemStatus, ItineraryItem
@@ -254,6 +256,14 @@ def _pending_options(trip_id: str) -> Optional[dict]:
         return None
 
 
+def _optimization_block(trip_id: str) -> Optional[dict]:
+    """Cached Cascade optimization — additive, never load-bearing."""
+    try:
+        return cascade_optimize.public_view(trip_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _consent_block(trip_id: str) -> Optional[dict]:
     """The consent-gated repair flow's state for this trip (Phase 23) —
     the dashboard's waiting / stand-down treatments key off it. Additive
@@ -276,11 +286,22 @@ async def trip_status(trip_id: str):
     (Phase 21, the booking page's candidates panel); everything else in the
     payload is unchanged.
     """
-    success, view, error = await asyncio.to_thread(trips.get_trip_with_items, trip_id)
-    if not success:
-        raise HTTPException(status_code=500, detail=f"could not load trip: {error}")
-    if view is None:
-        raise HTTPException(status_code=404, detail=f"trip {trip_id} not found")
+    view = memory_trips.get(trip_id)
+    from_memory = view is not None
+    if not from_memory:
+        try:
+            success, view, error = await asyncio.to_thread(
+                trips.get_trip_with_items, trip_id
+            )
+        except Exception as exc:  # noqa: BLE001 — ADC/BQ outages
+            success, view, error = False, None, str(exc)
+        if not success:
+            err = (error or "").lower()
+            if "credential" in err:
+                raise HTTPException(status_code=404, detail=f"trip {trip_id} not found")
+            raise HTTPException(status_code=500, detail=f"could not load trip: {error}")
+        if view is None:
+            raise HTTPException(status_code=404, detail=f"trip {trip_id} not found")
 
     details = await _details_for(trip_id, view.items)
     items = []
@@ -302,15 +323,98 @@ async def trip_status(trip_id: str):
     consent_state = _consent_block(trip_id)
     if consent_state:
         body["consent"] = consent_state
+    optimization = _optimization_block(trip_id)
+    if optimization:
+        body["optimization"] = optimization
     return body
+
+
+class OptimizePrefsRequest(BaseModel):
+    text: str = ""
+    priority: str = ""
+    max_walk_minutes: Optional[int] = None
+    min_buffer: Optional[int] = None
+
+
+class OptimizeDecisionRequest(BaseModel):
+    recommendation_id: str
+    chosen: str = ""
+    rejected: str = ""
+
+
+@itinerary_ui.get("/optimize/{trip_id}")
+async def optimize_trip(trip_id: str, text: str = ""):
+    """Score the existing itinerary and return ranked recommendations."""
+    try:
+        return await asyncio.to_thread(cascade_optimize.analyze_by_id, trip_id, pref_text=text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@itinerary_ui.post("/optimize/{trip_id}/prefs")
+async def optimize_prefs(trip_id: str, req: OptimizePrefsRequest):
+    from ml.transport.optimize import Prefs
+
+    prefs = cascade_optimize.prefs_for(trip_id)
+    if req.text:
+        prefs = cascade_optimize.merge_pref_text(trip_id, req.text)
+    else:
+        prefs = cascade_optimize.set_prefs(
+            trip_id,
+            Prefs(
+                priority=req.priority or prefs.priority,
+                max_walk_minutes=(
+                    req.max_walk_minutes
+                    if req.max_walk_minutes is not None
+                    else prefs.max_walk_minutes
+                ),
+                min_buffer=req.min_buffer if req.min_buffer is not None else prefs.min_buffer,
+                frozen=prefs.frozen,
+            ),
+        )
+    return await asyncio.to_thread(cascade_optimize.analyze_by_id, trip_id)
+
+
+@itinerary_ui.post("/optimize/{trip_id}/apply")
+async def optimize_apply(trip_id: str, req: OptimizeDecisionRequest):
+    return await asyncio.to_thread(
+        cascade_optimize.apply_recommendation, trip_id, req.recommendation_id,
+    )
+
+
+@itinerary_ui.post("/optimize/{trip_id}/reject")
+async def optimize_reject(trip_id: str, req: OptimizeDecisionRequest):
+    return await asyncio.to_thread(
+        cascade_optimize.reject_recommendation, trip_id, req.recommendation_id,
+    )
+
+
+@itinerary_ui.post("/optimize/{trip_id}/feedback")
+async def optimize_feedback(trip_id: str, req: OptimizeDecisionRequest):
+    row = cascade_optimize.log_feedback(
+        trip_id,
+        action="choice",
+        chosen=req.chosen,
+        rejected=req.rejected,
+        extra={"recommendation_id": req.recommendation_id},
+    )
+    return {"ok": True, "feedback": row}
 
 
 @itinerary_ui.get("/trips")
 async def recent_trips(limit: int = 10):
     """Recent trips, newest first — backs the page's trip selector."""
-    success, result, error = await asyncio.to_thread(trips.list_recent_trips, limit)
-    if not success:
-        raise HTTPException(status_code=500, detail=f"could not list trips: {error}")
+    mem = memory_trips.list_recent()
+    if mem:
+        result = mem[:limit]
+    else:
+        try:
+            success, result, error = await asyncio.to_thread(trips.list_recent_trips, limit)
+        except Exception as exc:  # noqa: BLE001 — ADC/BQ outages fall back to memory
+            success, result, error = False, [], str(exc)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"could not list trips: {error}")
+        result = result[:limit]
     return {
         "trips": [
             {

@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 
 from google.cloud import bigquery
 
+from api import memory_trips
 from api.helpers.bigquery_helper import bq_helper
 from api.repositories.models import (
     TRIP_STATUS_ADAPTER,
@@ -18,35 +19,52 @@ def _table() -> str:
 
 
 def create_trip(trip: Trip) -> Tuple[bool, Optional[Trip], Optional[str]]:
-    """Insert a trip; created_at is stamped by BigQuery. Returns the trip."""
-    query = f"""
-        INSERT INTO `{_table()}`
-            (trip_id, user_id, title, status, origin, destinations,
-             start_date, end_date, created_at)
-        VALUES
-            (@trip_id, @user_id, @title, @status, @origin, @destinations,
-             @start_date, @end_date, CURRENT_TIMESTAMP())
+    """Insert a trip; created_at is stamped by BigQuery. Returns the trip.
+
+    Local demo (no ADC) keeps the trip in memory so voice booking still
+    works without BigQuery.
     """
-    params = [
-        bigquery.ScalarQueryParameter("trip_id", "STRING", trip.trip_id),
-        bigquery.ScalarQueryParameter("user_id", "STRING", trip.user_id),
-        bigquery.ScalarQueryParameter("title", "STRING", trip.title),
-        bigquery.ScalarQueryParameter("status", "STRING", trip.status),
-        bigquery.ScalarQueryParameter("origin", "STRING", trip.origin),
-        bigquery.ArrayQueryParameter("destinations", "STRING", trip.destinations),
-        bigquery.ScalarQueryParameter("start_date", "DATE", trip.start_date),
-        bigquery.ScalarQueryParameter("end_date", "DATE", trip.end_date),
-    ]
-    success, _, error = bq_helper.run_dml(query, params)
-    return success, trip if success else None, error
+    if bq_helper.credentials_ready():
+        query = f"""
+            INSERT INTO `{_table()}`
+                (trip_id, user_id, title, status, origin, destinations,
+                 start_date, end_date, created_at)
+            VALUES
+                (@trip_id, @user_id, @title, @status, @origin, @destinations,
+                 @start_date, @end_date, CURRENT_TIMESTAMP())
+        """
+        params = [
+            bigquery.ScalarQueryParameter("trip_id", "STRING", trip.trip_id),
+            bigquery.ScalarQueryParameter("user_id", "STRING", trip.user_id),
+            bigquery.ScalarQueryParameter("title", "STRING", trip.title),
+            bigquery.ScalarQueryParameter("status", "STRING", trip.status),
+            bigquery.ScalarQueryParameter("origin", "STRING", trip.origin),
+            bigquery.ArrayQueryParameter("destinations", "STRING", trip.destinations),
+            bigquery.ScalarQueryParameter("start_date", "DATE", trip.start_date),
+            bigquery.ScalarQueryParameter("end_date", "DATE", trip.end_date),
+        ]
+        success, _, error = bq_helper.run_dml(query, params)
+        if success:
+            return True, trip, None
+        if "credential" not in (error or "").lower():
+            return False, None, error
+    memory_trips.ensure_trip(trip)
+    return True, trip, None
 
 
 def get_trip(trip_id: str) -> Tuple[bool, Optional[Trip], Optional[str]]:
     """Fetch one trip. (True, None, None) means the query ran but no row."""
+    mem = memory_trips.get(trip_id)
+    if mem is not None:
+        return True, mem.trip, None
+    if not bq_helper.credentials_ready():
+        return True, None, None
     query = f"SELECT * FROM `{_table()}` WHERE trip_id = @trip_id"
     params = [bigquery.ScalarQueryParameter("trip_id", "STRING", trip_id)]
     success, rows, error = bq_helper.run_select(query, params)
     if not success:
+        if "credential" in (error or "").lower():
+            return True, None, None
         return False, None, error
     models = rows_to_models(Trip, rows)
     return True, models[0] if models else None, None
@@ -86,6 +104,9 @@ def get_trip_with_items(
 ) -> Tuple[bool, Optional[TripWithItems], Optional[str]]:
     """The unified trip view: the trip plus all its itinerary items ordered by
     start_ts — the read the live itinerary UI polls."""
+    mem = memory_trips.get(trip_id)
+    if mem is not None:
+        return True, mem, None
     success, trip, error = get_trip(trip_id)
     if not success or trip is None:
         return success, None, error

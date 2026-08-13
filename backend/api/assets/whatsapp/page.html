@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cascade Repairer — WhatsApp</title>
+<style>
+  :root { color-scheme: only light; }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #111b21;
+    color: #e9edef;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+  }
+  .phone {
+    width: min(420px, 100vw);
+    height: min(780px, 100vh);
+    background: #0b141a;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #233138;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  .app-bar {
+    background: #202c33;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .back { color: #8696a0; font-size: 20px; }
+  .avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #00a884; color: #111b21;
+    display: grid; place-items: center; font-weight: 800;
+  }
+  .who .name { font-weight: 700; font-size: 16px; }
+  .who .sub { font-size: 12px; color: #8696a0; }
+  .badge {
+    margin-left: auto;
+    font-size: 10px; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase;
+    background: #2a3942; color: #00a884;
+    padding: 4px 8px; border-radius: 999px;
+  }
+  .thread {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 12px 12px;
+    background: #0b141a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath fill='%23182229' d='M0 0h60v60H0z'/%3E%3C/svg%3E");
+  }
+  .bubble {
+    max-width: 82%;
+    padding: 8px 10px 6px;
+    border-radius: 8px;
+    font-size: 14.5px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .bubble .time {
+    display: block; text-align: right;
+    font-size: 11px; color: #8696a0; margin-top: 4px;
+  }
+  .in { background: #202c33; margin-right: auto; }
+  .out { background: #005c4b; margin-left: auto; }
+  .file {
+    display: flex; gap: 10px; align-items: center;
+    background: #1d282f; padding: 10px; border-radius: 8px; margin-bottom: 6px;
+  }
+  .file .ico {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #ef4444; color: #fff;
+    display: grid; place-items: center; font-size: 11px; font-weight: 800;
+  }
+  .file .meta { font-size: 12px; color: #8696a0; }
+  .preview {
+    background: #111b21; border-radius: 8px; overflow: hidden;
+    margin-bottom: 8px; border: 1px solid #233138;
+  }
+  .preview .hero {
+    background: linear-gradient(135deg, #0f766e, #115e59);
+    padding: 14px 12px; color: #ecfdf5; font-weight: 700;
+  }
+  .preview .hero span { display: block; font-size: 12px; font-weight: 500; opacity: .85; margin-top: 4px; }
+  .preview a {
+    display: block; padding: 10px 12px; color: #53bdeb; text-decoration: none; font-size: 13px;
+    word-break: break-all;
+  }
+  .composer {
+    background: #202c33;
+    padding: 8px 10px 12px;
+    display: grid;
+    gap: 8px;
+  }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1; font: inherit; font-size: 15px;
+    background: #2a3942; color: #e9edef;
+    border: none; border-radius: 22px;
+    padding: 10px 14px; resize: none; min-height: 44px; max-height: 90px;
+  }
+  .send, .attach, .sample {
+    font: inherit; font-weight: 700; border: none; cursor: pointer;
+  }
+  .send {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #00a884; color: #111b21; font-size: 18px;
+  }
+  .attach, .sample {
+    background: #2a3942; color: #e9edef;
+    border-radius: 18px; padding: 8px 12px; font-size: 13px;
+  }
+  .hint { font-size: 11px; color: #8696a0; text-align: center; }
+  .err { color: #f87171; font-size: 13px; padding: 0 4px; }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="app-bar">
+      <div class="back">‹</div>
+      <div class="avatar">CR</div>
+      <div class="who">
+        <div class="name">Cascade Repairer</div>
+        <div class="sub">online</div>
+      </div>
+      <span class="badge">Not live WhatsApp</span>
+    </div>
+    <div class="thread" id="thread"></div>
+    <div class="composer">
+      <div class="hint">Attach a PDF or tap Sample itinerary</div>
+      <div class="row">
+        <button class="attach" id="attach" type="button">PDF</button>
+        <button class="sample" id="sample" type="button">Sample itinerary</button>
+        <button class="sample" id="sample-nyc" type="button">NYC business</button>
+        <textarea id="message" placeholder="help me change up some things about this trip" rows="1"></textarea>
+        <button class="send" id="send" type="button">➤</button>
+      </div>
+      <input id="file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf" />
+      <div class="err" id="err"></div>
+    </div>
+  </div>
+<script>
+(() => {
+  const codeFromUrl = new URL(window.location).searchParams.get("code");
+  if (codeFromUrl) localStorage.setItem("vb_access_code", codeFromUrl);
+  const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
+  const codeHeaders = (extra) =>
+    ACCESS_CODE ? Object.assign({}, extra || {}, { "X-Access-Code": ACCESS_CODE }) : (extra || {});
+  const withCode = (href) => ACCESS_CODE
+    ? href + (href.indexOf("?") >= 0 ? "&" : "?") + "code=" + encodeURIComponent(ACCESS_CODE)
+    : href;
+
+  const thread = document.getElementById("thread");
+  const err = document.getElementById("err");
+  const message = document.getElementById("message");
+  const fileInput = document.getElementById("file");
+  let pendingFile = null;
+
+  const now = () => {
+    const d = new Date();
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+
+  function addBubble(html, side) {
+    const el = document.createElement("div");
+    el.className = "bubble " + side;
+    el.innerHTML = html + "<span class='time'>" + now() + "</span>";
+    thread.appendChild(el);
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function showErr(msg) {
+    err.textContent = msg || "";
+  }
+
+  addBubble(
+    "Send a PDF itinerary — or tap Sample itinerary — and I’ll open Cascade Repairer with that trip.",
+    "in"
+  );
+
+  async function fileToB64(file) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  async function ingest(payload, userText, fileLabel) {
+    showErr("");
+    if (fileLabel) {
+      addBubble(
+        "<div class='file'><div class='ico'>PDF</div><div><div>" + fileLabel +
+        "</div><div class='meta'>itinerary</div></div></div>" + (userText || ""),
+        "out"
+      );
+    } else {
+      addBubble(userText || "help me change up some things about this trip", "out");
+    }
+    try {
+      const res = await fetch("/v1/whatsapp/ingest", {
+        method: "POST",
+        headers: codeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        const detail = data.detail || data.error || ("HTTP " + res.status);
+        showErr(detail);
+        addBubble("I couldn’t load that trip into Cascade. " + String(detail), "in");
+        return;
+      }
+      const href = withCode(data.cascade_path);
+      const abs = location.origin + href;
+      addBubble(data.reply_reviewing, "in");
+      addBubble(
+        "<div class='preview'><div class='hero'>Cascade Repairer" +
+        "<span>A voice agent that puts your broken trip back together — in one call.</span></div>" +
+        "<a href='" + href + "'>" + abs + "</a></div>",
+        "in"
+      );
+      addBubble(data.reply_done, "in");
+    } catch (e) {
+      showErr(e.message);
+    }
+  }
+
+  document.getElementById("attach").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = "";
+    if (!file) return;
+    document.getElementById("sample").textContent = file.name;
+    const text = (message.value || "").trim() || "help me change up some things about this trip";
+    let pdf_base64 = "";
+    try { pdf_base64 = await fileToB64(file); } catch (e) { showErr(e.message); }
+    ingest({ sample: false, filename: file.name, text: text, pdf_base64: pdf_base64 }, text, file.name);
+    document.getElementById("sample").textContent = "Sample itinerary";
+  });
+  document.getElementById("sample").addEventListener("click", () => {
+    ingest({ sample: true, filename: "sample-trip-itinerary.pdf" },
+      "help me change up some things about this trip",
+      "sample-trip-itinerary.pdf");
+  });
+  document.getElementById("sample-nyc").addEventListener("click", () => {
+    ingest({ sample: false, sample_kind: "nyc", filename: "nyc-business-itinerary.pdf" },
+      "optimize this New York trip",
+      "nyc-business-itinerary.pdf");
+  });
+  document.getElementById("send").addEventListener("click", async () => {
+    const text = (message.value || "").trim() || "help me change up some things about this trip";
+    const file = pendingFile;
+    const name = file ? file.name : "";
+    let pdf_base64 = "";
+    if (file) {
+      try { pdf_base64 = await fileToB64(file); } catch (e) { showErr(e.message); }
+    }
+    ingest({ sample: !name && !pdf_base64, filename: name, text: text, pdf_base64: pdf_base64 }, text, name || null);
+    message.value = "";
+    pendingFile = null;
+    document.getElementById("sample").textContent = "Sample itinerary";
+  });
+})();
+</script>
+</body>
+</html>

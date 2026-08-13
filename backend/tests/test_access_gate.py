@@ -28,6 +28,8 @@ PUBLIC_GETS = (
     "/v1/demo/",
     "/v1/booking/",
     "/v1/cascade/",
+    "/v1/build/",
+    "/v1/whatsapp/",
 )
 
 PAGE_PATHS = (
@@ -37,6 +39,8 @@ PAGE_PATHS = (
     "/v1/demo/",
     "/v1/booking/",
     "/v1/cascade/",
+    "/v1/build/",
+    "/v1/whatsapp/",
 )
 
 

@@ -27,6 +27,17 @@ def test_shell_served_without_code_when_gate_armed(monkeypatch):
     assert "Cascade Dashboard — Cascade Repairer" in resp.text
 
 
+def test_shell_links_to_build_my_trip():
+    text = page_text()
+    assert 'id="nav-build"' in text
+    assert "/v1/build/" in text
+    assert "Optimize My Trip" in text
+    assert 'id="nav-wa"' in text
+    assert "/v1/whatsapp/" in text
+    assert 'id="nav-trips"' in text
+    assert "My Trips" in text
+
+
 def test_gated_json_endpoints_still_401_without_code(monkeypatch):
     """The shell is inert without the gated APIs behind it — allowlisting
     the page must not have opened anything else, including the trigger
@@ -38,10 +49,23 @@ def test_gated_json_endpoints_still_401_without_code(monkeypatch):
         ("get", "/v1/itinerary/trips"),
         ("get", "/v1/sabre_tools/latest_trip_id"),
         ("get", "/v1/sabre_tools/search_log"),
+        ("get", "/v1/sabre_tools/pending_options"),
+        ("get", "/v1/sabre_tools/latest_booking"),
+        ("get", "/v1/ml/metrics"),
         ("post", "/v1/demo/book"),
         ("post", "/v1/demo/disrupt"),
+        ("post", "/v1/sabre_tools/select_date"),
+        ("post", "/v1/sabre_tools/book_option"),
         ("post", "/v1/web_call/token"),
         ("post", "/v1/web_call/query"),
+        ("post", "/v1/trip_builder/turn"),
+        ("post", "/v1/trip_builder/build"),
+        ("post", "/v1/trip_builder/save"),
+        ("post", "/v1/trip_builder/token"),
+        ("post", "/v1/whatsapp/ingest"),
+        ("get", "/v1/itinerary/optimize/some-trip"),
+        ("post", "/v1/itinerary/optimize/some-trip/apply"),
+        ("post", "/v1/itinerary/optimize/some-trip/reject"),
     ):
         resp = getattr(client, method)(path)
         assert resp.status_code == 401, path
@@ -278,12 +302,33 @@ def test_page_renders_pending_options_as_the_candidates_panel():
     candidate line also names the carrier and shows the journey length."""
     text = page_text()
     assert 'id="candidates"' in text
+    assert 'id="options-section"' in text
+    assert 'id="options-grid"' in text
+    assert "Available flights" in text
+    assert "window.cascadeShowFlights" in text
+    assert "Choose a replacement" in text
+    assert "hasPendingBoard" in text
+    assert "/v1/ml/metrics" in text
     assert "AI Recommended" in text
     assert "pending_options" in text
+    assert "${TOOLS}/pending_options" in text
+    assert "${TOOLS}/latest_booking" in text
     for field in ("option_number", "arrive_time", "depart_time",
                   "route", "stops", "airline_name", "duration"):
         assert f"o.{field}" in text, field
     assert "fmtPrice(o.price)" in text
+    assert "o.delay_risk_pct" in text
+    assert "o.recommendation_score" in text
+    assert "Recommended" in text
+    assert "o.why" in text
+    assert 'id="date-strip"' in text
+    assert "Available dates to book" in text
+    assert "available_dates" in text
+    assert "${TOOLS}/select_date" in text
+    assert "${TOOLS}/book_option" in text
+    assert "Book this flight" in text
+    assert "bookOption" in text
+    assert "No flights on that day" in text
 
 
 def test_page_has_the_rich_flight_fields():
@@ -300,3 +345,15 @@ def test_page_has_the_rich_flight_fields():
     assert "Nonstop" in text and "via" in text
     assert "arrives next day" in text
     assert "fmtDuration" in text
+
+
+def test_page_has_optimization_cards():
+    text = page_text()
+    assert 'id="opt-card"' in text
+    assert "Cascade found an optimization" in text
+    assert "Keep current" in text
+    assert "decideOptimization" in text
+    assert "/optimize/" in text
+    assert "transport_options" in text
+    assert "cheapest" in text
+    assert "best_value" in text

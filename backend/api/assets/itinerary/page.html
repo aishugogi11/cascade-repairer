@@ -47,7 +47,15 @@
     display: grid; place-items: center;
     font-size: 20px;
   }
+  .masthead { display: flex; align-items: center; gap: 12px; }
   .masthead .name { font-size: 17px; font-weight: 700; }
+  .app-nav { display: flex; gap: 6px; margin-left: 12px; }
+  .app-nav a {
+    font-size: 13px; font-weight: 700; text-decoration: none; color: var(--ink-soft);
+    padding: 8px 12px; border-radius: 999px;
+  }
+  .app-nav a:hover { background: #eff6ff; color: var(--brand); }
+  .app-nav a.is-current { background: #eff6ff; color: var(--brand); }
   .masthead .sub { font-size: 13px; color: var(--ink-soft); }
   .head-spacer { flex: 1; }
   .trip-picker { display: flex; align-items: center; gap: 8px; font-size: 14px; }
@@ -162,6 +170,12 @@
   .timer-card.is-done    .timer-value { color: var(--fixed); }
   .timer-card.is-over    .timer-value { color: var(--broken); }
   .timer-note { font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+  .opt-summary-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 20px;
+  }
+  .opt-summary-card .row { font-size: 14px; margin-top: 6px; color: var(--ink-soft); }
+  .opt-summary-card .row b { color: var(--ink); }
 
   .feed-card {
     background: var(--card); border: 1px solid var(--line);
@@ -196,6 +210,12 @@
     <div class="name">Cascade Repairer</div>
     <div class="sub">Live itinerary</div>
   </div>
+  <nav class="app-nav">
+    <a href="/v1/build/" id="nav-build">✨ Optimize My Trip</a>
+    <a href="/v1/whatsapp/" id="nav-wa">WhatsApp</a>
+    <a class="is-current" href="/v1/itinerary/" id="nav-trips">My Trips</a>
+    <a href="/v1/cascade/" id="nav-cascade">Cascade / Repair</a>
+  </nav>
   <div class="head-spacer"></div>
   <div class="trip-picker">
     <label for="trip-select">Trip</label>
@@ -225,6 +245,10 @@
       <h2>Recovery time</h2>
       <div class="timer-value" id="timer-value">—</div>
       <div class="timer-note">Target: everything fixed within 60 seconds</div>
+    </div>
+    <div class="opt-summary-card" id="opt-summary-card" hidden>
+      <h2>Cascade optimization</h2>
+      <div id="opt-summary-body"></div>
     </div>
     <div class="feed-card">
       <h2>Repair activity</h2>
@@ -260,6 +284,17 @@
   const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
   const codeHeaders = (extra = {}) =>
     ACCESS_CODE ? { ...extra, "X-Access-Code": ACCESS_CODE } : extra;
+  const withCode = (href) => ACCESS_CODE
+    ? href + (href.includes("?") ? "&" : "?") + "code=" + encodeURIComponent(ACCESS_CODE)
+    : href;
+  const navBuild = document.getElementById("nav-build");
+  const navWa = document.getElementById("nav-wa");
+  const navTrips = document.getElementById("nav-trips");
+  const navCascade = document.getElementById("nav-cascade");
+  if (navBuild) navBuild.href = withCode("/v1/build/");
+  if (navWa) navWa.href = withCode("/v1/whatsapp/");
+  if (navTrips) navTrips.href = withCode("/v1/itinerary/");
+  if (navCascade) navCascade.href = withCode("/v1/cascade/");
 
   const KIND = {
     flight:     { icon: "✈️", label: "Flight" },
@@ -313,6 +348,7 @@
     tripId: null,
     lastStatuses: null,   // item_id -> status from the previous poll
     cards: new Map(),     // item_id -> <li>
+    analyzedTrip: null,
     timerStart: null,
     timerFrozen: null,
   };
@@ -352,8 +388,9 @@
       const kind = KIND[item.type] || { icon: "📍", label: item.type };
       card.dataset.status = item.status;
       card.querySelector(".icon").textContent = kind.icon;
-      card.querySelector(".kind").textContent =
-        (item.details && item.details.description) || kind.label;
+      const title = (item.details && (item.details.title || item.details.description)) || kind.label;
+      const keep = item.details && (item.details.must_keep || item.details.importance === "must_keep");
+      card.querySelector(".kind").textContent = keep ? title + " ⭐" : title;
       card.querySelector(".where").textContent = item.location || "";
       card.querySelector(".when").textContent = fmtWhen(item);
       card.querySelector(".chip").textContent = item.status;
@@ -435,6 +472,32 @@
 
   // ---- recovery timer ----
 
+  function renderOptSummary(opt) {
+    const card = el("opt-summary-card");
+    const body = el("opt-summary-body");
+    const summary = opt && opt.summary;
+    if (!summary || summary.original_travel_min == null) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    const rows = [];
+    rows.push(`Original travel time: <b>${summary.original_travel_min} min</b>`);
+    if (summary.optimized_travel_min != null) {
+      rows.push(`Optimized: <b>${summary.optimized_travel_min} min</b>`);
+    }
+    if (summary.show_time_saved && summary.potential_time_saved_min) {
+      rows.push(`Potential time saved: <b>${summary.potential_time_saved_min} min</b>`);
+    }
+    if (summary.show_cost_saved && summary.potential_cost_saved) {
+      rows.push(`Potential savings: <b>~$${Math.round(summary.potential_cost_saved)}</b> (estimated)`);
+    }
+    if (summary.original_legs != null) {
+      rows.push(`Transportation legs: <b>${summary.original_legs} → ${summary.optimized_legs}</b>`);
+    }
+    body.innerHTML = rows.map((r) => `<div class="row">${r}</div>`).join("");
+  }
+
   function updateTimer(summary) {
     const active = summary.counts.broken > 0 || summary.counts.repairing > 0;
     if (active && (state.timerStart === null || state.timerFrozen !== null)) {
@@ -491,6 +554,13 @@
     renderHeadline(body.trip, body.summary);
     diffIntoFeed(body.items);
     updateTimer(body.summary);
+    renderOptSummary(body.optimization);
+    if (!body.optimization && state.tripId && state.analyzedTrip !== state.tripId) {
+      fetch(`${API}/optimize/${encodeURIComponent(state.tripId)}`, { headers: codeHeaders() })
+        .then((r) => r.ok ? r.json() : null)
+        .then((opt) => { if (opt) { state.analyzedTrip = state.tripId; renderOptSummary(opt); } })
+        .catch(() => {});
+    }
   }
 
   // ---- trip selector ----
@@ -498,6 +568,7 @@
   function resetForTrip(tripId) {
     state.tripId = tripId;
     state.lastStatuses = null;
+    state.analyzedTrip = null;
     state.cards.clear();
     state.timerStart = null;
     state.timerFrozen = null;

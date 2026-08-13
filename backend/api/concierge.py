@@ -55,16 +55,26 @@ from api.flight_options import (  # noqa: F401 — re-export surface
     _parse_instaflights_options,
     _spoken_clock,
     _spoken_option,
+    airline_name,
     details_from_option,
     FlightOption,
     fmt_duration,
     option_timestamps,
     select_airline_diverse,
 )
+from ml.inference import predict_delay_risk
+from ml.ranking import (
+    TravelerPrefs,
+    parse_clock,
+    rank_options,
+    spoken_recommendation,
+)
+from api import memory_trips
 from api.repositories import bookings, itinerary_items, trips
 from api.repositories.models import Booking, ItineraryItem, Trip
 from api.sabre import client as sabre_client
 from api.sabre import shapes
+from api.sabre.airport_tz import AIRPORT_TZ
 from api.sabre_tools import launch_trip_repairs
 
 logger = logging.getLogger(__name__)
@@ -85,9 +95,17 @@ BASE_INSTRUCTIONS = (
     "sentence and ask what they need — never open by saying you're pulling "
     "up details or checking on anything; only say you're looking something "
     "up when you're actually about to use a tool. "
-    "When the traveler reports a disruption (a cancelled flight, a broken "
-    "trip, 'fix my trip'), call the fix_trip tool immediately — it launches "
-    "every repair in the background and returns at once. Never wait silently "
+    "When the traveler reports a cancelled flight, a cancelled trip to the "
+    "airport, or a cancelled airport departure ('trip to airport cancelled', "
+    "'my flight was cancelled', 'airport transfer cancelled'), call "
+    "offer_rebook in the same turn — do not call fix_trip for that. "
+    "offer_rebook marks the leg disrupted, searches replacements, and puts "
+    "numbered options on the traveler's screen. Read the recommendation "
+    "sentence first, then the numbered options, and ask them to pick by "
+    "number. When they choose, call book_flight with that option number. "
+    "Call the fix_trip tool only when they ask to fix the whole trip after "
+    "a disruption already on screen, or say 'fix my trip' — it launches "
+    "every remaining repair in the background and returns at once. Never wait silently "
     "for repairs to finish and never refuse other questions while they run; "
     "keep helping. You cannot send notifications or follow up on your own — "
     "never promise to 'let them know' when something finishes; instead "
@@ -96,19 +114,33 @@ BASE_INSTRUCTIONS = (
     "trip_status tool and answer from its result — it is the authoritative "
     "live read, even when your live status section shows nothing (repairs "
     "may have run under another session). When there is no booked "
-    "trip and the traveler wants to plan or book one, follow the guided "
-    "flow: confirm the destination and departure date in one short turn, "
-    "then call search_flights — origin airport code (assume MSP unless the "
+    "trip and the traveler wants to plan or book one, call search_flights "
+    "in the same turn as soon as you have a destination and departure date "
+    "— do not confirm first and do not ask them to wait. Do not call "
+    "search_flights for a cancelled trip to the airport or a cancelled "
+    "flight on a booked itinerary — offer_rebook does that search and "
+    "scores replacements with the delay-risk model. Never invent delay "
+    "percentages. If they name a different city or date after options are "
+    "on screen, then call search_flights with those. Origin airport "
+    "code (assume MSP unless the "
     "traveler says otherwise), destination airport code, and the departure "
     "date as YYYY-MM-DD; turn city names into airport codes yourself — "
     "always a specific airport, never a metro or city code (New York is "
     "JFK, not NYC). Read "
-    "the options back and ask the traveler to pick one by number. Speak "
+    "the tool's recommendation sentence first (it already names the delay "
+    "risk), then the numbered options, and ask them to pick by number. Speak "
     "airline names, never airline codes or fare-class letters. The search "
     "result's bracketed reference section is not part of the read-back — "
     "use it to answer follow-up questions about the airline, cabin, total "
-    "duration, connections, or a next-day arrival without searching again, "
-    "and say connection airports as city names. When they "
+    "duration, connections, a next-day arrival, or delay risk without "
+    "searching again, "
+    "and say connection airports as city names. When they change what "
+    "matters — cheaper, nonstop, earlier, arrive before a clock time, "
+    "lowest risk — call set_recovery_preferences and read the new "
+    "recommendation; do not search again if options are already on the "
+    "table. Nearby bookable dates appear on the traveler's screen after a "
+    "search — when they name a different day, call search_flights with the "
+    "same route and that new date. When they "
     "choose, call book_flight with that option number and confirm the "
     "booking in one short sentence, then offer to arrange the rest of the "
     "trip; when they agree, call complete_trip and tell them the pieces are "
@@ -130,9 +162,14 @@ BASE_INSTRUCTIONS = (
     "call email_itinerary with the new address — the newest confirmed "
     "address replaces the old one for every later update, and the "
     "itinerary is sent again to the new address. "
-    "Never call search_flights or book_flight when a trip "
-    "is already booked; offer fix_trip or answer questions about the "
-    "existing trip instead. When a traveler with a booked trip asks about "
+    "When a trip is booked and healthy, prefer trip_status over "
+    "a new search. A disruption or an explicit ask for alternatives is the "
+    "exception — then offer_rebook or search_flights is correct. If they already have an "
+    "itinerary — including one loaded from a trip PDF — and they pick a "
+    "replacement flight by number, call book_flight; that updates the "
+    "existing trip's flight and must not start a second trip. Do not call "
+    "complete_trip when hotel, dining, or other legs are already on the "
+    "itinerary. When a traveler with a booked trip asks about "
     "getting back or getting home ('is there a way to get home', 'flights "
     "to get me back', any return question), call check_return_flights — "
     "never search_flights, and never refuse the question. If they haven't "
@@ -140,6 +177,15 @@ BASE_INSTRUCTIONS = (
     "trip's end date when there is one; if they decline or say whenever, "
     "call the tool without a date. Relay its answer as an indication that "
     "flights exist, never as fares or options they can book. "
+    "When the traveler asks to optimize the trip, find a better route, "
+    "save time or money on transportation, compare Uber and the subway, "
+    "or analyze the itinerary, call analyze_itinerary in the same turn. "
+    "Pass any preference they just stated (save time, stay cheap, hate "
+    "walking). Read the tool's spoken recommendation — do not invent "
+    "minutes, dollars, or savings, and never say you used a machine "
+    "learning model. When they accept a numbered optimization or say "
+    "apply, call apply_optimization with that number. When they decline "
+    "or say keep the current plan, call reject_optimization. "
     "When the traveler asks what's happening at "
     "their destination or for things to do there, call destination_info "
     "with their question and relay its answer conversationally — don't "
@@ -196,16 +242,42 @@ def _trip_summary(trip: Trip, items: List[ItineraryItem]) -> str:
         if trip.start_date and trip.end_date
         else "dates unknown"
     )
-    parts = "; ".join(
-        f"{item.type}" + (f" ({item.location})" if item.location else "")
-        for item in items
-    )
+    def _part(item: ItineraryItem) -> str:
+        loc = f" ({item.location})" if item.location else ""
+        line = f"{item.type}{loc}"
+        details = item.details or {}
+        title = (details.get("title") or "").strip()
+        if title:
+            line = f"{item.type} '{title}'{loc}"
+        if details.get("must_keep") or details.get("importance") == "must_keep":
+            line += " [must-keep]"
+        elif details.get("flexibility") == "high":
+            line += " [flexible]"
+        return line
+
+    parts = "; ".join(_part(item) for item in items)
+    prefs_blob = {}
+    for item in items:
+        blob = (item.details or {}).get("traveler_prefs") or {}
+        if blob:
+            prefs_blob = blob
+            break
+    prefs_line = ""
+    if prefs_blob:
+        interests = ", ".join(prefs_blob.get("interests") or []) or "unspecified"
+        prefs_line = (
+            f" Traveler prefs: budget={prefs_blob.get('budget') or 'unspecified'}"
+            f", interests={interests}"
+            f", pace={prefs_blob.get('pace') or 'unspecified'}."
+        )
     return (
         "TRIP CONTEXT (authoritative — this IS the traveler's booked trip; "
         "answer where/when/what questions about it directly, never say you "
         f"lack their itinerary): '{trip.title}' from {trip.origin or 'unknown'} "
-        f"to {destinations}, {dates}. Parts: {parts}. Live repair progress "
-        "comes only from the LIVE STATUS section, not from here. "
+        f"to {destinations}, {dates}. Parts: {parts}.{prefs_line} "
+        "When repairing a disruption, protect [must-keep] items and prefer "
+        "moving [flexible] ones. Live repair progress comes only from the "
+        "LIVE STATUS section, not from here. "
     )
 
 
@@ -324,17 +396,25 @@ def _spoken_date(d) -> str:
 # pattern: in-process, single-instance by standing decision). Replaced on
 # every search, cleared by a successful booking.
 _SESSION_FLIGHT_OPTIONS: Dict[str, List[FlightOption]] = {}
+_SESSION_PREFS: Dict[str, TravelerPrefs] = {}
 
 
 class LatestSearch(BaseModel):
     """The most recent search, bridged for the booking page (Phase 21):
     _SESSION_FLIGHT_OPTIONS is session-keyed and the trip doesn't exist until
     book_flight, so the trip-keyed status endpoint needs this one slot to
-    surface what the Concierge just offered."""
+    surface what the Concierge just offered. `insights` is additive ML
+    display data, parallel to `options` (empty on pre-ML constructors)."""
 
     session_id: str
     options: List[FlightOption]
     recorded_at: datetime
+    insights: List[dict] = []
+    prefs_summary: str = ""
+    origin: str = ""
+    destination: str = ""
+    depart_date: str = ""
+    available_dates: List[dict] = []
 
 
 # Written by search_flights_impl alongside _SESSION_FLIGHT_OPTIONS, cleared
@@ -343,6 +423,11 @@ class LatestSearch(BaseModel):
 # briefly show the other session's candidates — accepted demo-grade looseness
 # for a single-operator demo.
 _LATEST_SEARCH: Optional[LatestSearch] = None
+
+# The flight the Concierge just booked — in-memory display payload for the
+# cascade dashboard so available times stay on screen after pick, even when
+# BigQuery status polling is slow or unavailable locally.
+_LATEST_BOOKING: Optional[dict] = None
 
 # Age expiry for the slot (Phase 22, item H): a conversation that got real
 # options and was then abandoned — no booking, no further search — must not
@@ -381,7 +466,7 @@ _SEARCH_ERROR_LINE = (
 # carry (requirements, decision 4) — an honest answer, not an error, so no
 # silent mock swap and no apology for anything technical.
 _UNSUPPORTED_MARKET_LINE = (
-    "I can't search that route in the demo system — want to try another "
+    "I can't search that route right now — want to try another "
     "one, something like San Francisco to New York?"
 )
 
@@ -390,18 +475,415 @@ _UNSUPPORTED_MARKET_LINE = (
 # a concierge-local policy: shapes.InstaFlightsRequest.limit keeps its
 # default (10) so the repair re-shop's request is byte-identical to pre-41.
 _SEARCH_POOL_SIZE = 15
+# Airline-diversity cap after parse: wide enough for the ML ranker to see
+# a morning nonstop, a cheap connection, and a late nonstop in mock mode.
+_RANK_POOL_SIZE = 6
+# Nearby-date strip: requested day plus the next six, shopped in parallel
+# after the speakable search. Neighbor days use a smaller limit so live
+# Sabre latency stays bounded; a timeout falls back to the selected day.
+_CALENDAR_DAYS = 7
+_CALENDAR_LIMIT = 6
+_CALENDAR_TIMEOUT_S = 3.0
+
+_PRIORITY_ALIASES = {
+    "risk": "risk", "lowest_risk": "risk", "safest": "risk",
+    "disruption": "risk", "lowest disruption risk": "risk",
+    "price": "price", "lowest_price": "price", "cheaper": "price",
+    "cheapest": "price", "cost": "price",
+    "arrival": "arrival", "earliest": "arrival", "earliest_arrival": "arrival",
+    "earlier": "arrival",
+    "nonstop": "nonstop", "non-stop": "nonstop", "no_stops": "nonstop",
+    "direct": "nonstop",
+    "duration": "duration", "shortest": "duration",
+    "shortest_time": "duration", "fastest": "duration",
+}
+
+
+def _prefs_for(session_id: str) -> TravelerPrefs:
+    return _SESSION_PREFS.get(session_id) or TravelerPrefs()
+
+
+def _insight_payload(ranked) -> dict:
+    return {
+        "delay_risk_pct": ranked.delay_risk_pct,
+        "recommendation_score": int(round(ranked.score * 100)),
+        "recommended": ranked.recommended,
+        "why": ranked.why,
+        "key_factors": ranked.factors,
+    }
+
+
+def _parse_iso_date(value: str) -> Optional[date]:
+    try:
+        return date.fromisoformat((value or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def _date_chip(
+    day: date,
+    *,
+    available: bool,
+    selected: bool,
+    lowest_price: Optional[int] = None,
+    delay_risk_pct: Optional[int] = None,
+    n_flights: int = 0,
+) -> dict:
+    return {
+        "date": day.isoformat(),
+        "label": f"{day.strftime('%a')} {day.day}",
+        "weekday": day.strftime("%A"),
+        "available": available,
+        "selected": selected,
+        "lowest_price": lowest_price,
+        "delay_risk_pct": delay_risk_pct,
+        "n_flights": n_flights,
+    }
+
+
+def _summary_from_options(
+    options: List[FlightOption],
+) -> Tuple[Optional[int], Optional[int], int]:
+    if not options:
+        return None, None, 0
+    lowest_price = int(round(min(float(o.price or 0) for o in options)))
+    risks = [predict_delay_risk(o)["delay_risk_pct"] for o in options]
+    return lowest_price, min(risks), len(options)
+
+
+async def _shop_one_calendar_day(
+    origin: str, destination: str, day: date,
+) -> dict:
+    """Best-effort neighbor-day shop. Empty or failed → unavailable chip."""
+    try:
+        search = await sabre_client.instaflights_search(
+            shapes.InstaFlightsRequest(
+                origin=origin,
+                destination=destination,
+                departuredate=day.isoformat(),
+                limit=_CALENDAR_LIMIT,
+            )
+        )
+        pool = _parse_instaflights_options(
+            search, origin, destination, max_options=_CALENDAR_LIMIT,
+        )
+    except Exception:  # noqa: BLE001 — a dead neighbor must not kill search
+        pool = []
+    price, risk, n = _summary_from_options(pool)
+    return _date_chip(
+        day, available=bool(pool), selected=False,
+        lowest_price=price, delay_risk_pct=risk, n_flights=n,
+    )
+
+
+async def shop_available_dates(
+    origin: str,
+    destination: str,
+    selected_date: str,
+    selected_options: List[FlightOption],
+    window_start: Optional[str] = None,
+) -> List[dict]:
+    """Requested day plus the next six. Selected day uses already-parsed
+    options (no second search); neighbors shop in parallel."""
+    selected = _parse_iso_date(selected_date)
+    start = _parse_iso_date(window_start or "") or selected
+    if selected is None or start is None:
+        return []
+    days = [start + timedelta(days=i) for i in range(_CALENDAR_DAYS)]
+    price, risk, n = _summary_from_options(selected_options)
+    selected_chip = _date_chip(
+        selected, available=bool(selected_options), selected=True,
+        lowest_price=price, delay_risk_pct=risk, n_flights=n,
+    )
+    others = [d for d in days if d != selected]
+    results = await asyncio.gather(
+        *[_shop_one_calendar_day(origin, destination, d) for d in others],
+        return_exceptions=True,
+    )
+    by_date = {selected.isoformat(): selected_chip}
+    for day, result in zip(others, results):
+        if isinstance(result, Exception):
+            by_date[day.isoformat()] = _date_chip(
+                day, available=False, selected=False,
+            )
+        else:
+            by_date[day.isoformat()] = result
+    chips = [by_date[d.isoformat()] for d in days]
+    if selected.isoformat() not in {c["date"] for c in chips}:
+        chips.insert(0, selected_chip)
+    return chips
+
+
+def _rank_and_store(
+    session_id: str,
+    options: List[FlightOption],
+    *,
+    origin: str = "",
+    destination: str = "",
+    depart_date: str = "",
+    available_dates: Optional[List[dict]] = None,
+) -> Tuple[List[FlightOption], str]:
+    """Score with the delay-risk model, reorder by current prefs, store."""
+    global _LATEST_SEARCH
+    prev = _LATEST_SEARCH
+    if prev is not None and prev.session_id == session_id:
+        origin = origin or prev.origin
+        destination = destination or prev.destination
+        depart_date = depart_date or prev.depart_date
+        if available_dates is None:
+            available_dates = list(prev.available_dates)
+    dates = [dict(chip) for chip in (available_dates or [])]
+    for chip in dates:
+        chip["selected"] = chip.get("date") == depart_date
+    prefs = _prefs_for(session_id)
+    ranked = rank_options(options, prefs)
+    numbered: List[FlightOption] = []
+    for i, row in enumerate(ranked, start=1):
+        carrier = row.option.airline_name or airline_name(row.option.airline)
+        numbered.append(row.option.model_copy(update={
+            "option_number": i,
+            "spoken": _spoken_option(
+                i, carrier, row.option.stops, row.option.depart_time,
+                row.option.arrive_time, row.option.price,
+            ),
+        }))
+        row.option = numbered[-1]
+    _SESSION_FLIGHT_OPTIONS[session_id] = numbered
+    _LATEST_SEARCH = LatestSearch(
+        session_id=session_id,
+        options=numbered,
+        recorded_at=datetime.now(timezone.utc),
+        insights=[_insight_payload(row) for row in ranked],
+        prefs_summary=prefs.describe(),
+        origin=origin,
+        destination=destination,
+        depart_date=depart_date,
+        available_dates=dates,
+    )
+    return numbered, spoken_recommendation(ranked, prefs)
+
+
+def _store_date_strip_only(
+    session_id: str,
+    origin: str,
+    destination: str,
+    depart_date: str,
+    dates: List[dict],
+) -> None:
+    """Requested day had no fares, but neighbors did — keep the strip
+    visible and drop any stale numbered options so they cannot book by
+    saying option one."""
+    global _LATEST_SEARCH
+    _SESSION_FLIGHT_OPTIONS.pop(session_id, None)
+    _LATEST_SEARCH = LatestSearch(
+        session_id=session_id,
+        options=[],
+        recorded_at=datetime.now(timezone.utc),
+        insights=[],
+        prefs_summary=_prefs_for(session_id).describe(),
+        origin=origin,
+        destination=destination,
+        depart_date=depart_date,
+        available_dates=dates,
+    )
+
+
+def _spoken_open_dates(dates: List[dict]) -> str:
+    """'July 18th from 198 dollars and July 19th from 210 dollars'."""
+    open_days = [d for d in dates if d.get("available")]
+    parts: List[str] = []
+    for chip in open_days[:3]:
+        day = _parse_iso_date(chip.get("date") or "")
+        label = _spoken_date(day) if day else (chip.get("label") or "another day")
+        price = chip.get("lowest_price")
+        if price is not None:
+            parts.append(f"{label} from {int(price)} dollars")
+        else:
+            parts.append(label)
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        spoken = parts[0]
+    elif len(parts) == 2:
+        spoken = f"{parts[0]} and {parts[1]}"
+    else:
+        spoken = f"{', '.join(parts[:-1])}, and {parts[-1]}"
+    if len(open_days) > 3:
+        spoken += ", among others"
+    return spoken
+
+
+_IATA_TOKEN = re.compile(r"\b([A-Z]{3})\b")
+_AIRPORT_HINTS = ("airport", "departure", "terminal", "gate")
+
+
+def _item_text(item: ItineraryItem) -> str:
+    title = ""
+    if isinstance(item.details, dict):
+        title = str(item.details.get("title") or "")
+    return f"{item.location or ''} {title}"
+
+
+def _airports_in(text: str) -> List[str]:
+    return [
+        code for code in _IATA_TOKEN.findall((text or "").upper())
+        if code in AIRPORT_TZ
+    ]
+
+
+def _pair_from_location(location: Optional[str]) -> Optional[Tuple[str, str]]:
+    loc = (location or "").strip().upper()
+    loc = loc.replace("→", "-").replace("->", "-").replace(">", "-")
+    loc = loc.replace("–", "-").replace("—", "-")
+    if "-" not in loc:
+        return None
+    left, right = loc.split("-", 1)
+    a_codes = _airports_in(left) or (
+        [left.strip()] if left.strip() in AIRPORT_TZ else []
+    )
+    b_codes = _airports_in(right) or (
+        [right.strip()] if right.strip() in AIRPORT_TZ else []
+    )
+    if a_codes and b_codes:
+        return a_codes[0], b_codes[0]
+    return None
+
+
+def _leg_score(item: ItineraryItem) -> int:
+    blob = _item_text(item)
+    score = 0
+    if item.type == "flight":
+        score += 4
+    if any(hint in blob.lower() for hint in _AIRPORT_HINTS):
+        score += 5
+    if _airports_in(blob) or _pair_from_location(item.location):
+        score += 2
+    return score
+
+
+def _item_when(item: ItineraryItem) -> datetime:
+    ts = item.start_ts
+    if ts is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _recovery_leg(items: List[ItineraryItem]) -> Optional[ItineraryItem]:
+    """The cancelled airport/flight stop — last high-scoring itinerary item."""
+    scored = [
+        (_leg_score(item), _item_when(item), item) for item in items
+    ]
+    scored = [row for row in scored if row[0] > 0]
+    if not scored:
+        return None
+    scored.sort(key=lambda row: (row[0], row[1]))
+    return scored[-1][2]
+
+
+def _other_end(trip: Trip, origin: str) -> str:
+    origin = (origin or "").strip().upper()
+    for dest in trip.destinations or []:
+        codes = _airports_in(str(dest).upper())
+        raw = str(dest).strip().upper()
+        if not codes and raw in AIRPORT_TZ:
+            codes = [raw]
+        if codes and codes[0] != origin:
+            return codes[0]
+    home = (trip.origin or "").strip().upper()
+    if home in AIRPORT_TZ and home != origin:
+        return home
+    return "MSP" if origin != "MSP" else "SFO"
+
+
+def _iso_depart(ts) -> str:
+    today = datetime.now(_PACIFIC).date()
+    day = None
+    if ts is not None:
+        day = ts.date() if hasattr(ts, "date") else ts
+    if not isinstance(day, date) or day < today:
+        return today.isoformat()
+    return day.isoformat()
+
+
+def _recovery_route(
+    trip: Trip, items: List[ItineraryItem]
+) -> Tuple[str, str, str]:
+    """Origin, destination, and YYYY-MM-DD for a cancelled airport/flight leg."""
+    origin = dest = None
+    when = None
+    leg = _recovery_leg(items)
+    if leg is not None:
+        when = leg.start_ts
+        pair = _pair_from_location(leg.location)
+        if pair:
+            origin, dest = pair
+        else:
+            codes = _airports_in(_item_text(leg))
+            if codes:
+                origin = codes[0]
+                dest = _other_end(trip, origin)
+    if not origin:
+        origin = (trip.origin or "").strip().upper() or "MSP"
+        dest = None
+        for candidate in trip.destinations or []:
+            codes = _airports_in(str(candidate).upper())
+            raw = str(candidate).strip().upper()
+            if codes:
+                dest = codes[0]
+                break
+            if raw in AIRPORT_TZ:
+                dest = raw
+                break
+        dest = dest or _other_end(trip, origin)
+        when = trip.start_date
+    origin = _METRO_ALIASES.get(origin, origin)
+    dest = _METRO_ALIASES.get(dest or "", dest or "")
+    if not dest or origin == dest:
+        dest = _other_end(trip, origin)
+        dest = _METRO_ALIASES.get(dest, dest)
+    if origin == dest:
+        dest = "SFO" if origin != "SFO" else "MSP"
+    return origin, dest, _iso_depart(when)
+
+
+async def offer_rebook_impl(session_id: str) -> str:
+    """Mark the cancelled airport/flight leg broken and search replacements
+    so the traveler can pick by number. Speakable on every failure path —
+    this is the voice turn, not the silent repair cascade."""
+    try:
+        context, speakable_error = await ensure_trip_context(session_id)
+        if speakable_error:
+            return speakable_error
+        if _consent_wait_pending(context.trip.trip_id):
+            return _CONSENT_PENDING_LINE
+        origin, destination, depart_date = _recovery_route(
+            context.trip, context.items
+        )
+        target = _recovery_leg(context.items)
+        if target is not None:
+            try:
+                await asyncio.to_thread(
+                    itinerary_items.update_status, target.item_id, "broken"
+                )
+            except Exception:  # noqa: BLE001 — still offer the flights
+                logger.exception("offer_rebook status update failed")
+            target.status = "broken"
+        return await search_flights_impl(
+            session_id, origin, destination, depart_date
+        )
+    except Exception:  # noqa: BLE001 — the voice turn must survive anything
+        return _SEARCH_ERROR_LINE
 
 
 async def search_flights_impl(
-    session_id: str, origin: str, destination: str, depart_date: str
+    session_id: str, origin: str, destination: str, depart_date: str,
+    calendar_start: Optional[str] = None,
 ) -> str:
-    """Search flights and offer up to three options by voice — one per
-    distinct airline when the cache holds several (Phase 41: a 15-itinerary
-    pool through select_airline_diverse; a single-carrier pool degrades to
-    the classic response-order top three). The tool body, kept a plain
-    function for tests (the fix_trip_impl pattern). Stores the options
-    per session so book_flight can resolve 'option one'. Every failure path
-    returns a speakable string — a raising tool kills the spoken turn."""
+    """Search flights, score delay risk, and offer a ranked menu. Stores
+    the options per session so book_flight and set_recovery_preferences can
+    resolve 'option one'. Every failure path returns a speakable string."""
     origin = (origin or "").strip().upper()
     destination = (destination or "").strip().upper()
     origin = _METRO_ALIASES.get(origin, origin)
@@ -444,36 +926,153 @@ async def search_flights_impl(
         pool = _parse_instaflights_options(
             search, origin, destination, max_options=_SEARCH_POOL_SIZE
         )
-        options = select_airline_diverse(pool)
+        options = select_airline_diverse(pool, max_airlines=_RANK_POOL_SIZE)
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         _clear_search_state()
         return _SEARCH_ERROR_LINE
     if not options:
-        _clear_search_state()
+        dates: List[dict] = []
+        try:
+            dates = await asyncio.wait_for(
+                shop_available_dates(
+                    origin, destination, depart_date, [],
+                    window_start=calendar_start,
+                ),
+                timeout=_CALENDAR_TIMEOUT_S,
+            )
+        except Exception:  # noqa: BLE001
+            dates = []
+        open_days = [d for d in dates if d.get("available")]
+        if not open_days:
+            _clear_search_state()
+            return (
+                "I couldn't find any flights for that day — want to try a "
+                "different date?"
+            )
+        _store_date_strip_only(
+            session_id, origin, destination, depart_date, dates,
+        )
+        asked = _parse_iso_date(depart_date)
+        asked_s = _spoken_date(asked) if asked else "that day"
+        alts = _spoken_open_dates(dates)
         return (
-            "I couldn't find any flights for that day — want to try a "
-            "different date?"
+            f"I couldn't find any flights for {asked_s}. "
+            f"These days have flights: {alts}. "
+            f"They're on the screen — tap one or say the date."
         )
 
-    _SESSION_FLIGHT_OPTIONS[session_id] = options
-    global _LATEST_SEARCH
-    _LATEST_SEARCH = LatestSearch(
-        session_id=session_id,
-        options=options,
-        recorded_at=datetime.now(timezone.utc),
+    dates: List[dict] = []
+    try:
+        dates = await asyncio.wait_for(
+            shop_available_dates(
+                origin, destination, depart_date, options,
+                window_start=calendar_start,
+            ),
+            timeout=_CALENDAR_TIMEOUT_S,
+        )
+    except Exception:  # noqa: BLE001 — strip is additive; search still speaks
+        start = _parse_iso_date(depart_date)
+        if start is not None:
+            price, risk, n = _summary_from_options(options)
+            dates = [_date_chip(
+                start, available=True, selected=True,
+                lowest_price=price, delay_risk_pct=risk, n_flights=n,
+            )]
+
+    options, lead = _rank_and_store(
+        session_id, options,
+        origin=origin, destination=destination, depart_date=depart_date,
+        available_dates=dates,
     )
-    count_word = {2: "two", 3: "three"}.get(len(options), str(len(options)))
     spoken = " ".join(option.spoken for option in options)
     reference = " ".join(_option_facts(option) for option in options)
     facts = f" [Reference, don't read aloud unless asked: {reference}]"
-    if len(options) == 1:
-        return (
-            f"I found one flight. {spoken} Should I book it? Just say "
-            f"option one.{facts}"
+    pick = "Should I book it? Just say option one." if len(options) == 1 else (
+        "Which one would you like?"
+    )
+    other_days = sum(1 for d in dates if d.get("available") and not d.get("selected"))
+    screen = (
+        " Other bookable dates are on the screen if you want a different day."
+        if other_days else ""
+    )
+    return f"{lead} {spoken} {pick}{screen}{facts}"
+
+
+def _as_bool(value) -> Optional[bool]:
+    if value is True or value is False:
+        return value
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    if raw in ("true", "yes", "1", "on"):
+        return True
+    if raw in ("false", "no", "0", "off"):
+        return False
+    return None
+
+
+async def set_recovery_preferences_impl(
+    session_id: str,
+    priority: str = "",
+    arrive_before: str = "",
+    avoid_connections: str = "",
+) -> str:
+    """Rerank stored flight options from the traveler's new priorities.
+    Does not search again. Speakable on every path."""
+    prefs = _prefs_for(session_id)
+    if priority:
+        mapped = _PRIORITY_ALIASES.get(priority.strip().lower())
+        if mapped:
+            prefs = TravelerPrefs(
+                priority=mapped,
+                arrive_before=prefs.arrive_before,
+                avoid_connections=prefs.avoid_connections,
+            )
+    clock = parse_clock(arrive_before or "")
+    if clock:
+        prefs = TravelerPrefs(
+            priority=prefs.priority,
+            arrive_before=clock,
+            avoid_connections=prefs.avoid_connections,
         )
-    return (
-        f"I found {count_word} good options. {spoken} Which one would "
-        f"you like?{facts}"
+    flag = _as_bool(avoid_connections)
+    if flag is not None:
+        prefs = TravelerPrefs(
+            priority=prefs.priority,
+            arrive_before=prefs.arrive_before,
+            avoid_connections=flag,
+        )
+    _SESSION_PREFS[session_id] = prefs
+    options = _SESSION_FLIGHT_OPTIONS.get(session_id)
+    if not options:
+        return (
+            f"I'll rank the next search by {prefs.describe()}. Tell me "
+            "where you're headed and when, and I'll search."
+        )
+    options, lead = _rank_and_store(session_id, options)
+    spoken = " ".join(option.spoken for option in options)
+    reference = " ".join(_option_facts(option) for option in options)
+    facts = f" [Reference, don't read aloud unless asked: {reference}]"
+    return f"{lead} {spoken} Which one would you like?{facts}"
+
+
+async def select_search_date_impl(depart_date: str) -> str:
+    """Re-shop the current route on a date from the available-dates strip.
+    Speakable, same contract as search_flights_impl."""
+    slot = _LATEST_SEARCH
+    if slot is None or not slot.origin or not slot.destination:
+        return (
+            "I need a destination first — tell me where you're headed "
+            "and when."
+        )
+    depart_date = (depart_date or "").strip()
+    window_start = None
+    chips = slot.available_dates or []
+    if chips and any(c.get("date") == depart_date for c in chips):
+        window_start = chips[0].get("date")
+    return await search_flights_impl(
+        slot.session_id, slot.origin, slot.destination, depart_date,
+        calendar_start=window_start,
     )
 
 
@@ -492,7 +1091,20 @@ def _option_facts(option: FlightOption) -> str:
         parts.append("connects in " + ", ".join(option.layover_airports))
     if option.arrives_next_day:
         parts.append("arrives the next day")
+    insight = _insight_for_option(option)
+    if insight:
+        parts.append(f"{insight['delay_risk_pct']} percent delay risk")
     return f"Option {word}: {', '.join(parts)}."
+
+
+def _insight_for_option(option: FlightOption) -> Optional[dict]:
+    slot = _LATEST_SEARCH
+    if slot is None or not slot.insights:
+        return None
+    idx = option.option_number - 1
+    if 0 <= idx < len(slot.insights):
+        return slot.insights[idx]
+    return None
 
 
 def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
@@ -565,28 +1177,126 @@ def _booking_writes(option: FlightOption, options_offered: List[FlightOption]):
     return trip
 
 
+def _replace_or_add_flight(
+    context: TripContext, option: FlightOption, options_offered: List[FlightOption],
+) -> None:
+    """Write the chosen option onto an existing itinerary (PDF or booked
+    trip) instead of creating a second trip."""
+    start_ts, end_ts = option_timestamps(option)
+    details = details_from_option(option)
+    details["title"] = (
+        f"{option.airline_name or airline_name(option.airline)} "
+        f"{option.flight_number}"
+    )
+    location = f"{option.origin}-{option.destination}"
+    flight = next((i for i in context.items if i.type == "flight"), None)
+    if flight is None:
+        flight = ItineraryItem(
+            trip_id=context.trip.trip_id,
+            type="flight",
+            status="planned",
+            provider="sabre",
+            provider_ref=f"VOICE-FLIGHT-{uuid.uuid4().hex[:6].upper()}",
+            start_ts=start_ts,
+            end_ts=end_ts,
+            location=location,
+            details=details,
+            price=option.price,
+            currency=option.currency,
+        )
+        success, _, error = itinerary_items.create_item(flight)
+        if not success:
+            raise RuntimeError(f"flight item insert failed: {error}")
+    else:
+        success, affected, error = itinerary_items.update_flight_fields(
+            flight.item_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            price=option.price,
+            currency=option.currency,
+            details=details,
+        )
+        if not success or affected == 0:
+            raise RuntimeError(f"flight field write failed: {error}")
+        view = memory_trips.get(context.trip.trip_id)
+        if view is not None:
+            for item in view.items:
+                if item.item_id == flight.item_id:
+                    item.location = location
+                    break
+
+    booking = Booking(
+        item_id=flight.item_id,
+        trip_id=context.trip.trip_id,
+        sabre_confirmation_ref=flight.provider_ref or f"REBOOK-{option.flight_number}",
+        state="confirmed",
+        raw_response={
+            "source": "voice_rebook",
+            "option": option.model_dump(),
+            "options_offered": [o.model_dump() for o in options_offered],
+        },
+    )
+    success, _, error = bookings.create_booking(booking)
+    if not success:
+        raise RuntimeError(f"flight booking insert failed: {error}")
+    new_status = "fixed" if flight.status in ("broken", "repairing") else "booked"
+    success, affected, error = itinerary_items.update_status(
+        flight.item_id, new_status
+    )
+    if not success or affected == 0:
+        raise RuntimeError(f"flight status flip failed: {error}")
+    memory_trips.patch_trip_route(
+        context.trip.trip_id,
+        option.origin,
+        option.destination,
+        date.fromisoformat(option.depart_date),
+    )
+
+
 async def book_flight_impl(session_id: str, option_number: int) -> str:
     """Book one of the offered options by number — the tool body, kept a
     plain function for tests. Creates the Trip + flight item + booking rows,
     replaces the session's pinned trip (ensure_trip_context caches the pin
     for the session's life), and clears the offered options. Failures return
     speakable strings — a tool that raises kills the spoken turn."""
+    global _LATEST_SEARCH, _LATEST_BOOKING
+    from_latest = False
     options = _SESSION_FLIGHT_OPTIONS.get(session_id)
+    if not options and _LATEST_SEARCH is not None and _LATEST_SEARCH.options:
+        options = list(_LATEST_SEARCH.options)
+        _SESSION_FLIGHT_OPTIONS[session_id] = options
+        from_latest = True
+        pinned = _SESSION_TRIPS.get(_LATEST_SEARCH.session_id)
+        if pinned is not None and session_id not in _SESSION_TRIPS:
+            _SESSION_TRIPS[session_id] = pinned
     if not options:
         return (
             "I don't have flight options in front of me yet — tell me where "
             "you're headed and I'll search first."
         )
-    if not isinstance(option_number, int) or not 1 <= option_number <= len(options):
+    try:
+        option_number = int(option_number)
+    except (TypeError, ValueError):
+        option_number = -1
+    if option_number < 1 or option_number > len(options):
         count_word = _NUMBER_WORDS.get(len(options), str(len(options)))
         return (
             f"I only offered {count_word} options — which number would "
             "you like?"
         )
     option = options[option_number - 1]
+    existing = _SESSION_TRIPS.get(session_id)
+    updating = bool(existing and existing.items)
 
     try:
-        trip = await asyncio.to_thread(_booking_writes, option, options)
+        if updating:
+            await asyncio.to_thread(
+                _replace_or_add_flight, existing, option, options
+            )
+            trip_id = existing.trip.trip_id
+        else:
+            trip = await asyncio.to_thread(_booking_writes, option, options)
+            trip_id = trip.trip_id
     except Exception:  # noqa: BLE001 — the voice turn must survive anything
         return (
             "I couldn't get that flight booked just now — give me a second "
@@ -596,20 +1306,89 @@ async def book_flight_impl(session_id: str, option_number: int) -> str:
     # The booking is real from here on; replace the pin so this session's
     # remaining turns answer from the new trip, and drop the spent options.
     _SESSION_FLIGHT_OPTIONS.pop(session_id, None)
-    global _LATEST_SEARCH
-    if _LATEST_SEARCH is not None and _LATEST_SEARCH.session_id == session_id:
+    if _LATEST_SEARCH is not None and (
+        _LATEST_SEARCH.session_id == session_id or from_latest
+    ):
         _LATEST_SEARCH = None
+    _LATEST_BOOKING = _booking_display(trip_id, option)
     _SESSION_TRIPS.pop(session_id, None)
-    await ensure_trip_context(session_id, trip_id=trip.trip_id)
+    await ensure_trip_context(session_id, trip_id=trip_id)
 
     depart = date.fromisoformat(option.depart_date)
     legs = "nonstop" if option.stops == 0 else "with a stop"
+    if updating:
+        return (
+            f"Done — I updated your itinerary with that flight to "
+            f"{option.destination}, {legs}, leaving {_spoken_date(depart)} at "
+            f"{_spoken_clock(option.depart_time)}."
+        )
     return (
         f"Done — your flight to {option.destination} is booked, {legs}, "
         f"leaving {_spoken_date(depart)} at "
         f"{_spoken_clock(option.depart_time)}. Want me to arrange the rest "
         "of the trip — hotel, ride, dinner, and something fun?"
     )
+
+
+def _option_display(option: FlightOption) -> dict:
+    """One speakable option as the dashboard candidates card (Phase 21 + 33)."""
+    payload = {
+        "option_number": option.option_number,
+        "route": f"{option.origin} → {option.destination}",
+        "depart_date": option.depart_date,
+        "depart_time": _spoken_clock(option.depart_time),
+        "arrive_time": _spoken_clock(option.arrive_time),
+        "stops": option.stops,
+        "price": round(option.price),
+        "airline_name": option.airline_name,
+        "duration": (
+            fmt_duration(option.duration_minutes)
+            if option.duration_minutes else ""
+        ),
+    }
+    insight = _insight_for_option(option)
+    if insight:
+        payload.update(insight)
+    return payload
+
+
+def _pending_options_payload(slot: LatestSearch) -> dict:
+    return {
+        "recorded_at": slot.recorded_at.isoformat(),
+        "prefs_summary": slot.prefs_summary,
+        "origin": slot.origin,
+        "destination": slot.destination,
+        "depart_date": slot.depart_date,
+        "available_dates": list(slot.available_dates),
+        "options": [_option_display(o) for o in slot.options],
+    }
+
+
+def _booking_display(trip_id: str, option: FlightOption) -> dict:
+    payload = _option_display(option)
+    payload["trip_id"] = trip_id
+    payload["status"] = "booked"
+    payload["flight_number"] = (
+        str(option.flight_number) if option.flight_number else ""
+    )
+    payload["cabin"] = option.cabin or ""
+    return payload
+
+
+def current_pending_options() -> Optional[dict]:
+    """Latest search options for the cascade awaiting view — trip-agnostic
+    so times show while the traveler is still picking, before a trip exists."""
+    slot = _LATEST_SEARCH
+    if slot is None:
+        return None
+    if datetime.now(timezone.utc) - slot.recorded_at > _LATEST_SEARCH_TTL:
+        return None
+    return _pending_options_payload(slot)
+
+
+def latest_booking() -> Optional[dict]:
+    """The flight just booked by voice, for the cascade dashboard card."""
+    return _LATEST_BOOKING
 
 
 def pending_options_for_trip(trip_id: str) -> Optional[dict]:
@@ -632,29 +1411,7 @@ def pending_options_for_trip(trip_id: str) -> Optional[dict]:
     pinned = _SESSION_TRIPS.get(slot.session_id)
     if pinned is not None and pinned.trip.trip_id != trip_id:
         return None
-    return {
-        "recorded_at": slot.recorded_at.isoformat(),
-        "options": [
-            {
-                "option_number": o.option_number,
-                "route": f"{o.origin} → {o.destination}",
-                "depart_date": o.depart_date,
-                "depart_time": _spoken_clock(o.depart_time),
-                "arrive_time": _spoken_clock(o.arrive_time),
-                "stops": o.stops,
-                "price": round(o.price),
-                # Phase 33: the candidates panel names the carrier and shows
-                # the journey length — still a name, never a code; empty
-                # strings when the response didn't carry them.
-                "airline_name": o.airline_name,
-                "duration": (
-                    fmt_duration(o.duration_minutes)
-                    if o.duration_minutes else ""
-                ),
-            }
-            for o in slot.options
-        ],
-    }
+    return _pending_options_payload(slot)
 
 
 def _completion_items(trip: Trip) -> List[ItineraryItem]:
@@ -812,6 +1569,85 @@ async def trip_status_impl(session_id: str) -> str:
     if any(item.status in ("broken", "repairing", "cancelled") for item in items):
         return f"Here's your trip right now: {summary}."
     return f"Here's your trip right now: {summary}. Everything is on track."
+
+
+async def _refresh_pinned_items(session_id: str) -> None:
+    context = _SESSION_TRIPS.get(session_id)
+    if context is None:
+        return
+    try:
+        success, items, _error = await asyncio.to_thread(
+            itinerary_items.list_items_for_trip, context.trip.trip_id
+        )
+    except Exception:  # noqa: BLE001
+        return
+    if success and items:
+        context.items = items
+        context.summary = _trip_summary(context.trip, items)
+
+
+async def analyze_itinerary_impl(session_id: str, preference_note: str = "") -> str:
+    """Score the pinned itinerary. Speakable only — no ML jargon."""
+    from api import cascade_optimize
+
+    context = _SESSION_TRIPS.get(session_id)
+    if context is None:
+        return _NO_TRIP_SPOKEN
+    try:
+        result = await asyncio.to_thread(
+            cascade_optimize.analyze_by_id,
+            context.trip.trip_id,
+            pref_text=preference_note or "",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("analyze_itinerary failed")
+        return "I couldn't finish comparing your routes just now — ask me again in a moment."
+    return result.get("spoken") or "I looked over the itinerary."
+
+
+async def apply_optimization_impl(session_id: str, option_number: int) -> str:
+    from api import cascade_optimize
+
+    context = _SESSION_TRIPS.get(session_id)
+    if context is None:
+        return _NO_TRIP_SPOKEN
+    try:
+        number = int(option_number)
+    except (TypeError, ValueError):
+        return "Tell me which recommendation number to apply."
+    try:
+        result = await asyncio.to_thread(
+            cascade_optimize.apply_recommendation,
+            context.trip.trip_id,
+            str(number),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("apply_optimization failed")
+        return "I couldn't apply that change just now — ask me again in a moment."
+    await _refresh_pinned_items(session_id)
+    return result.get("spoken") or "Applied."
+
+
+async def reject_optimization_impl(session_id: str, option_number: int = 1) -> str:
+    from api import cascade_optimize
+
+    context = _SESSION_TRIPS.get(session_id)
+    if context is None:
+        return _NO_TRIP_SPOKEN
+    try:
+        number = int(option_number or 1)
+    except (TypeError, ValueError):
+        number = 1
+    try:
+        result = await asyncio.to_thread(
+            cascade_optimize.reject_recommendation,
+            context.trip.trip_id,
+            str(number),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("reject_optimization failed")
+        return "Okay — I'll leave your itinerary as it is."
+    return result.get("spoken") or "Okay — I'll keep your current plan."
 
 
 # Destination info (Phase 35): one trip-aware, read-only Tavily lookup —
@@ -1078,6 +1914,15 @@ def _today_line() -> str:
     )
 
 
+def _prefs_line(session_id: str) -> str:
+    prefs = _prefs_for(session_id)
+    return (
+        f"Current recovery ranking: {prefs.describe()}. When they change "
+        "priorities, call set_recovery_preferences; do not invent a new "
+        "ranking yourself. "
+    )
+
+
 def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> Agent:
     """The foreground agent for one turn. Tools close over session_id so
     background completions report into this voice session's log; the fresh
@@ -1085,21 +1930,49 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
     time — build per turn, never once."""
 
     async def _fix_trip() -> str:
-        """Start repairs for the traveler's booked trip after a disruption.
-        Repairs run in the background and this returns immediately — keep
-        the conversation going while they work."""
+        """Start the full background repair cascade for every remaining
+        itinerary item. Call only when they ask to fix the whole trip
+        ('fix my trip') after a disruption is already on screen. Do not
+        use this when they report a cancelled flight or trip to the
+        airport — call offer_rebook so they can pick a replacement."""
         return await fix_trip_impl(session_id)
 
+    async def _offer_rebook() -> str:
+        """Show numbered replacement flights after a cancelled trip to the
+        airport or a cancelled flight. Call this in the same turn for
+        those phrases — do not call fix_trip. Marks the disrupted leg and
+        searches so the traveler can pick by number."""
+        return await offer_rebook_impl(session_id)
+
     async def _search_flights(origin: str, destination: str, depart_date: str) -> str:
-        """Search flights and get 2-3 speakable options for the traveler to
-        pick from by number. Airport codes for origin and destination;
-        depart_date is YYYY-MM-DD. Use only when no trip is booked yet."""
+        """Search flights immediately and get ranked speakable options for
+        the traveler to pick from by number. Call in the same turn the
+        traveler names a destination and date on a new booking. For a
+        cancelled trip to the airport or cancelled flight on a booked
+        itinerary, call offer_rebook instead. Airport codes for origin and
+        destination; depart_date is YYYY-MM-DD. The result is already
+        scored by the delay-risk model — read its recommendation sentence."""
         return await search_flights_impl(session_id, origin, destination, depart_date)
+
+    async def _set_recovery_preferences(
+        priority: str = "",
+        arrive_before: str = "",
+        avoid_connections: str = "",
+    ) -> str:
+        """Rerank the flight options already on the table. Call when the
+        traveler changes what matters instead of searching again.
+        priority is one of: price, arrival, risk, nonstop, duration.
+        arrive_before is a clock like '9 AM' or '09:00'.
+        avoid_connections is true/false."""
+        return await set_recovery_preferences_impl(
+            session_id, priority, arrive_before, avoid_connections,
+        )
 
     async def _book_flight(option_number: int) -> str:
         """Book one of the flight options just offered, by its number.
-        Creates the trip and books the flight; call only after
-        search_flights has offered options."""
+        On a fresh session this creates the trip. If an itinerary is already
+        pinned (including one loaded from a PDF), this updates that trip's
+        flight instead of starting a second trip."""
         return await book_flight_impl(session_id, option_number)
 
     async def _complete_trip() -> str:
@@ -1135,17 +2008,38 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
         when they gave one, or leave it empty."""
         return await check_return_flights_impl(session_id, return_date or None)
 
+    async def _analyze_itinerary(preference_note: str = "") -> str:
+        """Analyze the pinned itinerary for cheaper, faster, or more
+        efficient travel. Call when they ask to optimize the trip, find a
+        better route, or compare transportation. Pass any preference they
+        stated. The result is already scored — read it; do not pick a
+        winner yourself."""
+        return await analyze_itinerary_impl(session_id, preference_note)
+
+    async def _apply_optimization(option_number: int) -> str:
+        """Apply one numbered itinerary optimization the traveler accepted."""
+        return await apply_optimization_impl(session_id, option_number)
+
+    async def _reject_optimization(option_number: int = 1) -> str:
+        """Keep the current plan and dismiss that numbered optimization."""
+        return await reject_optimization_impl(session_id, option_number)
+
     trip_line = trip_context.summary if trip_context else _NO_TRIP_LINE
     return Agent(
         name="Concierge",
         model=_llm_model(),
         instructions=(
-            BASE_INSTRUCTIONS + _today_line() + trip_line
+            BASE_INSTRUCTIONS + _today_line() + _prefs_line(session_id) + trip_line
             + session_snapshot(session_id)
         ),
         tools=[
             function_tool(_fix_trip, name_override="fix_trip"),
+            function_tool(_offer_rebook, name_override="offer_rebook"),
             function_tool(_search_flights, name_override="search_flights"),
+            function_tool(
+                _set_recovery_preferences,
+                name_override="set_recovery_preferences",
+            ),
             function_tool(_book_flight, name_override="book_flight"),
             function_tool(_complete_trip, name_override="complete_trip"),
             function_tool(_trip_status, name_override="trip_status"),
@@ -1154,6 +2048,9 @@ def build_agent(session_id: str, trip_context: Optional[TripContext] = None) -> 
                 _check_return_flights, name_override="check_return_flights"
             ),
             function_tool(_email_itinerary, name_override="email_itinerary"),
+            function_tool(_analyze_itinerary, name_override="analyze_itinerary"),
+            function_tool(_apply_optimization, name_override="apply_optimization"),
+            function_tool(_reject_optimization, name_override="reject_optimization"),
         ],
     )
 

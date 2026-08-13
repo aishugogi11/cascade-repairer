@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 
 from google.cloud import bigquery
 
+from api import memory_trips
 from api.helpers.bigquery_helper import bq_helper
 from api.repositories.models import BOOKING_STATE_ADAPTER, Booking, rows_to_models
 
@@ -14,6 +15,9 @@ def _table() -> str:
 
 def create_booking(booking: Booking) -> Tuple[bool, Optional[Booking], Optional[str]]:
     """Insert a booking; booked_at is stamped by BigQuery."""
+    mem = memory_trips.add_booking(booking)
+    if mem is not None:
+        return mem
     query = f"""
         INSERT INTO `{_table()}`
             (booking_id, item_id, trip_id, sabre_confirmation_ref, state,
@@ -49,6 +53,9 @@ def get_booking(booking_id: str) -> Tuple[bool, Optional[Booking], Optional[str]
 
 
 def list_bookings_for_trip(trip_id: str) -> Tuple[bool, List[Booking], Optional[str]]:
+    mem = memory_trips.list_bookings(trip_id)
+    if mem is not None:
+        return True, mem, None
     query = f"""
         SELECT * FROM `{_table()}`
         WHERE trip_id = @trip_id

@@ -1,0 +1,130 @@
+{
+  "n_test": 2400,
+  "mae": 0.04076423471931435,
+  "rmse": 0.05417631963893426,
+  "r2": 0.9268359402096875,
+  "y_mean": 0.44887986051032974,
+  "pred_mean": 0.4468963494814569,
+  "target": "transportation_quality_score",
+  "target_description": "Higher is a better transportation outcome for this hop (time, cost, walking, congestion, schedule fit).",
+  "model": "RandomForestRegressor",
+  "n_train": 9600,
+  "features": [
+    "distance_miles",
+    "road_distance",
+    "walking_distance",
+    "estimated_travel_time",
+    "estimated_cost",
+    "rideshare_eta",
+    "time_of_day",
+    "day_of_week",
+    "traffic_level",
+    "pickup_congestion",
+    "dropoff_congestion",
+    "schedule_buffer",
+    "activity_duration",
+    "time_until_next_activity",
+    "number_of_previous_stops",
+    "route_backtracking_distance",
+    "cost_per_mile",
+    "time_per_mile",
+    "buffer_ratio",
+    "walking_ratio",
+    "route_efficiency",
+    "transportation_mode",
+    "venue_type"
+  ],
+  "n_features": 23,
+  "expanded_features": [
+    "num__distance_miles",
+    "num__road_distance",
+    "num__walking_distance",
+    "num__estimated_travel_time",
+    "num__estimated_cost",
+    "num__rideshare_eta",
+    "num__time_of_day",
+    "num__day_of_week",
+    "num__traffic_level",
+    "num__pickup_congestion",
+    "num__dropoff_congestion",
+    "num__schedule_buffer",
+    "num__activity_duration",
+    "num__time_until_next_activity",
+    "num__number_of_previous_stops",
+    "num__route_backtracking_distance",
+    "num__cost_per_mile",
+    "num__time_per_mile",
+    "num__buffer_ratio",
+    "num__walking_ratio",
+    "num__route_efficiency",
+    "cat__transportation_mode_lyft",
+    "cat__transportation_mode_transit",
+    "cat__transportation_mode_uber",
+    "cat__transportation_mode_uber_alt_pickup",
+    "cat__transportation_mode_walk",
+    "cat__venue_type_airport",
+    "cat__venue_type_concert",
+    "cat__venue_type_dining",
+    "cat__venue_type_hotel",
+    "cat__venue_type_museum",
+    "cat__venue_type_other",
+    "cat__venue_type_park"
+  ],
+  "dataset": "synthetic_transport_quality",
+  "dataset_disclaimer": "Initial model trained on a synthetic transportation dataset designed around realistic travel constraints. The architecture is designed to be retrained on real-world trip outcomes.",
+  "comparison": {
+    "LinearRegression": {
+      "mae": 0.06356828205328961,
+      "rmse": 0.08301774246121905,
+      "r2": 0.8282009978842269
+    },
+    "RandomForestRegressor": {
+      "mae": 0.04076423471931435,
+      "rmse": 0.05417631963893426,
+      "r2": 0.9268359402096875
+    }
+  },
+  "production_model": "RandomForestRegressor",
+  "top_features": [
+    {
+      "feature": "walking_distance",
+      "importance": 0.6733372706205387,
+      "why": "Miles walked to/from pickup or the whole hop if walking."
+    },
+    {
+      "feature": "walking_ratio",
+      "importance": 0.08308787988734248,
+      "why": "Walk share of the hop. Tiny walks are fine; long ones are not."
+    },
+    {
+      "feature": "schedule_buffer",
+      "importance": 0.05681989049918403,
+      "why": "Minutes of slack before the next activity starts."
+    },
+    {
+      "feature": "estimated_travel_time",
+      "importance": 0.034334557720640625,
+      "why": "Door-to-door minutes including wait."
+    },
+    {
+      "feature": "route_backtracking_distance",
+      "importance": 0.030042578600847615,
+      "why": "Extra miles vs a more direct sequence."
+    },
+    {
+      "feature": "estimated_cost",
+      "importance": 0.02648062381524412,
+      "why": "Traveler-paid dollars for this option."
+    },
+    {
+      "feature": "distance_miles",
+      "importance": 0.022045708529251907,
+      "why": "Straight-line miles between origin and destination."
+    },
+    {
+      "feature": "buffer_ratio",
+      "importance": 0.016380576382226817,
+      "why": "Slack relative to travel time. Tight connections hurt."
+    }
+  ]
+}

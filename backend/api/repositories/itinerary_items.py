@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 
 from google.cloud import bigquery
 
+from api import memory_trips
 from api.helpers.bigquery_helper import bq_helper
 from api.repositories.models import (
     ITEM_STATUS_ADAPTER,
@@ -23,6 +24,9 @@ def _table() -> str:
 
 def create_item(item: ItineraryItem) -> Tuple[bool, Optional[ItineraryItem], Optional[str]]:
     """Insert an itinerary item; updated_at is stamped by BigQuery."""
+    mem = memory_trips.add_item(item)
+    if mem is not None:
+        return mem
     query = f"""
         INSERT INTO `{_table()}`
             (item_id, trip_id, type, status, provider, provider_ref,
@@ -65,6 +69,11 @@ def get_item(item_id: str) -> Tuple[bool, Optional[ItineraryItem], Optional[str]
 def list_items_for_trip(
     trip_id: str,
 ) -> Tuple[bool, List[ItineraryItem], Optional[str]]:
+    mem = memory_trips.get(trip_id)
+    if mem is not None:
+        return True, list(mem.items), None
+    if not bq_helper.credentials_ready():
+        return True, [], None
     query = f"""
         SELECT * FROM `{_table()}`
         WHERE trip_id = @trip_id
@@ -94,6 +103,16 @@ def update_flight_fields(
     Returns (success, affected_rows, error) — affected_rows 0 means no such
     item (a no-op, not an error; the caller decides whether that's fatal).
     """
+    mem = memory_trips.update_flight_fields(
+        item_id,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        price=price,
+        currency=currency,
+        details=details,
+    )
+    if mem is not None:
+        return mem
     query = f"""
         UPDATE `{_table()}`
         SET start_ts = @start_ts, end_ts = @end_ts, price = @price,
@@ -115,6 +134,45 @@ def update_flight_fields(
     return bq_helper.run_dml(query, params)
 
 
+def update_item_fields(
+    item_id: str,
+    *,
+    start_ts,
+    end_ts,
+    location,
+    details: Optional[dict],
+    price: Optional[float] = None,
+    currency: Optional[str] = None,
+) -> Tuple[bool, int, Optional[str]]:
+    """Update schedule/location/details after an accepted optimization."""
+    mem = memory_trips.update_item_fields(
+        item_id,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        location=location,
+        details=details,
+    )
+    if mem is not None:
+        return mem
+    query = f"""
+        UPDATE `{_table()}`
+        SET start_ts = @start_ts, end_ts = @end_ts, location = @location,
+            details = PARSE_JSON(@details), updated_at = CURRENT_TIMESTAMP()
+        WHERE item_id = @item_id
+    """
+    params = [
+        bigquery.ScalarQueryParameter("start_ts", "TIMESTAMP", start_ts),
+        bigquery.ScalarQueryParameter("end_ts", "TIMESTAMP", end_ts),
+        bigquery.ScalarQueryParameter("location", "STRING", location),
+        bigquery.ScalarQueryParameter(
+            "details", "STRING",
+            json.dumps(details) if details is not None else None,
+        ),
+        bigquery.ScalarQueryParameter("item_id", "STRING", item_id),
+    ]
+    return bq_helper.run_dml(query, params)
+
+
 def update_status(item_id: str, status: str) -> Tuple[bool, int, Optional[str]]:
     """Transition an item through the repair lifecycle, stamping updated_at.
 
@@ -123,6 +181,9 @@ def update_status(item_id: str, status: str) -> Tuple[bool, int, Optional[str]]:
     (success, affected_rows, error) — affected_rows 0 means no such item
     (a no-op, not an error).
     """
+    mem = memory_trips.update_status(item_id, status)
+    if mem is not None:
+        return mem
     status = ITEM_STATUS_ADAPTER.validate_python(status)
     query = f"""
         UPDATE `{_table()}`

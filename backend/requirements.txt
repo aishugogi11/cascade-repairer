@@ -17,3 +17,7 @@ tavily-python==0.7.26
 google-cloud-storage==2.19.0
 pytest==8.4.1
 httpx==0.28.1
+scikit-learn==1.6.1
+pandas==2.2.3
+joblib==1.4.2
+pypdf==5.4.0

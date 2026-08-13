@@ -19,6 +19,7 @@ from api import concierge
 from api import concurrency_core as core
 from api.helpers.bigquery_helper import bq_helper
 from api.sabre import client as sabre_client
+from api.sabre import shapes
 
 
 class _FakeResult:
@@ -53,6 +54,7 @@ def fresh_state(monkeypatch):
     monkeypatch.setattr(concierge, "_SESSION_TRIPS", {})
     monkeypatch.setattr(concierge, "_SESSION_FLIGHT_OPTIONS", {})
     monkeypatch.setattr(concierge, "_LATEST_SEARCH", None)
+    monkeypatch.setattr(concierge, "_LATEST_BOOKING", None)
     core._SESSIONS.clear()
     yield
     core._SESSIONS.clear()
@@ -61,7 +63,7 @@ def fresh_state(monkeypatch):
 def trip_row():
     return {
         "trip_id": "t-1", "user_id": "demo-traveler",
-        "title": "The Complete Trip — hackathon demo", "status": "booked",
+        "title": "The Complete Trip", "status": "booked",
         "origin": "MSP", "destinations": ["SFO", "Mountain View"],
         "start_date": "2026-07-17", "end_date": "2026-07-19",
     }
@@ -159,9 +161,11 @@ def test_agent_uses_fast_model_and_exposes_guided_toolset(monkeypatch):
     # rule); Phase 40 the email_itinerary offer (registered key or no key —
     # the send module degrades to "disabled", never an import-time gate).
     assert {t.name for t in agent.tools} == {
-        "fix_trip", "search_flights", "book_flight", "complete_trip",
+        "fix_trip", "offer_rebook", "search_flights", "set_recovery_preferences",
+        "book_flight", "complete_trip",
         "trip_status", "destination_info", "check_return_flights",
         "email_itinerary",
+        "analyze_itinerary", "apply_optimization", "reject_optimization",
     }
     # Without a pinned trip, the agent is told so instead of guessing.
     assert concierge._NO_TRIP_LINE in agent.instructions
@@ -482,7 +486,7 @@ def test_search_flights_stores_options_and_speaks_them(bq):
     msg = _search()
 
     options = concierge._SESSION_FLIGHT_OPTIONS["room-1"]
-    assert 2 <= len(options) <= 3
+    assert 2 <= len(options) <= 6
     assert [o.option_number for o in options] == list(range(1, len(options) + 1))
     # Listenable, not readable: numbered words, rounded dollars, and none of
     # the airline/fare codes or markdown the spoken-copy rule bans.
@@ -523,6 +527,102 @@ def test_search_flights_records_the_latest_search_slot(bq):
     assert slot.session_id == "room-1"
     assert slot.options == concierge._SESSION_FLIGHT_OPTIONS["room-1"]
     assert slot.recorded_at.tzinfo is not None  # an honest UTC instant
+    assert slot.origin == "MSP" and slot.destination == "SFO"
+    assert slot.depart_date == "2026-07-17"
+    assert len(slot.available_dates) == concierge._CALENDAR_DAYS
+    assert slot.available_dates[0]["date"] == "2026-07-17"
+    assert slot.available_dates[0]["selected"] is True
+    assert slot.available_dates[0]["available"] is True
+    assert slot.available_dates[0]["lowest_price"] is not None
+    assert all(d["date"] for d in slot.available_dates)
+
+
+def test_search_flights_mentions_other_dates_on_the_screen(bq):
+    msg = _search()
+    assert "on the screen" in msg
+
+
+def test_select_search_date_reshops_same_route_and_keeps_window(bq):
+    _search()
+    second = concierge._LATEST_SEARCH.available_dates[1]["date"]
+    msg = asyncio.run(concierge.select_search_date_impl(second))
+
+    slot = concierge._LATEST_SEARCH
+    assert "Option one" in msg
+    assert slot.depart_date == second
+    assert slot.origin == "MSP" and slot.destination == "SFO"
+    assert slot.available_dates[0]["date"] == "2026-07-17"  # window held
+    selected = [d for d in slot.available_dates if d["selected"]]
+    assert selected == [d for d in slot.available_dates if d["date"] == second]
+
+
+def test_select_search_date_without_a_route_asks(bq):
+    msg = asyncio.run(concierge.select_search_date_impl("2026-07-18"))
+    assert "destination" in msg.lower()
+
+
+def test_empty_day_still_surfaces_available_neighbor_dates(monkeypatch, bq):
+    """InstaFlights 404s a cache-miss day; neighbors that have fares must
+    still land on the screen so the traveler can pick a date."""
+    from api.sabre.mock_client import MockSabreClient
+
+    mock = MockSabreClient()
+    empty = shapes.InstaFlightsResponse(PricedItineraries=[])
+
+    async def missing_requested(request):
+        if request.departuredate == "2026-07-17":
+            return empty
+        return await mock.instaflights_search(request)
+
+    monkeypatch.setattr(
+        concierge.sabre_client, "instaflights_search", missing_requested
+    )
+    msg = asyncio.run(
+        concierge.search_flights_impl("room-1", "JFK", "LAX", "2026-07-17")
+    )
+
+    assert "couldn't find any flights" in msg
+    assert "on the screen" in msg
+    assert "room-1" not in concierge._SESSION_FLIGHT_OPTIONS
+    slot = concierge._LATEST_SEARCH
+    assert slot is not None
+    assert slot.options == []
+    assert slot.depart_date == "2026-07-17"
+    chips = slot.available_dates
+    asked = next(c for c in chips if c["date"] == "2026-07-17")
+    assert asked["available"] is False and asked["selected"] is True
+    open_days = [c for c in chips if c["available"]]
+    assert open_days
+    assert any(c["lowest_price"] is not None for c in open_days)
+    block = concierge.current_pending_options()
+    assert block["options"] == []
+    assert any(d["available"] for d in block["available_dates"])
+
+
+def test_calendar_neighbor_failure_still_keeps_the_selected_day(monkeypatch, bq):
+    from api.sabre.mock_client import MockSabreClient
+
+    mock = MockSabreClient()
+
+    async def flaky(request):
+        if request.departuredate != "2026-07-17":
+            raise RuntimeError("cache miss")
+        return await mock.instaflights_search(request)
+
+    monkeypatch.setattr(concierge.sabre_client, "instaflights_search", flaky)
+    _search()
+
+    chips = concierge._LATEST_SEARCH.available_dates
+    assert chips[0]["available"] is True and chips[0]["selected"] is True
+    assert all(not c["available"] for c in chips[1:])
+
+
+def test_pending_options_include_available_dates(bq):
+    _search()
+    block = concierge.current_pending_options()
+    assert len(block["available_dates"]) == 7
+    assert block["origin"] == "MSP"
+    assert block["depart_date"] == "2026-07-17"
 
 
 def test_second_search_replaces_the_latest_search_slot(bq):
@@ -554,6 +654,11 @@ def test_book_flight_clears_the_latest_search_slot(monkeypatch, bq):
     asyncio.run(concierge.book_flight_impl("room-1", 1))
 
     assert concierge._LATEST_SEARCH is None
+    booked = concierge.latest_booking()
+    assert booked is not None
+    assert booked["status"] == "booked"
+    assert booked["trip_id"]
+    assert "depart_time" in booked and "arrive_time" in booked
 
 
 def test_book_flight_leaves_another_sessions_slot_alone(monkeypatch, bq):
@@ -650,6 +755,18 @@ def test_pending_options_slot_just_inside_the_ttl_still_surfaces():
     assert concierge.pending_options_for_trip("any-trip") is not None
 
 
+def test_current_pending_options_surfaces_without_a_trip_id():
+    """The cascade awaiting view has no trip yet — times still have to show."""
+    concierge._LATEST_SEARCH = _slot()
+    concierge._SESSION_TRIPS["s-1"] = _pinned("t-other")
+
+    block = concierge.current_pending_options()
+    assert block is not None
+    assert [o["depart_time"] for o in block["options"]]
+    # Pin matching still hides this from the other trip's status poll.
+    assert concierge.pending_options_for_trip("t-1") is None
+
+
 def test_book_flight_without_search_is_speakable_and_writes_nothing(monkeypatch, bq):
     seen = _mock_repos(monkeypatch)
 
@@ -665,12 +782,29 @@ def test_book_flight_bad_option_number_is_speakable_and_writes_nothing(
     seen = _mock_repos(monkeypatch)
     _search()
 
-    msg = asyncio.run(concierge.book_flight_impl("room-1", 4))
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 9))
 
-    assert "three options" in msg
+    assert "options" in msg
     assert seen["writes"] == []
     # The options survive so the traveler can just say a valid number next.
     assert "room-1" in concierge._SESSION_FLIGHT_OPTIONS
+
+
+def test_book_flight_accepts_a_string_option_number(monkeypatch, bq):
+    _mock_repos(monkeypatch)
+    _search()
+    msg = asyncio.run(concierge.book_flight_impl("room-1", "1"))
+    assert "Done" in msg
+
+
+def test_book_flight_uses_latest_search_when_session_has_no_options(
+    monkeypatch, bq
+):
+    _mock_repos(monkeypatch)
+    _search("room-search")
+    concierge._SESSION_FLIGHT_OPTIONS.pop("room-voice", None)
+    msg = asyncio.run(concierge.book_flight_impl("room-voice", 1))
+    assert "Done" in msg
 
 
 def test_book_flight_creates_rows_replaces_pin_and_clears_options(monkeypatch, bq):
@@ -773,6 +907,134 @@ def test_book_flight_write_failure_is_speakable(monkeypatch, bq):
     assert "couldn't get that flight booked" in msg
 
 
+def test_book_flight_updates_existing_itinerary_instead_of_new_trip(monkeypatch, bq):
+    from api import memory_trips
+
+    memory_trips.clear()
+    seeded = memory_trips.seed("whatsapp-demo", "PDF trip")
+    view = memory_trips.get(seeded["trip_id"])
+    concierge._SESSION_TRIPS["room-1"] = concierge.TripContext(
+        trip=view.trip, items=list(view.items), summary="pdf",
+    )
+    _search()
+    option = concierge._SESSION_FLIGHT_OPTIONS["room-1"][0]
+
+    msg = asyncio.run(concierge.book_flight_impl("room-1", 1))
+
+    assert "updated your itinerary" in msg
+    assert concierge._SESSION_TRIPS["room-1"].trip.trip_id == seeded["trip_id"]
+    refreshed = memory_trips.get(seeded["trip_id"])
+    flight = next(i for i in refreshed.items if i.type == "flight")
+    assert flight.details["flight_number"] == option.flight_number
+    assert flight.location == f"{option.origin}-{option.destination}"
+    assert len([i for i in refreshed.items if i.type == "hotel"]) == 1
+    memory_trips.clear()
+
+
+def test_recovery_route_uses_flight_location():
+    trip = concierge.Trip(
+        user_id="u", title="t", origin="MSP", destinations=["SFO"],
+        start_date=date(2026, 8, 20), end_date=date(2026, 8, 22),
+    )
+    items = [concierge.ItineraryItem(
+        trip_id="x", type="flight", status="booked", location="MSP-SFO",
+        start_ts=datetime(2026, 8, 20, 8, 0, tzinfo=timezone.utc),
+    )]
+    origin, dest, depart = concierge._recovery_route(trip, items)
+    assert (origin, dest, depart) == ("MSP", "SFO", "2026-08-20")
+
+
+def test_recovery_route_airport_departure_goes_home():
+    trip = concierge.Trip(
+        user_id="u", title="SF weekend", origin="MSP", destinations=["SFO"],
+        start_date=date(2026, 8, 22), end_date=date(2026, 8, 23),
+    )
+    items = [
+        concierge.ItineraryItem(
+            trip_id="x", type="dining", status="booked",
+            location="Union Square",
+            start_ts=datetime(2026, 8, 22, 8, 0, tzinfo=timezone.utc),
+        ),
+        concierge.ItineraryItem(
+            trip_id="x", type="ground", status="booked",
+            location="Airport departure — SFO",
+            details={"title": "Airport departure — SFO"},
+            start_ts=datetime(2026, 8, 23, 20, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    origin, dest, depart = concierge._recovery_route(trip, items)
+    assert origin == "SFO"
+    assert dest == "MSP"
+    assert depart == "2026-08-23"
+
+
+def test_offer_rebook_no_trip_is_speakable(bq):
+    msg = asyncio.run(concierge.offer_rebook_impl("room-1"))
+    assert "don't see a booked trip" in msg
+    assert concierge._LATEST_SEARCH is None
+
+
+def test_offer_rebook_marks_leg_broken_and_stores_options(monkeypatch, bq):
+    from api import memory_trips
+
+    memory_trips.clear()
+    seeded = memory_trips.seed("whatsapp-demo", "PDF trip")
+    view = memory_trips.get(seeded["trip_id"])
+    concierge._SESSION_TRIPS["room-1"] = concierge.TripContext(
+        trip=view.trip, items=list(view.items), summary="pdf",
+    )
+
+    msg = asyncio.run(concierge.offer_rebook_impl("room-1"))
+
+    assert "Option one" in msg
+    slot = concierge._LATEST_SEARCH
+    assert slot is not None
+    assert slot.origin == "MSP"
+    assert slot.destination == "SFO"
+    flight = next(i for i in view.items if i.type == "flight")
+    assert flight.status == "broken"
+    memory_trips.clear()
+
+
+def test_offer_rebook_airport_departure_searches_home(monkeypatch, bq):
+    from api import memory_trips
+    from api.repositories.models import ItineraryItem, Trip
+
+    memory_trips.clear()
+    trip = Trip(
+        user_id="whatsapp-demo", title="SF weekend", status="booked",
+        origin="MSP", destinations=["SFO"],
+        start_date=date(2026, 8, 22), end_date=date(2026, 8, 23),
+    )
+    items = [
+        ItineraryItem(
+            trip_id=trip.trip_id, type="dining", status="booked",
+            location="Union Square",
+            details={"title": "Breakfast — Union Square"},
+            start_ts=datetime(2026, 8, 22, 8, 0, tzinfo=timezone.utc),
+        ),
+        ItineraryItem(
+            trip_id=trip.trip_id, type="ground", status="booked",
+            location="Airport departure — SFO",
+            details={"title": "Airport departure — SFO"},
+            start_ts=datetime(2026, 8, 23, 20, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    memory_trips.put(trip, items)
+    concierge._SESSION_TRIPS["room-1"] = concierge.TripContext(
+        trip=trip, items=list(items), summary="pdf",
+    )
+
+    msg = asyncio.run(concierge.offer_rebook_impl("room-1"))
+
+    assert "Option one" in msg
+    slot = concierge._LATEST_SEARCH
+    assert slot.origin == "SFO"
+    assert slot.destination == "MSP"
+    assert items[1].status == "broken"
+    memory_trips.clear()
+
+
 def test_complete_trip_without_pin_is_speakable(bq):
     msg = asyncio.run(concierge.complete_trip_impl("room-1"))
 
@@ -859,7 +1121,7 @@ def test_fresh_session_booking_reaches_search_flights(monkeypatch, bq):
     # The search reached the mock Sabre client: options stored per session,
     # readback speakable.
     options = concierge._SESSION_FLIGHT_OPTIONS["fresh-session"]
-    assert 2 <= len(options) <= 3
+    assert 2 <= len(options) <= 6
     assert all(o.origin == "MSP" and o.destination == "DFW" for o in options)
     assert "Option one" in seen["tool_result"]
     assert "dollars" in seen["tool_result"]
@@ -867,17 +1129,22 @@ def test_fresh_session_booking_reaches_search_flights(monkeypatch, bq):
 
 def test_instructions_carry_the_guided_script():
     for phrase in ("search_flights", "book_flight", "complete_trip",
-                   "destination", "pick one by number"):
+                   "destination", "pick by number",
+                   "set_recovery_preferences", "offer_rebook",
+                   "trip to airport cancelled",
+                   "analyze_itinerary", "apply_optimization"):
         assert phrase in concierge.BASE_INSTRUCTIONS
+    assert "same turn" in concierge.BASE_INSTRUCTIONS
+    assert "do not confirm first" in concierge.BASE_INSTRUCTIONS
     # The retired magic utterance is gone from the script...
     assert "book_trip " not in concierge.BASE_INSTRUCTIONS
-    # ...and the guard against re-booking a pinned trip stands.
-    assert (
-        "Never call search_flights or book_flight when a trip is already "
-        "booked" in concierge.BASE_INSTRUCTIONS
-    )
-    # Disruption rules untouched.
+    # A healthy booked trip still prefers status; disruption is the
+    # exception that may search again (ML recovery ranking).
+    assert "When a trip is booked and healthy" in concierge.BASE_INSTRUCTIONS
+    assert "second trip" in concierge.BASE_INSTRUCTIONS
+    assert "delay-risk model" in concierge.BASE_INSTRUCTIONS
     assert "fix_trip" in concierge.BASE_INSTRUCTIONS
+    assert "do not call fix_trip" in concierge.BASE_INSTRUCTIONS
 
 
 # --- today's date in the instructions (Phase 18) -----------------------------

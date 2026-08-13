@@ -55,6 +55,13 @@
   }
   .masthead .name { font-size: 17px; font-weight: 700; }
   .masthead .sub { font-size: 13px; color: var(--ink-soft); }
+  .app-nav { display: flex; gap: 6px; margin-left: 4px; }
+  .app-nav a {
+    font-size: 13px; font-weight: 700; text-decoration: none; color: var(--ink-soft);
+    padding: 8px 12px; border-radius: 999px;
+  }
+  .app-nav a:hover { background: var(--brand-soft); color: var(--brand); }
+  .app-nav a.is-current { background: var(--brand-soft); color: var(--brand); }
 
   /* Compact operator cluster — the on-page triggers for both beats. Small
      on purpose: they must not fight the repair surfaces. */
@@ -454,6 +461,61 @@
   .score-fill.is-severe   { background: var(--broken); }
   .score-note { font-size: 13px; color: var(--ink-soft); margin-top: 10px; }
 
+  .opt-card {
+    background: var(--card); border: 1px solid var(--brand);
+    border-radius: 16px; overflow: hidden;
+  }
+  .opt-head {
+    background: var(--brand); color: #fff;
+    padding: 12px 18px;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .opt-body { padding: 16px 18px 18px; display: grid; gap: 14px; }
+  .opt-metrics {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .opt-metric {
+    background: var(--brand-soft); border-radius: 12px; padding: 10px 12px;
+  }
+  .opt-metric .k {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .opt-metric .v { font-size: 18px; font-weight: 800; margin-top: 2px; }
+  .opt-metric .s { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .opt-rec {
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 12px;
+    display: grid; gap: 8px;
+  }
+  .opt-rec .eyebrow {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--brand);
+  }
+  .opt-rec h3 { font-size: 16px; font-weight: 800; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0; }
+  .opt-rec .why { font-size: 13px; color: var(--ink-soft); }
+  .opt-path { font-size: 13px; color: var(--ink); }
+  .opt-path .was { color: var(--ink-faint); text-decoration: line-through; }
+  .opt-trio { display: grid; gap: 6px; }
+  .opt-trio div {
+    display: flex; justify-content: space-between; gap: 8px;
+    font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--paper);
+  }
+  .opt-trio .pick { background: var(--fixed-bg); color: #166534; font-weight: 700; }
+  .opt-map {
+    width: 100%; height: 120px; border-radius: 10px; background: #eef2ff;
+    display: block;
+  }
+  .opt-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .opt-actions button {
+    font: inherit; font-size: 13px; font-weight: 700;
+    padding: 8px 12px; border-radius: 10px; cursor: pointer; border: none;
+  }
+  .opt-apply { background: var(--brand); color: #fff; }
+  .opt-keep { background: var(--card); color: var(--ink); border: 1px solid var(--line) !important; }
+  .opt-note { font-size: 12px; color: var(--ink-faint); }
+  .opt-empty { font-size: 14px; color: var(--ink-soft); }
+
   /* candidates panel (mockup's "AI Recommended" card) */
   .candidates-panel {
     background: var(--card); border: 1px solid var(--brand);
@@ -489,6 +551,21 @@
     padding: 4px 12px; border-radius: 999px;
     background: var(--brand-soft); color: var(--brand);
   }
+  .c-actions {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 12px;
+  }
+  .c-actions .c-number { margin-top: 0; }
+  .c-book {
+    margin-left: auto;
+    background: var(--brand); color: #fff;
+    border: none; border-radius: 10px;
+    padding: 8px 14px;
+    font: inherit; font-size: 13px; font-weight: 700;
+    cursor: pointer;
+  }
+  .c-book:hover { filter: brightness(1.06); }
+  .c-book:disabled { opacity: 0.45; cursor: wait; }
 
   /* downstream impact (mockup: one glanceable line per affected leg) */
   .impact-list { list-style: none; padding: 0; display: grid; gap: 12px; }
@@ -516,6 +593,65 @@
   }
   .awaiting .big { font-size: 20px; font-weight: 700; }
   .awaiting .sub { font-size: 15px; color: var(--ink-soft); margin-top: 6px; }
+
+  /* Live flight options the Concierge just found — center column, under
+     the orb, so they aren't easy to miss once a search lands. */
+  .options-section {
+    background: var(--card); border: 1px solid var(--brand);
+    border-radius: 16px; padding: 18px 20px 20px;
+  }
+  .options-section h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--brand); margin-bottom: 6px; }
+  .options-sub { font-size: 14px; color: var(--ink-soft); margin-bottom: 12px; }
+  .options-grid { list-style: none; padding: 0; display: grid; gap: 12px; }
+  .options-grid .candidate { background: var(--brand-soft); }
+  .candidate.is-recommended { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+  .c-badge {
+    display: inline-block; margin-bottom: 8px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px;
+    background: var(--brand); color: #fff;
+  }
+  .ml-insights { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .ml-risk { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .ml-risk .pct { color: var(--brand); }
+  .ml-score { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+  .ml-why { list-style: none; padding: 8px 0 0; display: grid; gap: 4px; }
+  .ml-why li { font-size: 13px; color: var(--ink-soft); padding-left: 14px; position: relative; }
+  .ml-why li::before { content: "•"; position: absolute; left: 0; color: var(--brand); }
+  .ml-model {
+    font-size: 12px; color: var(--ink-faint); margin: 8px 0 0;
+  }
+  .date-strip { margin: 4px 0 14px; }
+  .date-strip-label {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px;
+  }
+  .date-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .date-chip {
+    flex: 0 0 auto; min-width: 76px; text-align: left;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 8px 10px; cursor: pointer;
+    color: var(--ink); font: inherit;
+  }
+  .date-chip:hover { border-color: var(--brand); }
+  .date-chip.is-selected {
+    border-color: var(--brand); background: var(--brand-soft);
+    box-shadow: 0 0 0 1px var(--brand);
+  }
+  .date-chip.is-unavailable {
+    cursor: not-allowed; opacity: 0.45;
+  }
+  .date-chip .dow { display: block; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-faint); }
+  .date-chip .dom { display: block; font-size: 18px; font-weight: 800; line-height: 1.2; }
+  .date-chip .meta { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+  .date-chip.is-selected .dow { color: var(--brand); }
+  .date-empty {
+    list-style: none; padding: 16px 4px; color: var(--ink-soft);
+    font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -528,6 +664,12 @@
       <div class="sub">Autonomous recovery</div>
     </div>
   </div>
+  <nav class="app-nav">
+    <a href="/v1/build/" id="nav-build">✨ Optimize My Trip</a>
+    <a href="/v1/whatsapp/" id="nav-wa">WhatsApp</a>
+    <a href="/v1/itinerary/" id="nav-trips">My Trips</a>
+    <a class="is-current" href="/v1/cascade/" id="nav-cascade">Cascade / Repair</a>
+  </nav>
   <div class="controls">
     <button class="btn btn-new" id="btn-new-trip">🆕 New trip</button>
     <button class="btn btn-book" id="btn-book">📞 Book</button>
@@ -611,6 +753,17 @@
       </div>
     </div>
 
+    <section class="options-section" id="options-section" hidden>
+      <h2>Available flights</h2>
+      <p class="options-sub" id="options-sub">Pick one by voice or tap Book.</p>
+      <p class="ml-model" id="ml-model" hidden></p>
+      <div class="date-strip" id="date-strip" hidden>
+        <div class="date-strip-label">Available dates to book</div>
+        <div class="date-chips" id="date-chips"></div>
+      </div>
+      <ul class="options-grid" id="options-grid"></ul>
+    </section>
+
     <section id="flight-section" hidden>
       <h2>Current Flight</h2>
       <div class="flight-card" id="flight-card" data-status="planned">
@@ -659,12 +812,21 @@
       <div class="score-note">A live read of how disrupted this trip is right now.</div>
     </div>
 
+    <div class="opt-card" id="opt-card" hidden>
+      <div class="opt-head">Cascade found an optimization</div>
+      <div class="opt-body">
+        <div class="opt-metrics" id="opt-summary"></div>
+        <div id="opt-recs"></div>
+        <div class="opt-note" id="opt-note"></div>
+      </div>
+    </div>
+
     <div id="candidates" hidden>
       <div class="candidates-panel">
         <div class="candidates-head">✨ AI Recommended</div>
         <div class="candidates-sub">
           What this booking could be — your concierge is reading these out.
-          Pick one by voice.
+          Pick one by voice or tap Book.
         </div>
         <ul class="candidate-list" id="candidate-list"></ul>
       </div>
@@ -715,6 +877,17 @@
   const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
   const codeHeaders = (extra = {}) =>
     ACCESS_CODE ? { ...extra, "X-Access-Code": ACCESS_CODE } : extra;
+  const withCode = (href) => ACCESS_CODE
+    ? href + (href.includes("?") ? "&" : "?") + "code=" + encodeURIComponent(ACCESS_CODE)
+    : href;
+  const navBuild = document.getElementById("nav-build");
+  const navWa = document.getElementById("nav-wa");
+  const navTrips = document.getElementById("nav-trips");
+  const navCascade = document.getElementById("nav-cascade");
+  if (navBuild) navBuild.href = withCode("/v1/build/");
+  if (navWa) navWa.href = withCode("/v1/whatsapp/");
+  if (navTrips) navTrips.href = withCode("/v1/itinerary/");
+  if (navCascade) navCascade.href = withCode("/v1/cascade/");
 
   const KIND = {
     flight:     { icon: "✈️", label: "Flight" },
@@ -771,6 +944,7 @@
     tripId: null,
     latestSeen: null,   // last /latest_trip_id answer — a change means a
                         // trip was booked mid-conversation: adopt it.
+    latestBookingSeen: null, // last /latest_booking trip_id — same adopt rule
     cards: new Map(),   // item_id -> reservation <li>
     lastStatuses: null, // item_id -> status from the previous poll
     timerStart: null,   // recovery timer (client-side, no server event state)
@@ -778,6 +952,10 @@
     disruptedTrip: null, // the trip already cascaded — Disrupt is one-shot per
                          // trip, re-armed when the consent wait stands down
     consent: null,       // the status payload's consent block (Phase 23)
+    pickingDate: false,
+    bookingOption: false,
+    analyzedTrip: null,
+    optimizing: false,
   };
 
   // ---- formatting ----
@@ -814,9 +992,9 @@
   // "MSP-SFO" (item.location) -> "MSP → SFO"
   const fmtRoute = (location) => (location || "").replace("-", " → ");
 
-  // "demo-traveler" -> "Demo Traveler" — the traveler on screen, not an id.
+  // Internal ids like "demo-traveler" stay off the screen.
   function travelerName(userId) {
-    if (!userId) return "Traveler";
+    if (!userId || /demo/i.test(userId)) return "Traveler";
     return userId.split(/[-_]/)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
@@ -832,7 +1010,13 @@
     for (const item of items) {
       if (item.status in counts) counts[item.status] += 1;
     }
-    if (counts.broken > 0) {
+    const optionCount = pendingOptions && pendingOptions.options
+      ? pendingOptions.options.length
+      : 0;
+    if (optionCount > 0 && counts.broken > 0) {
+      mode = "voice"; text = "Choose a replacement";
+      message = "Your trip to the airport was cancelled — pick a replacement flight by number.";
+    } else if (counts.broken > 0) {
       // Phase 23: between the break and the traveler's spoken yes, the
       // page is red with the waiting treatment — never "repairs are
       // starting" before consent, and no running clock.
@@ -997,8 +1181,14 @@
     }
     for (const item of items) {
       const kind = KIND[item.type] || { icon: "📍", label: item.type };
+      const title = (item.details && item.details.title) || kind.label;
+      const keep = item.details && (item.details.must_keep || item.details.importance === "must_keep");
       nodes.push(makeNode(
-        kind.icon, kind.label, item.location || "", fmtWhen(item), item.status,
+        kind.icon,
+        keep ? title + " ⭐" : title,
+        item.location || "",
+        fmtWhen(item),
+        item.status,
       ));
     }
     timeline.replaceChildren(...nodes);
@@ -1099,8 +1289,9 @@
       const kind = KIND[item.type] || { icon: "📍", label: item.type };
       card.dataset.status = item.status;
       card.querySelector(".icon").textContent = kind.icon;
-      card.querySelector(".kind").textContent =
-        (item.details && item.details.description) || kind.label;
+      const title = (item.details && (item.details.title || item.details.description)) || kind.label;
+      const keep = item.details && (item.details.must_keep || item.details.importance === "must_keep");
+      card.querySelector(".kind").textContent = keep ? title + " ⭐ Must keep" : title;
       card.querySelector(".where").textContent = item.location || "";
       card.querySelector(".when").textContent = fmtWhen(item);
       card.querySelector(".price").textContent = fmtPrice(item.price);
@@ -1151,48 +1342,230 @@
 
   // ---- right column: candidates + downstream impact ----
 
+  function optionCard(o) {
+    const stopsLine = (stops) =>
+      stops === 0 ? "Nonstop" : (stops === 1 ? "One stop" : `${stops} stops`);
+    const li = document.createElement("li");
+    li.className = "candidate" + (o.recommended ? " is-recommended" : "");
+    if (o.recommended) {
+      const badge = document.createElement("div");
+      badge.className = "c-badge";
+      badge.textContent = "Recommended";
+      li.appendChild(badge);
+    }
+    const top = document.createElement("div");
+    top.className = "c-top";
+    const arrives = document.createElement("div");
+    arrives.className = "c-arrives";
+    arrives.textContent = `Arrives ${o.arrive_time} PT`;
+    const price = document.createElement("div");
+    price.className = "c-price";
+    price.textContent = fmtPrice(o.price);
+    top.append(arrives, price);
+    const sub = document.createElement("div");
+    sub.className = "c-sub";
+    sub.textContent = [
+      o.airline_name, stopsLine(o.stops), o.duration,
+      `departs ${o.depart_time} PT`,
+    ].filter(Boolean).join(" · ");
+    const route = document.createElement("div");
+    route.className = "c-route";
+    route.textContent = `${o.route} · ${o.depart_date}`;
+    const number = document.createElement("span");
+    number.className = "c-number";
+    number.textContent = `Option ${o.option_number}`;
+    const actions = document.createElement("div");
+    actions.className = "c-actions";
+    const book = document.createElement("button");
+    book.type = "button";
+    book.className = "c-book";
+    book.textContent = o.recommended ? "Book recommended" : "Book this flight";
+    book.disabled = !!state.bookingOption;
+    book.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      bookOption(o.option_number);
+    });
+    actions.append(number, book);
+    li.append(top, sub, route, actions);
+    if (o.delay_risk_pct != null) {
+      const ml = document.createElement("div");
+      ml.className = "ml-insights";
+      const risk = document.createElement("div");
+      risk.className = "ml-risk";
+      const pct = document.createElement("span");
+      pct.className = "pct";
+      pct.textContent = `${o.delay_risk_pct}%`;
+      risk.append(pct, " predicted disruption risk");
+      ml.appendChild(risk);
+      if (o.recommendation_score != null) {
+        const score = document.createElement("div");
+        score.className = "ml-score";
+        score.textContent = `Match score ${o.recommendation_score}`;
+        ml.appendChild(score);
+      }
+      const reasons = (o.why || []).filter(Boolean);
+      if (reasons.length) {
+        const ul = document.createElement("ul");
+        ul.className = "ml-why";
+        reasons.forEach((line) => {
+          const item = document.createElement("li");
+          item.textContent = line;
+          ul.appendChild(item);
+        });
+        ml.appendChild(ul);
+      }
+      li.appendChild(ml);
+    }
+    return li;
+  }
+
+  function setBookingBusy(busy) {
+    state.bookingOption = busy;
+    document.querySelectorAll(".c-book").forEach((btn) => { btn.disabled = busy; });
+  }
+
+  async function bookOption(n) {
+    if (!n || state.bookingOption) return;
+    setBookingBusy(true);
+    showStatus("✈️", "Booking that flight…", "live");
+    try {
+      const payload = { option_number: n };
+      if (state.tripId) payload.trip_id = state.tripId;
+      const resp = await fetch(`${TOOLS}/book_option`, {
+        method: "POST",
+        headers: codeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok || !body.ok) {
+        showStatus("✈️", body.spoken || "Could not book that flight.", "error");
+        return;
+      }
+      clearStatus();
+      el("options-section").hidden = true;
+      renderCandidates(null);
+      if (body.booking && body.booking.trip_id) {
+        state.latestBookingSeen = body.booking.trip_id;
+        if (body.booking.trip_id !== state.tripId) {
+          resetForTrip(body.booking.trip_id);
+        }
+      }
+      poll();
+    } catch {
+      showStatus("✈️", "Could not book that flight — try again.", "error");
+    } finally {
+      setBookingBusy(false);
+    }
+  }
+
+  async function selectAvailableDate(iso) {
+    if (!iso || state.pickingDate) return;
+    state.pickingDate = true;
+    try {
+      const resp = await fetch(`${TOOLS}/select_date`, {
+        method: "POST",
+        headers: codeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ depart_date: iso }),
+      });
+      if (!resp.ok) return;
+      const body = await resp.json();
+      if (body.pending_options) renderOptionsBoard(body.pending_options);
+    } catch { /* poll will retry */ }
+    finally { state.pickingDate = false; }
+  }
+
+  function renderDateStrip(pending) {
+    const strip = el("date-strip");
+    const chips = el("date-chips");
+    const dates = (pending && pending.available_dates) || [];
+    if (!dates.length) {
+      strip.hidden = true;
+      chips.replaceChildren();
+      return;
+    }
+    strip.hidden = false;
+    chips.replaceChildren(...dates.map((d) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "date-chip"
+        + (d.selected ? " is-selected" : "")
+        + (d.available ? "" : " is-unavailable");
+      btn.disabled = !d.available;
+      const dow = document.createElement("span");
+      dow.className = "dow";
+      dow.textContent = d.weekday ? String(d.weekday).slice(0, 3) : (d.label || "");
+      const dom = document.createElement("span");
+      dom.className = "dom";
+      const dayNum = d.date ? Number(String(d.date).slice(8, 10)) : "";
+      dom.textContent = dayNum || (d.label || "");
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      if (!d.available) {
+        meta.textContent = "No flights";
+      } else if (d.lowest_price != null) {
+        meta.textContent = "from " + fmtPrice(d.lowest_price);
+      } else {
+        meta.textContent = "Tap to search";
+      }
+      btn.append(dow, dom, meta);
+      if (d.available && !d.selected) {
+        btn.addEventListener("click", () => selectAvailableDate(d.date));
+      }
+      return btn;
+    }));
+  }
+
   function renderCandidates(pending) {
     const options = (pending && pending.options) || [];
     const has = options.length > 0;
     el("candidates").hidden = !has;
     const list = el("candidate-list");
     if (!has) {
-      // The block disappeared — the booking happened; the chosen flight
-      // arrives through the items path within one poll.
       list.replaceChildren();
       return;
     }
-    const stopsLine = (stops) =>
-      stops === 0 ? "Nonstop" : (stops === 1 ? "One stop" : `${stops} stops`);
-    list.replaceChildren(...options.map((o) => {
-      const li = document.createElement("li");
-      li.className = "candidate";
-      const top = document.createElement("div");
-      top.className = "c-top";
-      const arrives = document.createElement("div");
-      arrives.className = "c-arrives";
-      arrives.textContent = `Arrives ${o.arrive_time} PT`;
-      const price = document.createElement("div");
-      price.className = "c-price";
-      price.textContent = fmtPrice(o.price);
-      top.append(arrives, price);
-      const sub = document.createElement("div");
-      sub.className = "c-sub";
-      // Phase 33: carrier name + journey length join the line when the
-      // search carried them — names, never codes (the standing rule).
-      sub.textContent = [
-        o.airline_name, stopsLine(o.stops), o.duration,
-        `departs ${o.depart_time} PT`,
-      ].filter(Boolean).join(" · ");
-      const route = document.createElement("div");
-      route.className = "c-route";
-      route.textContent = `${o.route} · ${o.depart_date}`;
-      const number = document.createElement("span");
-      number.className = "c-number";
-      number.textContent = `Option ${o.option_number}`;
-      li.append(top, sub, route, number);
-      return li;
-    }));
+    list.replaceChildren(...options.map(optionCard));
+  }
+
+  function renderOptionsBoard(pending) {
+    const options = (pending && pending.options) || [];
+    const dates = (pending && pending.available_dates) || [];
+    const hasFlights = options.length > 0;
+    const hasDates = dates.some((d) => d && d.available);
+    const has = hasFlights || hasDates || dates.length > 0;
+    el("options-section").hidden = !has;
+    const grid = el("options-grid");
+    if (!has) {
+      grid.replaceChildren();
+      return;
+    }
+    el("awaiting").hidden = true;
+    if (!state.tripId) {
+      el("flight-section").hidden = true;
+    }
+    const sub = el("options-sub");
+    if (!hasFlights && hasDates) {
+      sub.textContent = "No flights on that day — tap a date with fares, or say it.";
+    } else if (pending && pending.prefs_summary) {
+      sub.textContent = "Ranked for " + pending.prefs_summary +
+        " — tap Book, or say option one.";
+    } else {
+      sub.textContent = "Pick one by voice or tap Book.";
+    }
+    renderDateStrip(pending);
+    if (!hasFlights) {
+      const empty = document.createElement("li");
+      empty.className = "candidate date-empty";
+      empty.textContent = "No flights on the selected day. Pick an available date above.";
+      grid.replaceChildren(empty);
+    } else {
+      grid.replaceChildren(...options.map(optionCard));
+    }
+    renderCandidates(pending);
+    if (!state.tripId) {
+      renderAwaitingMood(pending);
+    }
   }
 
   function renderImpact(items) {
@@ -1225,21 +1598,301 @@
     }));
   }
 
+  function fmtMins(n) {
+    if (n == null) return "—";
+    const m = Math.round(n);
+    if (m < 60) return m + " min";
+    return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+
+  function pathLine(titles) {
+    return (titles || []).filter(Boolean).join(" → ");
+  }
+
+  function drawOptMap(stops, alt) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "opt-map");
+    svg.setAttribute("viewBox", "0 0 300 120");
+    const pts = (stops || []).filter((s) => s.lat != null && s.lon != null);
+    if (pts.length < 2) return svg;
+    const lats = pts.map((s) => s.lat);
+    const lons = pts.map((s) => s.lon);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const pad = 16;
+    const sx = (maxLon - minLon) || 0.01;
+    const sy = (maxLat - minLat) || 0.01;
+    const xy = (s) => [
+      pad + ((s.lon - minLon) / sx) * (300 - pad * 2),
+      pad + (1 - (s.lat - minLat) / sy) * (120 - pad * 2),
+    ];
+    const line = (list, color, width) => {
+      const d = list.map((s, i) => {
+        const [x, y] = xy(s);
+        return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+      }).join(" ");
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", d);
+      p.setAttribute("fill", "none");
+      p.setAttribute("stroke", color);
+      p.setAttribute("stroke-width", width);
+      p.setAttribute("stroke-linecap", "round");
+      svg.appendChild(p);
+    };
+    line(pts, "#94a3b8", 3);
+    if (alt && alt.length >= 2) line(alt.filter((s) => s.lat != null), "#2563eb", 3);
+    pts.forEach((s) => {
+      const [x, y] = xy(s);
+      const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 3.5);
+      c.setAttribute("fill", "#0f172a");
+      svg.appendChild(c);
+    });
+    return svg;
+  }
+
+  function renderOptimization(opt) {
+    const card = el("opt-card");
+    if (!opt || !opt.ok) {
+      card.hidden = true;
+      return;
+    }
+    const recs = opt.recommendations || [];
+    const summary = opt.summary || {};
+    if (!recs.length && !summary.original_travel_min) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    const metrics = [];
+    if (summary.show_time_saved && summary.potential_time_saved_min) {
+      metrics.push(["Time saved", fmtMins(summary.potential_time_saved_min),
+        fmtMins(summary.original_travel_min) + " → " + fmtMins(summary.optimized_travel_min)]);
+    } else if (summary.original_travel_min != null) {
+      metrics.push(["Travel time", fmtMins(summary.original_travel_min), "from scored routes"]);
+    }
+    if (summary.show_cost_saved && summary.potential_cost_saved) {
+      const est = summary.cost_is_estimated ? "estimated" : "";
+      metrics.push(["Potential savings", "~$" + Math.round(summary.potential_cost_saved), est]);
+    }
+    if (summary.original_legs != null && summary.optimized_legs != null
+        && summary.optimized_legs < summary.original_legs) {
+      metrics.push(["Transportation legs",
+        summary.original_legs + " → " + summary.optimized_legs, "fewer hops"]);
+    }
+    const box = el("opt-summary");
+    box.replaceChildren(...metrics.map(([k, v, s]) => {
+      const d = document.createElement("div");
+      d.className = "opt-metric";
+      d.innerHTML = `<div class="k">${k}</div><div class="v">${v}</div><div class="s">${s || ""}</div>`;
+      return d;
+    }));
+    const list = el("opt-recs");
+    list.replaceChildren(...recs.map((rec, idx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "opt-rec";
+      const eye = document.createElement("div");
+      eye.className = "eyebrow";
+      eye.textContent = (rec.type || "optimization").replace(/_/g, " ");
+      const h = document.createElement("h3");
+      h.textContent = rec.title || rec.recommendation;
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = rec.reason || rec.recommendation || "";
+      wrap.append(eye, h, why);
+      if ((rec.current_titles || []).length && (rec.recommended_titles || []).length
+          && pathLine(rec.current_titles) !== pathLine(rec.recommended_titles)) {
+        const cur = document.createElement("div");
+        cur.className = "opt-path was";
+        cur.textContent = "Current: " + pathLine(rec.current_titles);
+        const nxt = document.createElement("div");
+        nxt.className = "opt-path";
+        nxt.textContent = "Recommended: " + pathLine(rec.recommended_titles);
+        wrap.append(cur, nxt);
+      }
+      const trio = rec.transport_options;
+      if (trio && (trio.cheapest || trio.fastest || trio.best_value)) {
+        const box3 = document.createElement("div");
+        box3.className = "opt-trio";
+        const rows = [
+          ["Cheapest", trio.cheapest],
+          ["Fastest", trio.fastest],
+          ["Best value", trio.best_value],
+        ];
+        const pickLabel = (trio.cascade_pick && trio.cascade_pick.label) || "";
+        rows.forEach(([name, row]) => {
+          if (!row) return;
+          const line = document.createElement("div");
+          if (row.label === pickLabel) line.className = "pick";
+          const cost = row.cost_label || (row.estimated ? "estimated" : "");
+          const mins = row.travel_time != null ? Math.round(row.travel_time) + " min" : "";
+          line.innerHTML = `<span>${name} · ${row.label || ""}</span><span>${[cost, mins].filter(Boolean).join(" · ")}</span>`;
+          box3.appendChild(line);
+        });
+        wrap.appendChild(box3);
+      }
+      if (opt.map && (opt.map.current_stops || []).length >= 2) {
+        wrap.appendChild(drawOptMap(opt.map.current_stops, opt.map.recommended_stops));
+      }
+      const actions = document.createElement("div");
+      actions.className = "opt-actions";
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "opt-apply";
+      apply.textContent = "Apply";
+      apply.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "apply"));
+      const keep = document.createElement("button");
+      keep.type = "button";
+      keep.className = "opt-keep";
+      keep.textContent = "Keep current";
+      keep.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "reject"));
+      actions.append(apply, keep);
+      wrap.appendChild(actions);
+      return wrap;
+    }));
+    const note = el("opt-note");
+    const src = (opt.model && opt.model.maps_source) || "";
+    note.textContent = src === "demo_geometry"
+      ? "Travel times use mapped geometry until a live Maps key is set. Costs are estimated."
+      : "Savings shown only from scored route data.";
+  }
+
+  async function ensureOptimization(tripId, existing) {
+    if (!tripId) return;
+    if (existing) {
+      renderOptimization(existing);
+      state.analyzedTrip = tripId;
+      return;
+    }
+    if (state.analyzedTrip === tripId || state.optimizing) return;
+    state.optimizing = true;
+    try {
+      const resp = await fetch(`${API}/optimize/${encodeURIComponent(tripId)}`, {
+        headers: codeHeaders(),
+      });
+      if (!resp.ok) return;
+      renderOptimization(await resp.json());
+      state.analyzedTrip = tripId;
+    } catch { /* poll retries */ }
+    finally { state.optimizing = false; }
+  }
+
+  async function decideOptimization(id, action) {
+    if (!state.tripId || !id) return;
+    try {
+      const resp = await fetch(
+        `${API}/optimize/${encodeURIComponent(state.tripId)}/${action}`,
+        {
+          method: "POST",
+          headers: codeHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ recommendation_id: id }),
+        }
+      );
+      const body = await resp.json().catch(() => ({}));
+      if (body && body.ok !== false) renderOptimization(body);
+      poll();
+    } catch { /* next poll */ }
+  }
+
   function showAwaiting(pendingOptions) {
     el("awaiting").hidden = false;
     el("flight-section").hidden = true;
     el("reservations-section").hidden = true;
     el("feed-section").hidden = true;
-    renderCandidates(null);
+    el("options-section").hidden = true;
+    renderCandidates(pendingOptions);
     el("impact-card").hidden = true;
+    el("opt-card").hidden = true;
     resetScore();
     renderAwaitingMood(pendingOptions);
   }
 
+  function renderVoiceBooking(booking) {
+    // In-memory card for a voice booking when BigQuery status isn't up yet.
+    el("awaiting").hidden = true;
+    el("flight-section").hidden = false;
+    el("reservations-section").hidden = true;
+    el("feed-section").hidden = true;
+    const card = el("flight-card");
+    card.dataset.status = "booked";
+    el("flight-route").textContent = booking.route || "Your flight";
+    el("flight-price").textContent = fmtPrice(booking.price);
+    const times = [
+      booking.depart_time ? `Leaves ${booking.depart_time} PT` : "",
+      booking.arrive_time ? `arrives ${booking.arrive_time} PT` : "",
+    ].filter(Boolean).join(" · ");
+    el("flight-times").textContent = times;
+    el("flight-chip").textContent = "booked";
+    const airline = [booking.airline_name, booking.flight_number]
+      .filter(Boolean).join(" ");
+    el("flight-airline").hidden = !airline;
+    el("flight-airline").textContent = airline;
+    const facts = [];
+    if (booking.cabin) facts.push(booking.cabin);
+    if (typeof booking.stops === "number") {
+      facts.push(booking.stops === 0 ? "Nonstop"
+        : `${booking.stops} stop${booking.stops > 1 ? "s" : ""}`);
+    }
+    if (booking.duration) facts.push(booking.duration);
+    el("flight-facts").hidden = facts.length === 0;
+    el("flight-facts").textContent = facts.join(" · ");
+    el("flight-was").hidden = true;
+    el("flight-detail").hidden = true;
+    el("options-section").hidden = true;
+    pill.className = "overall-pill is-booked";
+    pillText.textContent = "Trip confirmed";
+    banner.className = "banner is-booked";
+    bannerText.textContent =
+      "Booked by voice — " + (booking.route || "your flight") +
+      (booking.depart_time ? ` leaving ${booking.depart_time} PT` : "") + ".";
+    renderCandidates(null);
+    el("impact-card").hidden = true;
+  }
+
+  async function fetchPendingOptions() {
+    try {
+      const resp = await fetch(`${TOOLS}/pending_options`, { headers: codeHeaders() });
+      if (!resp.ok) return null;
+      return (await resp.json()).pending_options || null;
+    } catch { return null; }
+  }
+
+  async function fetchLatestBooking() {
+    try {
+      const resp = await fetch(`${TOOLS}/latest_booking`, { headers: codeHeaders() });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch { return null; }
+  }
+
   // ---- polling ----
 
+  function hasPendingBoard(pending) {
+    return !!(pending && (
+        (pending.options && pending.options.length) ||
+        (pending.available_dates && pending.available_dates.length)
+    ));
+  }
+
   async function poll() {
-    if (!state.tripId) { showAwaiting(null); return; }
+    const pending = await fetchPendingOptions();
+    const showingOptions = hasPendingBoard(pending);
+    if (!state.tripId) {
+      if (showingOptions) {
+        renderOptionsBoard(pending);
+        return;
+      }
+      el("options-section").hidden = true;
+      const booking = await fetchLatestBooking();
+      if (booking && booking.trip_id
+          && booking.trip_id !== state.latestBookingSeen) {
+        state.latestBookingSeen = booking.trip_id;
+        resetForTrip(booking.trip_id);
+        return;
+      }
+      showAwaiting(null);
+      return;
+    }
     let resp;
     try {
       resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`,
@@ -1249,14 +1902,19 @@
       bannerText.textContent = "Connection hiccup — catching back up…";
       return;
     }
-    if (resp.status === 404) {
-      // A just-booked trip's BigQuery writes can land a beat after /book
-      // returns — keep polling; the trip appears on the next pass.
-      banner.className = "banner is-stale";
-      bannerText.textContent = "Waiting for the booking to land…";
-      return;
-    }
-    if (!resp.ok) {
+    if (resp.status === 404 || !resp.ok) {
+      const booking = await fetchLatestBooking();
+      if (booking && booking.trip_id === state.tripId) {
+        renderVoiceBooking(booking);
+        return;
+      }
+      if (resp.status === 404) {
+        // A just-booked trip's BigQuery writes can land a beat after /book
+        // returns — keep polling; the trip appears on the next pass.
+        banner.className = "banner is-stale";
+        bannerText.textContent = "Waiting for the booking to land…";
+        return;
+      }
       banner.className = "banner is-stale";
       bannerText.textContent = "Having trouble reaching your trip — retrying…";
       return;
@@ -1265,15 +1923,21 @@
     el("awaiting").hidden = true;
     state.consent = body.consent || null;
     updateTimer(body.items);
-    renderMood(body.items, body.pending_options, state.consent);
+    renderMood(body.items, showingOptions ? pending : body.pending_options, state.consent);
     renderTraveler(body.trip, body.items);
     renderTimeline(body.trip, body.items);
     renderFlight(body.items);
     renderReservations(body.items);
     diffIntoFeed(body.items);
     renderScore(body.items);
-    renderCandidates(body.pending_options);
+    if (showingOptions) {
+      renderOptionsBoard(pending);
+    } else {
+      renderCandidates(body.pending_options);
+      el("options-section").hidden = true;
+    }
     renderImpact(body.items);
+    ensureOptimization(state.tripId, body.optimization);
     updateControls();  // a consent stand-down re-arms the Cancel trigger
   }
 
@@ -1285,6 +1949,8 @@
     state.timerStart = null;
     state.timerFrozen = null;
     state.consent = null;
+    state.analyzedTrip = null;
+    el("opt-card").hidden = true;
     el("reservations").replaceChildren();
     feed.replaceChildren();
     feedEmpty.hidden = false;
@@ -1334,11 +2000,14 @@
 
   // The voice module (the orb, a separate module scope) rides this page's
   // access code and displayed trip — one window bridge so its /query POSTs
-  // carry the header and pin the trip on screen.
+  // carry the header and pin the trip on screen. cascadeShowFlights lets
+  // the orb paint options as soon as /query returns, without waiting for
+  // the 1.5s poll.
   window.cascadeVoice = {
     headers: (extra) => codeHeaders(extra),
     tripId: () => state.tripId || "",
   };
+  window.cascadeShowFlights = renderOptionsBoard;
 
   // A trip booked mid-conversation appears without a reload (the iOS
   // TripManager pattern): when the latest trip *changes*, adopt it.
@@ -1546,6 +2215,16 @@
     await checkLatest();
     updateControls();
     refreshSearchLog();
+    fetch("/v1/ml/metrics", { headers: codeHeaders() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((m) => {
+        if (!m || m.roc_auc == null) return;
+        const node = el("ml-model");
+        node.hidden = false;
+        const auc = Number(m.roc_auc).toFixed(2);
+        node.textContent = `Delay-risk model · logistic regression · ROC-AUC ${auc}`;
+      })
+      .catch(() => {});
     setInterval(poll, POLL_MS);
     setInterval(checkLatest, LATEST_MS);
     setInterval(refreshSearchLog, SEARCH_MS);
@@ -1598,6 +2277,15 @@ function Orb({ tokenError, sessionRef }) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         setLatencyMs(Math.round(performance.now() - started));
+        try {
+          const pendingRes = await fetch('/v1/sabre_tools/pending_options', {
+            headers: bridge.headers(),
+          });
+          const pendingBody = await pendingRes.json().catch(() => ({}));
+          if (window.cascadeShowFlights) {
+            window.cascadeShowFlights(pendingBody.pending_options || null);
+          }
+        } catch { /* poll will retry */ }
         return data.response;
       } catch (err) {
         setQueryError('query failed: ' + err.message);
