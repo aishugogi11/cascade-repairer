@@ -1,105 +1,105 @@
-# Vocal Bridge Training — hackathon-ready voice-agent foundation
+# Cascade Repairer
 
-This repo is the pre-built foundation for the **DeepLearning.AI Voice AI Hackathon — "The Complete Trip," powered by Sabre and Vocal Bridge** (July 18, 2026, Mountain View, CA). The challenge: pull a fragmented trip — flights, hotels, ground transport, dining — into a single voice conversation and a single itinerary, booked and managed by a voice AI agent. Everything infrastructural (voice architectures, agent layer, deployment, evaluation) is built *before* event day, so the team spends hackathon hours on the idea, not the plumbing.
+ML-powered travel recovery. When a flight cancels, Cascade keeps talking while it repairs the downstream trip — hotel, ride, dinner, tour — in parallel. The itinerary flips from **broken → repairing → fixed** on screen. A trained delay-risk model ranks replacement flights; a separate action-policy model ranks ground-transport moves on the itinerary you already have.
 
-**The team's demo concept is locked** (2026-07-06): the **Cascade Repairer** — a flight cancels live, and the voice agent keeps talking while it repairs the whole downstream trip (hotel, ride, dinner, tour) in parallel, the itinerary flipping from broken to fixed on screen. Full mission and scope: [`specs/mission.md`](specs/mission.md).
+- Dashboard: http://localhost:1019/v1/cascade/
+- Optimize My Trip: http://localhost:1019/v1/build/
+- Live: https://talktomytrip.com/?code=cascade2026 (the `?code=` query is required)
+
+## Problem
+
+A cancelled flight is not a search problem. It is a ranking problem under stress: which alternative actually gets you there with the least chance of breaking again? Travelers bounce across tabs for times, prices, and rides, and still cannot see delay risk or how a later arrival hits the rest of the day.
+
+## Solution
+
+Cascade is a conversational recovery agent on a live itinerary.
+
+1. Speech becomes structured tools (search, preferences, trip status, repair).
+2. Sabre InstaFlights supplies priced alternatives (real CERT shopping; PNR writes are mock where entitlements block create).
+3. A logistic regression scores P(arrival delay ≥ 15 min) on every option.
+4. A preference ranker mixes that risk with price, arrival, stops, and duration.
+5. You hear and see *why* — “24% disruption risk, nonstop, lands at 8:50 AM.”
+6. “Price matters more” or “arrive before 9” reranks the **same** options. No second search.
+
+The LLM explains. The models decide.
 
 ## Build & run locally
 
-All commands below run from the **repo root** — that's where the `Makefile` and `docker-compose.yml` live, and where Compose resolves the `config/.env` path from.
+Commands run from the **repo root** (`Makefile`, `docker-compose.yml`, `config/.env`).
 
-**1. Install Docker.** Get [Docker Desktop](https://docs.docker.com/get-started/get-docker/) (it includes Docker Compose) and make sure it's running. `make` ships with macOS/Linux.
+**1. Install Docker.** [Docker Desktop](https://docs.docker.com/get-started/get-docker/) includes Compose. `make` ships with macOS/Linux.
 
-**2. Create `config/.env`.** Docker Compose injects this file into both containers and refuses to start without it. Copy the template and fill in what you have:
+**2. Create `config/.env`.** Compose injects this file and will not start without it:
 
 ```bash
 cp backend/.env.example config/.env
 ```
 
-The stack boots fine with placeholder values — you only need real keys for the endpoints you exercise:
+Placeholder values boot the stack. Add keys only for the surfaces you exercise:
 
 | Variable | Needed for |
 |----------|------------|
-| `OPENAI_API_KEY` | Agent endpoints (`/v1/hello/agents*`), cascaded pipeline (`/v1/cascade_demo`), Whisper STT / TTS |
-| `FEATHERLESS_API_KEY` | Spoken text LLM (Concierge, Cascade, consent). Unset → OpenAI `gpt-5.4-mini`. STT/TTS stay on OpenAI. |
-| `VOCAL_BRIDGE_API_KEY`, `VOCAL_BRIDGE_AGENT_ID` | Voice smoke-test page (`/v1/vb_test/`) |
-| `VOCAL_BRIDGE_CALLER_AGENT_ID`, `VOCAL_BRIDGE_CALLEE_PHONE` | Outbound-call tool (`/v1/outbound_call`) |
+| `OPENAI_API_KEY` | Concierge / agent endpoints, Whisper STT / TTS |
+| `FEATHERLESS_API_KEY` | Spoken-text LLM. Unset → OpenAI `gpt-5.4-mini`. STT/TTS stay on OpenAI. |
+| `VOCAL_BRIDGE_API_KEY`, `VOCAL_BRIDGE_WEB_AGENT_ID` | Voice orb on Cascade / Optimize (`/v1/web_call/token`) |
+| `VOCAL_BRIDGE_CALLER_AGENT_ID`, `VOCAL_BRIDGE_CALLEE_PHONE` | Outbound consent / results callbacks |
+| `SABRE_*` + `SABRE_MODE` | Flight shopping (`mock` or `real`) |
+| `GOOGLE_MAPS_API_KEY` | Live directions on Optimize My Trip (unset → labeled demo geometry) |
+| `UBER_SERVER_TOKEN` | Live first-stop fares (unset → no live prices) |
+| `RESEND_API_KEY` | Itinerary email |
+| `DEMO_ACCESS_CODE` | Gate on `/v1/*` JSON (unset → fail-open for local dev) |
 
-**3. Build the images.** `config/.env` must exist before this step — Compose loads it at build/start time and errors out if it's missing:
-
-```bash
-make build          # = docker compose build (both images)
-```
-
-To build just one image, or force a clean rebuild of the Jupyter image after a base-image change:
-
-```bash
-docker compose build backend
-make rebuild-jupyter
-```
-
-**4. Start the stack** (`make up` also builds, so you can skip step 3 and run this directly):
+**3. Build and start:**
 
 ```bash
 make up
 ```
 
-- Backend (FastAPI, hot-reload): http://localhost:1019/v1/hello/hello_world
-- JupyterLab (course notebooks): http://localhost:8020/?token=vb
+- Backend (FastAPI, hot-reload): http://localhost:1019/v1/cascade/
+- Health: http://localhost:1019/v1/hello/hello_world
 
-Other useful targets (`make help` lists them all): `make logs` tails everything, `make down` stops the stack, `make clean` also removes volumes and locally-built images, and `make backend` / `make jupyter` start one service alone.
+`make logs`, `make down`, `make clean`, `make backend` — see `make help`.
 
-Run the test suite the same way CI does — inside the built container:
+Tests (hermetic — no GCP or LLM keys):
 
 ```bash
 docker compose build backend
 docker run --rm hackathon-vocal-bridge-backend python -m pytest tests/ -v
 ```
 
-Tests are hermetic: no GCP credentials or `OPENAI_API_KEY` required. The agent endpoints (`/v1/hello/agents*`) do need `OPENAI_API_KEY` set in the environment to return live results.
-
 ## Repo layout
 
 | Path | What it is |
 |------|------------|
-| `backend/` | FastAPI app (Docker): OpenAI Agents SDK endpoints, BigQuery/GCS helpers, MCP servers, devops + promotion scripts, tests |
-| `backend/ml/` | Delay-risk training + inference (separate from request path). Artifact in `backend/ml/artifacts/` |
-| `jupyter_notebook/` | Dockerized JupyterLab with the reworked DeepLearning.AI course notebooks (L2–L5), glossary, and transcript — the reference source for all voice code |
-| `specs/` | Project constitution (mission, tech stack, roadmap) and per-feature specs — spec-driven development lives here |
-| `skills/` | Agent skills (source of truth; `make copy-skills` mirrors them into `.claude/skills/` and `.agents/skills/`) |
-| `AGENTS.md` | Working rules for AI agents contributing to this repo |
-| `TODO.md` | Ideas inbox — not authoritative; the roadmap is |
+| `backend/` | FastAPI app: Concierge, repair cascade, Sabre, email, tests |
+| `backend/ml/` | Delay-risk training + inference. Artifact in `backend/ml/artifacts/` |
+| `backend/ml/transport/` | Ground-transport quality + action-policy models |
+| `backend/api/assets/cascade/` | Live dashboard |
+| `backend/api/assets/build/` | Optimize My Trip |
+| `specs/` | Mission, tech stack, roadmap, per-feature specs |
+| `ios/TalkToMyTrip/` | Native SwiftUI companion (optional) |
 
-## Stack at a glance
+## Stack
 
-- **Backend:** Python / FastAPI, containerized; local orchestration via `docker-compose.yml` + `Makefile`.
-- **Agent layer:** **OpenAI Agents SDK** (agents, function tools, MCP servers) — patterns proven in `backend/api/hello.py` and documented in `skills/openai-agents-sdk/`. Deliberately not Anthropic.
-- **Voice:** Vocal Bridge web client (WebRTC) in front of three course architectures — cascaded (STT → LLM → TTS), real-time voice-to-voice, and the hybrid "Concierge" pattern (demo target) — ported from the L2–L5 notebooks as the roadmap progresses.
-- **Data:** BigQuery (dataset `vocal_bridge`) for trips/itineraries/conversations/evals, GCS for audio artifacts — both via config-driven helpers in `backend/api/helpers/`.
-- **Travel APIs:** Sabre (hackathon requirement) — mocked docs-accurate first, real credentials swapped in at the event.
-- **ML:** scikit-learn logistic regression predicts P(arrival delay ≥ 15 min) for each Sabre option; a preference ranker mixes that risk with price, arrival, stops, and duration.
-
-Details and decisions: [`specs/tech-stack.md`](specs/tech-stack.md).
-
-## Problem
-
-Travel disruptions force travelers to search across fragmented sources and decide under stress. A cancelled flight is not just a new ticket — it is a ranking problem: which alternative actually gets you there with the least chance of breaking again?
-
-## Solution
-
-An ML-powered conversational travel recovery agent on top of Cascade Repairer. Vocal Bridge is the voice. Sabre InstaFlights is the inventory. A trained delay-risk model scores every alternative. A preference layer reranks when you say "price matters more" or "I need to arrive before 9."
+- **Backend:** Python / FastAPI, Docker Compose + Makefile
+- **Agent:** OpenAI Agents SDK (function tools). Spoken text via Featherless when configured
+- **Voice:** WebRTC orb on the dashboard; every substantive turn POSTs to `/v1/web_call/query` (or `/v1/trip_builder/query` on Optimize). The voice layer does not pick flights
+- **Inventory:** Sabre InstaFlights
+- **ML:** scikit-learn logistic regression (delay risk) + random-forest action policy (hops)
+- **Data:** BigQuery trips / items / bookings; GCS for audio artifacts
+- **Maps / rides:** Google Directions and Uber estimates when keys exist; otherwise named demo fallbacks
 
 ## Machine Learning
 
-**What it predicts.** Probability a flight arrives 15+ minutes late (the BTS On-Time definition). Output example: `predicted_delay_risk = 0.18`.
+### Flight delay risk
 
-**Data.** Training uses a BTS-calibrated synthetic On-Time set (`backend/ml/data.py`): published national delay rate (~18%), higher evening banks, connections, congested hubs, and carrier differences. Optional `--csv` ingests a real labeled file with the same columns. CI never downloads a giant BTS dump.
+**Target.** P(arrival delay ≥ 15 minutes) — BTS On-Time definition. Example: `predicted_delay_risk = 0.18`.
 
-**Features.** Departure/arrival hour, day of week, month, stops, scheduled duration, connection flag, evening/early flags, origin/destination hub pressure, airline.
+**Data.** BTS-calibrated synthetic On-Time set (`backend/ml/data.py`): ~18% national delay rate, hotter evening banks, connections, congested hubs, carrier differences. Optional `--csv` for a real labeled file. CI never downloads a giant BTS dump.
 
-**Model.** Logistic regression in a sklearn pipeline (median impute + scale + one-hot airline). Chosen because it trains in seconds, coefficients are readable in a demo, and it does not need a GPU.
+**Features.** Departure/arrival hour, day of week, month, stops, duration, connection flag, evening/early flags, hub pressure, airline.
 
-**Training.** Separate from serving:
+**Model.** `LogisticRegression` in a sklearn pipeline (median impute, scale, one-hot airline). Trains in seconds, coefficients are readable, no GPU.
 
 ```bash
 docker compose exec backend python -m ml.train
@@ -107,7 +107,7 @@ docker compose exec backend python -m ml.train
 
 Writes `backend/ml/artifacts/delay_risk.joblib` and `metrics.json`. Requests never retrain.
 
-**Evaluation.** Hold-out on 2,400 flights from the 12,000-row set:
+**Hold-out** (2,400 flights from 12,000):
 
 | Metric | Value |
 |--------|-------|
@@ -118,88 +118,62 @@ Writes `backend/ml/artifacts/delay_risk.joblib` and `metrics.json`. Requests nev
 | F1 | 0.54 |
 | Delay rate in test set | 26% |
 
-Numbers also live in `backend/ml/artifacts/metrics.json` and `GET /v1/ml/metrics`. The cascade page shows ROC-AUC under Available flights.
+Precision is 0.44 because delay is the minority class — ranking uses the **probability**, not the hard label. Live numbers: `GET /v1/ml/metrics` and the cascade “Available flights” panel.
 
-**Inference.** `ml.inference.predict_delay_risk` loads the artifact once per process. Missing artifact → documented heuristic fallback so a voice turn cannot die.
+**Inference.** `ml.inference.predict_delay_risk` loads once per process. Missing artifact → documented `heuristic_fallback` so a voice turn cannot die.
 
 ### Optimize My Trip — action-selection model
 
-Most travel AI generates itineraries. **Cascade starts with the itinerary you already have.** Upload a PDF, screenshot, or pasted schedule at [http://localhost:1019/v1/build/](http://localhost:1019/v1/build/).
+Cascade starts with the itinerary you already have. Upload a PDF, screenshot, or pasted schedule at http://localhost:1019/v1/build/.
 
-Google Maps (or labeled demo geometry if no key) answers *what routes exist*. A trained forest answers *which action to take* (change pickup, rideshare provider, mode, leave earlier, reorder, …). The optimizer enforces hard constraints. Voice extracts preferences and explains — it does not pick the winner.
+Maps answers *what routes exist*. A trained forest answers *which action to take* (change pickup, provider, mode, leave earlier, reorder stops). Hard constraints (`Prefs`: max walk, min buffer, frozen stops) filter first. Voice extracts preferences and explains — it does not pick the winner.
 
-**What it predicts.** `action_utility` for (current hop state + candidate action). The loop executes the highest-scoring feasible action, then re-observes.
+**Target.** `action_utility` for (current hop + candidate action). The loop executes the highest-scoring feasible action, then re-observes (up to 5 steps). Route reorder is a constrained permutation of flexible interior stops (ends and `anchored` items stay put); it is proposed only if path miles drop by ~8%+, then scored as `REORDER_ACTIVITY` like any other action.
 
-**Data.** Synthetic urban hops with a documented data-generating process (`backend/ml/transport/data.py` + `policy.py`). This is **not** real labeled ride-quality or Uber/Lyft data. Simulated rideshare quotes are tagged `demo_simulated` and prices are never shown as live. `GOOGLE_MAPS_API_KEY` is optional; without it, routes are `demo_geometry`.
-
-**Training.**
+**Data.** Synthetic urban hops with a documented DGP (`backend/ml/transport/data.py`, `policy.py`). Not real Uber/Lyft outcome labels. Simulated quotes are tagged `demo_simulated`. Unset Maps key → `demo_geometry`.
 
 ```bash
 docker compose exec backend python -m ml.transport.train
 docker compose exec backend python -m ml.transport.policy_train
 ```
 
-Writes quality + action-policy artifacts under `backend/ml/transport/artifacts/`. Requests never retrain.
+**Action model (hold-out):** action accuracy **0.69** vs rules baseline **0.19** and linear **0.59**; R² **0.94**. See `GET /v1/ml/transport/policy` — UI reads the artifact, never hardcodes the numbers.
 
-**Quality model hold-out (2,400 hops from 12,000):** see `GET /v1/ml/transport` / `metrics.json`.
+## AI agent
 
-**Action model:** see `GET /v1/ml/transport/policy` / `policy_metrics.json` (action accuracy vs a rules baseline and linear regression). Numbers are from that training run — never hardcoded in the UI.
+The Concierge at `/v1/web_call/query`:
 
-## AI Agent
-
-Vocal Bridge STT/TTS delegates every substantive turn to `/v1/web_call/query` (Concierge). The agent:
-
-1. Extracts origin, destination, date, and constraints from speech.
+1. Extracts origin, destination, date, and constraints.
 2. Calls `search_flights` (Sabre InstaFlights).
-3. The tool scores each itinerary with the delay-risk model, then ranks with current traveler prefs (default: lowest disruption risk).
-4. Speaks the recommendation **and the delay percent from the model** — it is instructed not to invent percentages.
-5. On "I'd rather pay less" / "avoid connections" / "arrive before 9", calls `set_recovery_preferences` and reranks the **same** stored options. No second search.
-6. Auto-repair (`fix_trip`) also uses the model: remaining candidates are ranked by low delay risk with arrival closeness to the cancelled flight.
+3. Scores each itinerary with the delay-risk model, then ranks with traveler prefs (default: lowest disruption risk).
+4. Speaks the recommendation **and the delay percent from the model** — it must not invent percentages.
+5. On “I’d rather pay less” / “avoid connections” / “arrive before 9”, calls `set_recovery_preferences` and reranks the **same** stored options.
+6. Auto-repair (`fix_trip`) ranks remaining candidates by low delay risk plus arrival closeness to the cancelled flight.
 
-The LLM does not decide which flight is best. The model + ranker do. The LLM explains that output.
+Sessions pin a `trip_id` (book, disrupt, or POST body). The dashboard polls `GET /v1/itinerary/status/{trip_id}` every 1.5s on the same rows the tools write.
 
-## Impact
+## Demo script (flight recovery)
 
-- Less tab-switching during a cancellation.
-- Delay risk is visible, not vibes.
-- Preferences update the ranking live, so "cheaper" and "must land before 9" are different recommended flights.
-- The screen shows predicted disruption risk, match score, and why — the same facts the agent speaks.
+On http://localhost:1019/v1/cascade/, tap the orb:
 
-## Demo script (ML recovery)
-
-On [http://localhost:1019/v1/cascade/](http://localhost:1019/v1/cascade/), tap the orb:
-
-1. "My flight was canceled. I need to get from JFK to LAX tomorrow morning."
-2. Agent searches, model scores, cards appear with **Recommended** + disruption risk.
-3. "Actually, price matters more." → rank flips toward the cheaper (often connecting) option; the agent explains the higher delay risk.
-4. "Never mind — I really need to arrive before 9 AM." → JetBlue 8:50 AM (mock) or the earliest live option that makes the window.
-
-Then book by saying "option one" if you want the rest of the Cascade Repairer beat.
+1. “My flight was canceled. I need to get from JFK to LAX tomorrow morning.”
+2. Cards appear with **Recommended** + disruption risk.
+3. “Actually, price matters more.” → cheaper (often connecting) option rises; the agent names the higher delay risk.
+4. “Never mind — I really need to arrive before 9 AM.” → earliest option that makes the window.
+5. Book with “option one” if you want the full repair beat.
 
 ## Demo script (Optimize My Trip)
 
-On [http://localhost:1019/v1/build/](http://localhost:1019/v1/build/):
+On http://localhost:1019/v1/build/:
 
-1. Click **Try sample San Francisco weekend** (Alex Morgan’s Chase Center itinerary) or upload that PDF.
-2. Analysis stages complete from real parse → maps → rideshare → ML action loop. Trip Optimized shows calculated original vs optimized travel minutes (cost is hidden unless a live price API exists).
-3. Say **optimize my trip for time**, **what's the best rideshare?**, **why did you choose Lyft?**, or **undo that change**.
-4. **Model Intelligence** shows the real action-model hold-out accuracy / MAE and Rules vs Linear vs Random Forest from `policy_metrics.json`.
+1. **Try sample San Francisco weekend** or upload a PDF / screenshot.
+2. Stages: parse → maps → rideshare → ML action loop. Header shows original vs optimized travel minutes.
+3. Say **optimize my trip for time**, **best option for first stop**, **why did you choose that?**, or **undo that change**.
+4. **Apply** / **Keep current** on route-reorder and transportation cards. **Model Intelligence** shows hold-out accuracy from `policy_metrics.json`.
 
-## Course integration patterns
+## Database
 
-The course teaches three patterns for where voice plugs into a product. These are distinct from the cascaded, real-time, and Concierge voice architectures above:
-
-1. **Voice embedded in applications (Voice for your application).** Voice and the GUI share bidirectional state: spoken commands can trigger UI changes, while clicks and other UI actions remain visible to the voice agent. The course calls this the **Client Actions** pattern and demonstrates it in Lesson 2 (`jupyter_notebook/training_course/L2/`).
-2. **Voice for existing agents.** Vocal Bridge acts as a thin voice layer in front of an existing GPT, Claude, LangChain, or other LLM agent. It handles conversational flow itself and delegates queries that need the existing agent's reasoning, tools, or domain logic. Lesson 3 demonstrates this with `useAIAgent`; the backend reference surface is `/v1/web_call/`.
-3. **Voice as a tool.** An LLM agent invokes voice when a phone call or live conversation is the right modality, just as it would call any other tool. Lesson 4 demonstrates outbound calling with `vb call`; the backend reference surface is `/v1/outbound_call`.
-
-> **Pattern used by the Cascade Repairer demo:** [`backend/api/demo.py`](backend/api/demo.py) uses the outbound-calling capability associated with **Voice as a tool**, but it is not a strict implementation of that pattern. Both demo beats invoke `vb_cli.place_call` to make a proactive outbound call: first to confirm the booking, then to report the cancellation while repairs run in the background. The calls are triggered deterministically by the operator-facing demo orchestrator rather than selected as a tool by an LLM. The demo is therefore closest to Pattern 3, but does not fully implement any of the three course integration patterns. Its live itinerary is a coordinated visual surface, not the Client Actions pattern, because the phone agent and UI do not share bidirectional WebRTC state.
-
-The canonical course wording and definitions live in [`COURSE_TRANSCRIPT.md`](jupyter_notebook/training_course/COURSE_TRANSCRIPT.md) and [`COURSE_GLOSSARY.md`](jupyter_notebook/training_course/COURSE_GLOSSARY.md).
-
-## Database structure
-
-Six tables in the BigQuery dataset `vocal_bridge` (us-west1). Schema source of truth: [`specs/tech-stack.md`](specs/tech-stack.md) § Schema; typed pydantic models + one repository module per table live in `backend/api/repositories/`. Tables are created idempotently by CI on every build and never dropped.
+Six tables in BigQuery dataset `vocal_bridge` (`us-west1`). Schema: [`specs/tech-stack.md`](specs/tech-stack.md). Typed repositories in `backend/api/repositories/`.
 
 ```mermaid
 erDiagram
@@ -211,236 +185,64 @@ erDiagram
 
     trips {
         string trip_id PK
-        string user_id
-        string title
         string status "draft | booked | active | complete"
-        string origin
-        string destinations "repeated"
-        date start_date
-        date end_date
-        timestamp created_at
     }
     itinerary_items {
         string item_id PK
         string trip_id FK
         string type "flight | hotel | ground | dining | experience"
         string status "planned | booked | broken | repairing | fixed | cancelled"
-        string provider "sabre | other"
-        string provider_ref
-        timestamp start_ts
-        timestamp end_ts
-        string location
-        json details
-        float price
-        string currency
-        timestamp updated_at
     }
     bookings {
         string booking_id PK
         string item_id FK
-        string trip_id FK
-        string sabre_confirmation_ref
         string state "pending | confirmed | cancelled"
-        timestamp booked_at
-        json raw_response
-    }
-    sessions {
-        string session_id PK
-        string trip_id FK "nullable"
-        string architecture "cascaded | realtime | concierge"
-        string client "vb_web"
-        timestamp started_at
-        timestamp ended_at
-    }
-    turns {
-        string turn_id PK
-        string session_id FK
-        string role "user | agent"
-        string transcript
-        string audio_gcs_uri
-        timestamp started_at
-        int ttfb_ms
-        int duration_ms
-    }
-    eval_runs {
-        string run_id PK
-        string architecture "cascaded | realtime | concierge"
-        string git_sha
-        string scenario
-        float ttfb_ms
-        float e2e_latency_ms
-        float wer
-        float mos_estimate
-        string notes
-        timestamp run_at
     }
 ```
 
-The `itinerary_items.status` lifecycle (**booked → broken → repairing → fixed**) is what drives the Cascade Repairer demo — the agent's repair logic and the live itinerary UI both key off it. `eval_runs` stands alone: one row per evaluation-harness run, not tied to a trip.
+The **booked → broken → repairing → fixed** lifecycle drives both the repair agent and the live UI.
 
-## Deployment
+## The one-page demo: `/v1/cascade/`
 
-The backend runs on **Cloud Run** (GCP project `vocal-bridge-hackathon`, `us-west1`):
+1. **Book by voice** — orb → Concierge → InstaFlights options → mock PNR. Trip appears on the page within ~4 s.
+2. **Cancel flight → cascade** — breaks the flight (screen turns red) and places **Call 1** asking consent. No repairs at click time.
+3. **Spoken “yes”** launches parallel repairs. The 60-second timer starts at the go-ahead. No / timeout stands down and re-arms Cancel.
+4. **Call 2** reports the actual rebooked flight, price delta, and (if cheaper and PayPal is configured) a sandbox refund sentence. Optional email of the repair summary.
 
-- Dev service: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/
-- Health check: `GET /v1/hello/gcp_check` — verifies BigQuery and GCS reachability independently.
+Mid-repair, “how’s my trip?” uses `trip_status` against live item rows. **Sabre Live Search** in the right column is the shopping ring buffer.
 
-CI/CD is Cloud Build, driven by `backend/config.yaml` + `backend/devops/cloudbuild.yaml`: validate config → ensure BigQuery dataset → build image → **pytest inside the built image** (failure blocks the deploy) → deploy. The pipeline fires on a **GitHub PR from a `vb/feature/*` branch into `vb/dev`** — direct pushes do not build. Provisioning and console-only setup steps: [`backend/devops/README.md`](backend/devops/README.md).
+Local mock (`SABRE_MODE=mock`, voice env unset): page still serves; drive the agent with `POST /v1/web_call/query` and watch the page adopt the trip. Disrupt endpoints 503 without outbound-call env.
 
-## The one-page demo: `/v1/cascade/` (Phase 23)
+### Operator run sheet
 
-The complete book → break → consent → repair → callback experience runs from the
-cascade dashboard, with Josh as both operator and traveler:
-
-1. **Book by voice, free of quota** — tap the center-column orb (the
-   `/v1/web_call/` wiring on-page) and book through the guided Concierge flow;
-   real InstaFlights fares on live pairs, mock PNR writes. The booked trip
-   auto-appears on the page within ~4 s.
-2. **Cancel flight → cascade** does two things only: breaks the flight (screen
-   turns red) and places **Call 1**, which describes the real trip and asks the
-   traveler for consent to repair. **No repairs launch at click time** — the
-   page shows "waiting for the traveler's go-ahead" with no running clock.
-3. **The spoken "yes" launches the repairs**: a backend watcher polls the VB
-   session log for Call 1's transcript, LLM-classifies the answer, and only an
-   unambiguous yes fires the cascade — the 60-second recovery timer starts
-   here, at the go-ahead. No/ambiguous/timeout stands down on-page and re-arms
-   the Cancel trigger.
-4. **Call 2 — the results callback** — fires when the backend's repair tasks
-   land (~35 s), its script composed from the actual repair results (rebooked
-   flight, price delta, re-checked legs).
-
-Quota: **2 calls per full run** (booking is web-voice, free). Mid-repair, ask
-the orb "how's my trip?" — the Concierge's `trip_status` tool reads the live
-statuses across sessions. The right column's **Sabre Live Search** panel shows
-the shopping layer's recent operations (route, real/mock/fallback, outcome).
-
-Local mock walkthrough (zero quota, `SABRE_MODE=mock`, VB env unset): the page
-serves at `/v1/cascade/`, booking works through the orb only with VB env set —
-without it, drive the Concierge via the `/v1/web_call/query` curl seam and
-watch the page adopt the trip; the disrupt endpoints 503 cleanly without the
-VB env.
-
-### Running it live — the operator run sheet
-
-One full run costs **2 calls** of the 10/day quota (resets 00:00 UTC = 5 PM PDT).
-Have the phone next to the computer; you are both operator and traveler.
-
-**0. Re-verify the anchor pair first (free)** — run the probe loop in
-"Demo-day: check which flight pairs are live" below, within the hour before the
-run. Book whichever pair answers "I found…" (JFK→LAX is the usual anchor).
-
-**1. Open the dashboard** (the `?code=` persists to localStorage, so reloads
-keep working):
+Access-gated JSON needs `X-Access-Code` (browser `?code=` persists to localStorage).
 
 ```
 https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade/?code=cascade2026
 ```
 
-**2. Book by voice (free)** — if the page already shows a trip, click **🆕 New
-trip** first: it clears the display AND ends any live voice session (sessions
-pin to the displayed trip, and a pinned session refuses to book — "you already
-have a trip"). Then tap the orb, allow the mic, and say e.g. *"Book a flight
-from New York to Los Angeles on July 17th"* → pick an option by number → say
-yes when the Concierge offers to **arrange the rest of the trip** (without
-this the cascade has only a flight to repair). The booked trip auto-appears on
-the page within ~4 s.
-
-**2b. Optional return check (free)** — with the trip booked, ask the orb *"is
-there a way to get home?"*. The agent asks your return date, then speaks a
-Tavily-backed indication that return flights exist ("I can't book the return
-from here, but…"). Web schedule info, not fares — nothing appears in the
-candidates panel and nothing becomes bookable.
-
-**2c. Email offer (free; Phase 40)** — after the booking the Concierge offers
-once: *"Would you like me to send this to your email?"*. Say yes, **speak a
-real address you can open on stage**, and listen to the read-back: the agent
-**spells the part before the @ letter by letter** (live-QA lesson 2026-07-18:
-"janzen" and "janzzen" sound identical spoken plainly, and the bounced email
-is invisible on stage) — confirm only if every letter is right; a correction
-or garbled answer gets a re-ask, never a guess. You can also ask *"what email
-do you have on file?"* or give a corrected address any time — the newest
-confirmed address replaces the old one and the itinerary is re-sent. The
-email arrives from `Cascade <info@talktomytrip.com>` with the **departure
-date in the subject** ("Your trip to Los Angeles — July 21") so lookalike
-runs can't be confused. The address is kept in memory per trip for Call 2's
-offer; declining stores nothing and the offer isn't repeated. **Delivery
-validator: the Resend dashboard** (resend.com → Emails) shows every send
-with recipient and delivered/bounced status — check it if an email seems
-missing.
-
-**3. Cancel flight → cascade (Call 1)** — click it once. Expect: the screen
-turns red with **"waiting for the traveler's go-ahead"** and **no running
-clock**, and the phone rings (~15–30 s). Call 1 must describe the trip you just
-booked and ask permission. Do **not** click Cancel again while the call is up.
-
-**4. Optional mid-window check** — before answering yes, ask the orb to fix the
-trip: it must answer *"I'm already asking you on the phone — just say yes on
-the call and I'll get started."* and launch nothing.
-
-**5. Say "yes" on the phone** — expect: the timer starts (anchored at the
-go-ahead, not at the break), cards animate broken → repairing → fixed, and the
-**rebooked flight differs from the cancelled one** (different flight/time on
-the flight card).
-
-**6. Call 2 arrives** (~35 s after consent) speaking the actual rebooked
-details and price delta. If the rebooked flight is **cheaper**, it also says
-the difference was already refunded to the traveler's PayPal (sandbox payout,
-PR #71). No refund sentence means the fare was equal/pricier — or the
-`PAYPAL_*` env vars are unset (the kill switch). If you gave an email in
-step 2c, Call 2 also offers *"Would you like an email of this?"* — answer
-plainly; a clear yes sends the repair summary (rebooked flight, struck-through
-original, the refund sentence when one fired) to the stored address, anything
-else sends nothing. No email in step 2c means Call 2 makes no email offer.
-
-**The "no" path** (second run, if quota allows): answer "no" on Call 1 —
-no repairs launch, the page shows the stand-down message, the Cancel button
-re-arms, and no Call 2 fires.
-
-**Under-the-hood verification** (curl only — these JSON endpoints read the
-`X-Access-Code` *header*, so a browser address bar gets a 401):
+1. **New trip** if a trip is already pinned (a pinned session will not book).
+2. Book JFK→LAX (or whichever pair the probe below marks live) and accept “arrange the rest of the trip.”
+3. Optional: “is there a way to get home?” — schedule indication, not bookable fares.
+4. Optional: email offer — confirm the spelled local-part; mail is `Cascade <info@talktomytrip.com>`.
+5. **Cancel flight → cascade** once. Answer **yes** on Call 1. Cards animate; Call 2 follows (~35 s).
 
 ```bash
 BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
 CODE="cascade2026"
-# The page's source of truth: item statuses + the consent block
-# (awaiting_consent → granted after your yes; declined/timed_out on stand-down)
 curl -s -H "X-Access-Code: $CODE" "$BASE/v1/itinerary/status/<TRIP_ID>" | python3 -m json.tool
-curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/latest_trip_id"   # what the page auto-adopts
-curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/search_log"       # the live-search panel feed
+curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/latest_trip_id"
+curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/search_log"
 ```
 
-**After a passing run:** write the notes (date, pair, both call outcomes, the
-differing rebooked flight) into the PR evidence — `PR_BODY.md` + `gh pr edit
-<PR#> --body-file PR_BODY.md` — and clear the run's items from the roadmap's
-open-follow-ups list.
+### Check which flight pairs are live
 
-## Demo-day: check which flight pairs are live
-
-The guided-booking and repair flows shop **real** Sabre fares (`SABRE_MODE=real`
-on the deployed service) via InstaFlights. InstaFlights is a **per-pair cache**
-with a **per-pair advance-purchase window**, so at any given moment only *some*
-origin→destination pairs have priced content — the rest honestly return "no
-flights." That live set **drifts**: it changes as the cache refreshes and **as
-the UTC day rolls** (00:00 UTC = 5 PM PDT). A pair that returns options in the
-morning can be empty an hour later, and a pair that was live yesterday is not
-guaranteed today. **A green result yesterday proves nothing about the demo.**
-
-So before every rehearsal — and again right before the live demo — probe the
-current set and pick a pair (and date) that comes back with options. This runs
-entirely against the **deployed Cloud Run service** through the same voice path
-the demo uses; no local setup, just the shared access code. Adjust `DEMO_DATE`
-to the departure date you'll speak in the demo (near-term dates — a couple of
-days out — are the most likely to be cached):
+InstaFlights is a per-pair cache with a per-pair advance-purchase window. Empty is a documented 404, not a bug. Re-probe within the hour before a demo:
 
 ```bash
 BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
-CODE="cascade2026"                 # the DEMO_ACCESS_CODE on the service
-DEMO_DATE="July 18 2026"           # the date you'll actually say in the demo
-
-# Curated demo shortlist (from specs/2026-07-13-sabre-cert-exploration/sabre-cert-notes.md).
-# Each probe MUST use a unique session_name — reusing one makes the agent replay the
-# prior conversation ("I already have options…") instead of searching. epoch+counter
-# guarantees uniqueness; do NOT use $RANDOM (it can collapse to a constant in a shell).
+CODE="cascade2026"
+DEMO_DATE="July 18 2026"
 RUN="$(date +%s)"; i=0
 for PAIR in "SFO to MIA" "SEA to BOS" "BOS to SEA" "JFK to LAX" "JFK to ORD" \
             "ATL to SEA" "LAX to MSP" "DFW to EWR" "MCO to JFK" "SEA to PDX"; do
@@ -450,50 +252,32 @@ for PAIR in "SFO to MIA" "SEA to BOS" "BOS to SEA" "JFK to LAX" "JFK to ORD" \
     -d "{\"query\": \"Search flights from $PAIR on $DEMO_DATE\", \"session_name\": \"probe-$RUN-$i\"}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('response',''))")
   case "$REPLY" in
-    *"I found"*)          echo "✅ LIVE     $PAIR — $REPLY" ;;
-    *"couldn't find"*|*"couldn’t find"*) echo "⚪ empty    $PAIR" ;;
-    *"can't search"*|*"can’t search"*)   echo "🚫 unsupported route  $PAIR" ;;
-    *)                    echo "❓ other    $PAIR — $REPLY" ;;
+    *"I found"*) echo "LIVE     $PAIR" ;;
+    *"couldn't find"*|*"couldn’t find"*) echo "empty    $PAIR" ;;
+    *"can't search"*|*"can’t search"*) echo "unsupported  $PAIR" ;;
+    *) echo "other    $PAIR" ;;
   esac
 done
 ```
 
-Reading the output:
-- **✅ LIVE** — the agent said "I found N options"; this pair+date is bookable
-  right now. Use one of these in the demo.
-- **⚪ empty** — supported pair, but no cached content for that date (the honest
-  no-flights line). Try a different date or pair.
-- **🚫 unsupported route** — the pair isn't in the sandbox's supported markets at
-  all (e.g. MSP→MCI); don't script it.
+Use a unique `session_name` per probe or the agent replays prior options.
 
-Pick a **LIVE** pair and speak that exact route and date in the demo (`/v1/web_call/`
-or the phone flow). Because the set drifts, **re-run this within the hour before
-you present**, not the night before.
+## Deployment
 
-> Note: this is the manual form of the "event-day-morning Sabre smoke" on the
-> roadmap (Phases 24/29). A turnkey endpoint that sweeps this automatically is
-> planned but not yet built — until then, this curl loop is the day-of check.
+Cloud Run, `us-west1`:
 
-## Shipping a PR
+- Dev: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/
+- Health: `GET /v1/hello/gcp_check`
 
-`git_pull_dev.sh` (commit → push → PR → merge → sync) uses the commit message as
-the PR description by default; for a richer body, write `PR_BODY.md` at the repo
-root (gitignored) and the script uses it verbatim, never clobbering a
-hand-written description. The Phase 31 evidence guard was deliberately retired
-(commit `933f8e8`; decision recorded at the 2026-07-16 evening replan) — run
-evidence (mock walkthrough, live run, pytest output) lives in each phase's spec
-directory under `specs/` and in `specs/changelog.md`, not in PR descriptions.
+CI (Cloud Build): validate config → BigQuery dataset → image → pytest in the image → deploy. See `backend/devops/README.md`.
 
-## Create Sabre secret 
+## Sabre client secret (from the raw user/secret pair)
+
+```bash
 set -a && . ./config/.env && set +a
 python3 - <<'PY'
 import base64, os
 b64 = lambda s: base64.b64encode(s.encode()).decode()
 print(b64(f"{b64(os.environ['SABRE_API_USER_ID'])}:{b64(os.environ['SABRE_API_SECRET'])}"))
 PY
-
-# Live URL
-https://talktomytrip.com/?code=cascade2026 (must include the ?code parm)
-
-## Resend 
-curl -i -X POST 'https://api.resend.com/emails' -H "Authorization: Bearer $RESEND_API_KEY" -H 'Content-Type: application/json' -d '{"from":"Vocal Bridge <hello@talktomytrip.com>","to":"joshjanzen@gmail.com","subject":"Resend is live","html":"<p>Domain verified and sending.</p>"}'
+```
