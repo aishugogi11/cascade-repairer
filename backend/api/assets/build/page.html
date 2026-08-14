@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
+<title>Optimize My Trip — Cascade Repairer</title>
+<style>
+  :root { color-scheme: only light; }
+  :root {
+    --ink: #0f172a;
+    --ink-soft: #475569;
+    --ink-faint: #94a3b8;
+    --paper: #f6f8fb;
+    --card: #ffffff;
+    --line: #e2e8f0;
+    --brand: #2563eb;
+    --brand-soft: #eff6ff;
+    --fixed: #16a34a; --fixed-bg: #f0fdf4;
+    --repairing: #d97706; --repairing-bg: #fffbeb;
+    --broken: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 28px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  .masthead { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-size: 21px;
+  }
+  .masthead .name { font-size: 17px; font-weight: 700; }
+  .masthead .sub { font-size: 13px; color: var(--ink-soft); }
+  .app-nav { display: flex; gap: 6px; margin-left: 4px; }
+  .app-nav a {
+    font-size: 13px; font-weight: 700; text-decoration: none; color: var(--ink-soft);
+    padding: 8px 12px; border-radius: 999px;
+  }
+  .app-nav a:hover { background: var(--brand-soft); color: var(--brand); }
+  .app-nav a.is-current { background: var(--brand-soft); color: var(--brand); }
+  .head-spacer { flex: 1; }
+  .overall-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 600;
+    padding: 8px 16px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .overall-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  }
+  main {
+    max-width: 980px; margin: 0 auto; padding: 28px 24px 80px;
+  }
+  main.has-compare {
+    max-width: 1280px;
+    display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    gap: 20px; align-items: start;
+  }
+  .page-left { display: grid; gap: 16px; align-content: start; position: sticky; top: 20px; }
+  .page-main { min-width: 0; }
+  .page-left .card { margin-top: 0; }
+  main.has-compare .page-main .card:first-child { margin-top: 0; }
+  @media (max-width: 980px) {
+    main.has-compare { grid-template-columns: 1fr; }
+    .page-left { position: static; order: 2; }
+    .page-main { order: 1; }
+  }
+  .hero h1 {
+    font-size: 34px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15;
+  }
+  .hero p {
+    margin-top: 12px; font-size: 17px; color: var(--ink-soft); line-height: 1.5;
+    max-width: 720px;
+  }
+  .card {
+    margin-top: 22px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 22px;
+  }
+  .card h2 {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 14px;
+  }
+  .hidden { display: none !important; }
+  .voice-card { text-align: center; margin-bottom: 8px; }
+  .voice-orb {
+    width: 74px; height: 74px; border-radius: 50%;
+    margin: 0 auto 8px;
+    background: var(--brand-soft); color: var(--brand);
+    display: grid; place-items: center; font-size: 30px;
+    border: 2px solid var(--brand);
+    cursor: pointer;
+  }
+  .voice-orb.is-connecting { border-style: dashed; animation: pulse 1.1s ease-in-out infinite; }
+  .voice-orb.is-live {
+    background: var(--fixed-bg); color: var(--fixed); border-color: var(--fixed);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .voice-orb.is-error { background: #fef2f2; color: var(--broken); border-color: var(--broken); }
+  .voice-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .voice-state {
+    display: inline-block; font-size: 12px; font-weight: 700;
+    padding: 3px 12px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand);
+  }
+  .voice-error { font-size: 13px; color: var(--broken); margin-top: 8px; }
+  .voice-sub { font-size: 14px; color: var(--ink-soft); max-width: 460px; margin: 8px auto 0; }
+  .convo { list-style: none; padding: 0; display: grid; gap: 8px; margin-top: 14px; text-align: left; max-height: 220px; overflow-y: auto; }
+  .convo li { font-size: 14px; line-height: 1.45; }
+  .convo .who { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 6px; }
+  .convo .who.is-traveler { color: var(--brand); }
+  .convo .who.is-cascade { color: var(--fixed); }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  .composer { display: flex; gap: 10px; margin-top: 16px; }
+  .composer textarea {
+    flex: 1; font: inherit; font-size: 15px; line-height: 1.45;
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+    resize: vertical; min-height: 88px; color: var(--ink);
+  }
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 700;
+    padding: 10px 16px; border-radius: 12px; border: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    text-decoration: none;
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-brand { background: var(--brand); color: #fff; }
+  .btn-ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+  .btn-fixed { background: var(--fixed); color: #fff; }
+  .drop {
+    margin-top: 14px; padding: 18px;
+    border: 1.5px dashed var(--line); border-radius: 14px;
+    background: var(--paper); text-align: center;
+    color: var(--ink-soft); font-size: 14px;
+  }
+  .drop input { margin-top: 10px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .err { color: var(--broken); font-size: 14px; margin-top: 10px; }
+  .metrics {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+  }
+  @media (max-width: 800px) { .metrics { grid-template-columns: 1fr 1fr; } }
+  .metric {
+    background: var(--paper); border-radius: 14px; padding: 14px 16px;
+  }
+  .metric .n {
+    font-size: 28px; font-weight: 800; letter-spacing: -0.03em; color: var(--brand);
+  }
+  .metric .l { font-size: 12px; color: var(--ink-soft); margin-top: 4px; line-height: 1.3; }
+  .day-travel { margin-top: 14px; display: grid; gap: 8px; }
+  .day-travel .row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    font-size: 14px; padding: 10px 12px; background: var(--paper); border-radius: 12px;
+  }
+  .day-travel .row .lab { font-weight: 700; }
+  .day-travel .row .vals { color: var(--ink-soft); text-align: right; }
+  .timeline { list-style: none; padding: 0; }
+  .timeline li {
+    display: grid; grid-template-columns: 78px 16px 1fr;
+    gap: 8px; align-items: start;
+    margin-bottom: 4px;
+  }
+  .timeline .t { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; color: var(--brand); padding-top: 2px; }
+  .timeline .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--brand); margin: 6px auto 0;
+    box-shadow: 0 0 0 4px var(--brand-soft);
+  }
+  .timeline .line {
+    width: 2px; height: 22px; background: var(--line); margin: 2px auto 0;
+  }
+  .timeline .name { font-weight: 700; font-size: 15px; }
+  .timeline .maps-link {
+    display: inline-block; margin-top: 4px;
+    font-size: 12px; font-weight: 700; color: var(--brand); text-decoration: none;
+  }
+  .timeline .maps-link:hover { text-decoration: underline; }
+  .rec .maps-link {
+    display: inline-block; margin-top: 10px;
+    font-size: 13px; font-weight: 700; color: var(--brand); text-decoration: none;
+  }
+  .timeline li.is-changed .name { color: var(--fixed); }
+  .timeline li.is-changed .dot { background: var(--fixed); box-shadow: 0 0 0 4px var(--fixed-bg); }
+  .recs { display: grid; gap: 12px; }
+  .rec {
+    border: 1px solid var(--line); border-radius: 16px; padding: 16px;
+    background: var(--paper);
+  }
+  .rec.is-changed { border-color: #bbf7d0; background: var(--fixed-bg); }
+  .rec .kicker { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand); }
+  .rec h3 { font-size: 18px; margin: 4px 0 10px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+  .pair .box { background: #fff; border-radius: 10px; padding: 10px 12px; border: 1px solid var(--line); }
+  .pair .lab { font-size: 11px; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; }
+  .why { margin-top: 10px; font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+  .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+  .model-grid div { background: var(--paper); border-radius: 10px; padding: 10px 12px; }
+  .model-grid .k { font-size: 11px; font-weight: 700; color: var(--ink-faint); text-transform: uppercase; }
+  .disclaimer { font-size: 13px; color: var(--ink-soft); line-height: 1.45; margin-top: 12px; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--ink-faint); font-size: 11px; text-transform: uppercase; }
+  .hero h1 { font-size: 18px; font-weight: 700; color: var(--brand); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+  .hero .headline { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; color: var(--ink); text-transform: none; }
+  .stages { display: grid; gap: 8px; }
+  .stage { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--ink-soft); }
+  .stage .mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--paper); border: 1px solid var(--line); }
+  .stage.is-done { color: var(--ink); }
+  .stage.is-done .mark { background: var(--fixed-bg); color: var(--fixed); border-color: #bbf7d0; }
+  .stage.is-active .mark { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); }
+  .badge { display: inline-flex; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; margin-left: 8px; }
+  .badge-live { background: var(--fixed-bg); color: var(--fixed); }
+  .badge-demo { background: #fff7ed; color: #c2410c; }
+  .ride { border: 1px solid #bbf7d0; background: var(--fixed-bg); border-radius: 16px; padding: 18px; }
+  .ride h3 { font-size: 20px; margin: 4px 0 12px; }
+  .ride .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 14px; }
+  .saily { border: 1px solid var(--line); background: var(--card); border-radius: 16px; padding: 18px; }
+  .saily .kicker { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brand); }
+  .saily h3 { font-size: 20px; margin: 4px 0 8px; }
+  .saily .price { font-size: 15px; font-weight: 700; }
+  .saily .why { margin-top: 8px; font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+  .saily .btn { margin-top: 12px; }
+  .timeline .sub { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .upload-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 14px;
+    align-items: center;
+  }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--ink-faint); font-size: 11px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<header>
+  <div class="masthead">
+    <div class="logo">🧭</div>
+    <div>
+      <div class="name">Cascade Repairer</div>
+      <div class="sub">Start with the trip you already have</div>
+    </div>
+  </div>
+  <nav class="app-nav">
+    <a class="is-current" href="/v1/build/" id="nav-build">✨ Optimize My Trip</a>
+    <a href="/v1/whatsapp/" id="nav-wa">WhatsApp demo</a>
+    <a href="/v1/itinerary/" id="nav-trips">My Trips</a>
+    <a href="/v1/cascade/" id="nav-cascade">Cascade / Repair</a>
+  </nav>
+  <div class="head-spacer"></div>
+  <span class="overall-pill"><span class="dot"></span> ML trip optimization</span>
+</header>
+
+<main>
+  <aside class="page-left hidden" id="compare-rail">
+    <section class="card hidden" id="trip-card">
+      <h2>After</h2>
+      <ol class="timeline" id="opt-tl"></ol>
+    </section>
+  </aside>
+
+  <div class="page-main">
+  <section class="hero">
+    <h1>Optimize My Trip</h1>
+    <p class="headline">Already have a trip planned?</p>
+    <p>Upload your itinerary and Cascade will score walking vs rideshare on every hop. From the first stop it treats you as standing there now and can pull live Uber options to the next stop. Voice explains those quotes — it does not invent fares.</p>
+  </section>
+
+  <section class="card">
+    <div class="voice-card">
+      <div id="voice-root">
+        <div class="voice-orb">🎤</div>
+        <div class="voice-title">Talk to the optimizer</div>
+        <span class="voice-state" id="mic-state">Loading the voice client…</span>
+      </div>
+    </div>
+    <div class="upload-row">
+      <button class="btn btn-brand" id="upload-btn" type="button">Upload Itinerary</button>
+      <button class="btn btn-ghost" id="paste-toggle" type="button">Paste Itinerary</button>
+      <input id="file" class="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt,.md,application/pdf" />
+    </div>
+    <p class="voice-sub" style="margin-top:12px">PDF, PNG/JPG screenshot, or text. Cascade extracts the trip you already have — it does not invent a new one.</p>
+    <div id="paste-box">
+      <div class="composer">
+        <textarea id="message" placeholder="08:00 Breakfast — Union Square&#10;09:30 Golden Gate Bridge Welcome Center&#10;…&#10;&#10;Paste, then press ⌘ Enter (Ctrl+Enter on Windows)."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="opt-time" type="button">Optimize for time</button>
+      <button class="btn btn-ghost" id="opt-cost" type="button">Prefer walking / lower cost</button>
+      <button class="btn btn-fixed hidden" id="apply" type="button">Apply recommendations</button>
+      <button class="btn btn-ghost hidden" id="undo" type="button">Undo last action</button>
+      <a class="btn btn-fixed hidden" id="open-cascade" href="/v1/cascade/">Open in Cascade Repairer</a>
+    </div>
+    <div class="disclaimer" id="status"></div>
+    <div class="err hidden" id="err"></div>
+  </section>
+
+  <section class="card hidden" id="stages-card">
+    <h2>Analysis</h2>
+    <div class="stages" id="stages"></div>
+  </section>
+
+  <section class="card hidden" id="intel-card">
+    <h2>Trip Optimized</h2>
+    <div class="metrics">
+      <div class="metric"><div class="n" id="m-orig">—</div><div class="l" id="l-orig">Original transportation time</div></div>
+      <div class="metric"><div class="n" id="m-opt">—</div><div class="l" id="l-opt">Optimized transportation time</div></div>
+      <div class="metric"><div class="n" id="m-time">—</div><div class="l" id="l-time">Potential improvement</div></div>
+      <div class="metric"><div class="n" id="m-impr">—</div><div class="l">Transportation improvements</div></div>
+    </div>
+    <div class="day-travel hidden" id="day-travel"></div>
+    <div class="disclaimer" id="intel-note"></div>
+  </section>
+
+  <section class="card hidden" id="saily-card">
+    <h2>Stay online</h2>
+    <div class="saily" id="saily"></div>
+  </section>
+
+  <section class="card hidden" id="here-card">
+    <h2>You're at the first stop</h2>
+    <div class="ride" id="here"></div>
+  </section>
+
+  <section class="card hidden" id="ride-card">
+    <h2>Best rideshare option</h2>
+    <div class="ride" id="ride"></div>
+  </section>
+
+  <section class="card hidden" id="recs-card">
+    <h2>Hop details</h2>
+    <div class="recs" id="recs"></div>
+  </section>
+
+  <section class="card hidden" id="model-card">
+    <h2>Model Intelligence</h2>
+    <div class="model-grid">
+      <div><div class="k">Action model</div><div id="md-name">—</div></div>
+      <div><div class="k">Training samples</div><div id="md-n">—</div></div>
+      <div><div class="k">Features</div><div id="md-f">—</div></div>
+      <div><div class="k">Evaluation</div><div id="md-m">—</div></div>
+      <div><div class="k">Actions evaluated</div><div id="md-eval">—</div></div>
+      <div><div class="k">Maps / rideshare</div><div id="md-src">—</div></div>
+    </div>
+    <table id="md-compare"><thead><tr><th>Model</th><th>Action acc.</th><th>MAE</th><th>R²</th></tr></thead><tbody></tbody></table>
+    <div class="disclaimer" id="md-disc"></div>
+    <div class="disclaimer" id="md-top"></div>
+  </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  const API = "/v1/trip_builder";
+  const codeFromUrl = new URL(window.location).searchParams.get("code");
+  if (codeFromUrl) localStorage.setItem("vb_access_code", codeFromUrl);
+  const ACCESS_CODE = codeFromUrl || localStorage.getItem("vb_access_code") || "";
+  const codeHeaders = (extra) =>
+    ACCESS_CODE ? Object.assign({}, extra || {}, { "X-Access-Code": ACCESS_CODE }) : (extra || {});
+  const withCode = (href) => ACCESS_CODE
+    ? href + (href.indexOf("?") >= 0 ? "&" : "?") + "code=" + encodeURIComponent(ACCESS_CODE)
+    : href;
+
+  document.getElementById("nav-build").href = withCode("/v1/build/");
+  document.getElementById("nav-wa").href = withCode("/v1/whatsapp/");
+  document.getElementById("nav-trips").href = withCode("/v1/itinerary/");
+  document.getElementById("nav-cascade").href = withCode("/v1/cascade/");
+
+  const sessionId = "opt-" + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  window.buildVoiceSession = sessionId;
+  const activeSession = () => window.buildVoiceSession || sessionId;
+  window.buildVoice = {
+    headers: codeHeaders,
+    session: activeSession,
+    tripId: () => (state.data && state.data.trip_id)
+      || localStorage.getItem("vb_optimize_trip_id")
+      || "",
+  };
+
+  const el = (id) => document.getElementById(id);
+  const state = { data: null };
+
+  function showErr(msg) {
+    const node = el("err");
+    if (!msg) { node.classList.add("hidden"); node.textContent = ""; return; }
+    node.textContent = msg;
+    node.classList.remove("hidden");
+    node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function setStatus(msg) {
+    el("status").textContent = msg || "";
+  }
+
+  async function api(path, method, body) {
+    const resp = await fetch(API + path, {
+      method: method,
+      headers: codeHeaders({ "Content-Type": "application/json" }),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || data.error || ("HTTP " + resp.status));
+    return data;
+  }
+
+  function prettyTime(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "";
+    const ampm = s.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])m\.?$/i);
+    if (ampm) {
+      const hour = parseInt(ampm[1], 10);
+      const min = ampm[2] || "00";
+      return hour + ":" + min + " " + ampm[3].toUpperCase() + "M";
+    }
+    const mil = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!mil) return s;
+    let hour = parseInt(mil[1], 10);
+    const min = mil[2];
+    const suffix = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    return hour + ":" + min + " " + suffix;
+  }
+
+  function timeline(listEl, stops, changedTitles) {
+    const changed = changedTitles || {};
+    listEl.replaceChildren.apply(listEl, (stops || []).map((stop, i) => {
+      const li = document.createElement("li");
+      if (changed[stop.title] || stop.pickup_label) li.className = "is-changed";
+      const t = document.createElement("div");
+      t.className = "t";
+      t.textContent = prettyTime(stop.start_time);
+      const rail = document.createElement("div");
+      const dot = document.createElement("div");
+      dot.className = "dot";
+      rail.appendChild(dot);
+      if (i < stops.length - 1) {
+        const line = document.createElement("div");
+        line.className = "line";
+        rail.appendChild(line);
+      }
+      const name = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "name";
+      title.textContent = stop.title;
+      name.appendChild(title);
+      if (stop.leg_mode) {
+        const sub = document.createElement("div");
+        sub.className = "sub";
+        sub.textContent = stop.leg_mode + (stop.pickup_label && stop.leg_mode.indexOf("Walk") < 0 ? " · " + stop.pickup_label : "");
+        name.appendChild(sub);
+      } else if (stop.pickup_label) {
+        const sub = document.createElement("div");
+        sub.className = "sub";
+        sub.textContent = "Pickup: " + stop.pickup_label;
+        name.appendChild(sub);
+      }
+      if (stop.maps_url) {
+        const a = document.createElement("a");
+        a.className = "maps-link";
+        a.href = stop.maps_url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = stop.maps_label || "Open walking route";
+        name.appendChild(a);
+      }
+      li.append(t, rail, name);
+      return li;
+    }));
+  }
+
+  function changedMap(orig, opt) {
+    const map = {};
+    (orig || []).forEach((s, i) => {
+      if (!opt[i] || opt[i].title !== s.title) map[s.title] = true;
+    });
+    (opt || []).forEach((s, i) => {
+      if (!orig[i] || orig[i].title !== s.title) map[s.title] = true;
+    });
+    return map;
+  }
+
+  function recCard(tr) {
+    const rec = document.createElement("div");
+    rec.className = "rec" + (tr.changed ? " is-changed" : "");
+    const kindLabel = tr.kind === "walk" ? "Walk this hop"
+      : tr.kind === "rideshare" ? "Take rideshare"
+      : tr.kind === "pickup" ? "Better pickup"
+      : "Better hop";
+    const icon = tr.kind === "walk" ? "🚶 " : tr.kind === "rideshare" ? "🚗 " : tr.kind === "pickup" ? "📍 " : "🗺️ ";
+    const kicker = document.createElement("div");
+    kicker.className = "kicker";
+    kicker.textContent = icon + kindLabel;
+    const h3 = document.createElement("h3");
+    h3.textContent = tr.from_title + " → " + tr.to_title;
+    const pair = document.createElement("div");
+    pair.className = "pair";
+    const cur = document.createElement("div");
+    cur.className = "box";
+    cur.innerHTML = "<div class='lab'>Current</div><div>" +
+      (tr.current.label || "") + "<br>" + (tr.current.pickup_label || "") + "</div>";
+    const recb = document.createElement("div");
+    recb.className = "box";
+    recb.innerHTML = "<div class='lab'>Recommended</div><div>" +
+      (tr.recommended.label || "") + "<br>" + (tr.recommended.pickup_label || "") + "</div>";
+    pair.append(cur, recb);
+    const why = document.createElement("div");
+    why.className = "why";
+    why.textContent = "Why: " + (tr.why || []).join(" · ");
+    rec.append(kicker, h3, pair, why);
+    if (tr.maps_url) {
+      const a = document.createElement("a");
+      a.className = "maps-link";
+      a.href = tr.maps_url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = tr.maps_label || "Open walking route in Google Maps";
+      rec.appendChild(a);
+    }
+    return rec;
+  }
+
+  function sourceBadge(src) {
+    return "";
+  }
+
+  function render(data) {
+    state.data = data;
+    if (!data || !(data.original_stops || []).length) return;
+    document.querySelector("main").classList.add("has-compare");
+    el("compare-rail").classList.remove("hidden");
+    el("intel-card").classList.remove("hidden");
+    el("trip-card").classList.remove("hidden");
+    el("recs-card").classList.remove("hidden");
+    el("model-card").classList.remove("hidden");
+    el("apply").classList.toggle("hidden", !data.intelligence || data.applied);
+    el("undo").classList.toggle("hidden", !data.undo_available);
+    if (data.trip_id) {
+      try { localStorage.setItem("vb_optimize_trip_id", data.trip_id); } catch {}
+      const cascadeHref = withCode("/v1/cascade/?trip_id=" + encodeURIComponent(data.trip_id));
+      el("nav-cascade").href = cascadeHref;
+      const openCascade = el("open-cascade");
+      openCascade.href = cascadeHref;
+      openCascade.classList.remove("hidden");
+    }
+
+    const stages = data.analysis_stages || [];
+    el("stages-card").classList.toggle("hidden", !stages.length);
+    const stageBox = el("stages");
+    stageBox.replaceChildren();
+    stages.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "stage" + (s.state === "done" ? " is-done" : s.state === "active" ? " is-active" : "");
+      const mark = document.createElement("div");
+      mark.className = "mark";
+      mark.textContent = s.state === "done" ? "✓" : "…";
+      const lab = document.createElement("div");
+      lab.textContent = s.label + (s.detail ? " — " + s.detail : "");
+      row.append(mark, lab);
+      stageBox.appendChild(row);
+    });
+
+    const intel = data.intelligence || {};
+    const days = intel.travel_by_day || [];
+    const multiDay = days.length > 1;
+    function fmtMins(n) {
+      if (n == null) return "—";
+      let m = Math.round(Number(n));
+      if (m > 16 * 60) m = Math.round(m / 60);
+      if (m < 90) return m + " min";
+      const h = Math.floor(m / 60);
+      const rest = m % 60;
+      return rest ? (h + "h " + rest + "m") : (h + "h");
+    }
+    el("m-orig").textContent = intel.original_travel_min != null ? fmtMins(intel.original_travel_min) : "—";
+    el("m-opt").textContent = intel.optimized_travel_min != null ? fmtMins(intel.optimized_travel_min) : "—";
+    el("m-time").textContent = intel.travel_time_saved_min != null ? fmtMins(intel.travel_time_saved_min) : "—";
+    el("l-orig").textContent = multiDay ? "Original time / day" : "Original transportation time";
+    el("l-opt").textContent = multiDay ? "Optimized time / day" : "Optimized transportation time";
+    el("l-time").textContent = multiDay ? "Saved / day" : "Potential improvement";
+    const nImp = intel.potential_improvements;
+    el("m-impr").textContent = nImp != null ? String(nImp) : "—";
+    const dayBox = el("day-travel");
+    dayBox.replaceChildren();
+    dayBox.classList.toggle("hidden", !multiDay);
+    days.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const lab = document.createElement("div");
+      lab.className = "lab";
+      lab.textContent = d.label || ("Day " + ((d.day || 0) + 1));
+      const vals = document.createElement("div");
+      vals.className = "vals";
+      const saved = d.saved_min ? (" · saves " + fmtMins(d.saved_min)) : "";
+      vals.textContent = fmtMins(d.original_min) + " → " + fmtMins(d.optimized_min) + saved;
+      row.append(lab, vals);
+      dayBox.appendChild(row);
+    });
+    let note = nImp
+      ? ("Cascade made " + nImp + " transportation improvement" + (nImp === 1 ? "" : "s") + ".")
+      : "The action model kept the current plan on every hop.";
+    if (multiDay) {
+      note += " Times above are a typical day's travel, not the whole trip.";
+    }
+    if (intel.walk_hops != null && intel.rideshare_hops != null) {
+      note += " Walking on " + intel.walk_hops + " hops; rideshare on " + intel.rideshare_hops + ".";
+    }
+    if (intel.cost_saved_estimate && !intel.cost_saved) {
+      note += " Ranking cost estimate saved ~$" + intel.cost_saved_estimate + ".";
+    }
+    el("intel-note").textContent = note;
+
+    const saily = data.saily;
+    const sailyCard = el("saily-card");
+    const sailyBox = el("saily");
+    if (saily && saily.checkout_url) {
+      sailyCard.classList.remove("hidden");
+      sailyBox.replaceChildren();
+      const kicker = document.createElement("div");
+      kicker.className = "kicker";
+      kicker.textContent = saily.needed ? "Travel eSIM" : "Optional eSIM";
+      const title = document.createElement("h3");
+      title.textContent = "Saily — " + (saily.label || "travel data");
+      const price = document.createElement("div");
+      price.className = "price";
+      price.textContent = [saily.from_price, saily.data].filter(Boolean).join(" · ");
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = saily.blurb || (saily.needed
+        ? ("Prepaid data for " + (saily.label || "this trip") +
+           ". Starting catalog price — checkout is on Saily; we don't install the eSIM from here.")
+        : "This trip looks domestic. Keep a Saily plan handy if you add an international leg.");
+      const link = document.createElement("a");
+      link.className = "btn btn-brand";
+      link.href = saily.checkout_url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Get Saily eSIM";
+      sailyBox.append(kicker, title, price, why, link);
+    } else {
+      sailyCard.classList.add("hidden");
+    }
+
+    const here = data.here_now;
+    el("here-card").classList.toggle("hidden", !here);
+    if (here) {
+      const cheap = here.cheapest || {};
+      const liveFare = cheap.price_available && cheap.estimate;
+      const fareHtml = liveFare
+        ? ("<div><div class='lab'>Cheapest Uber</div>" + (cheap.product || "Uber") +
+           " · " + cheap.estimate +
+           (cheap.eta_min != null ? " · " + cheap.eta_min + " min away" : "") + "</div>")
+        : "";
+      const quotes = (here.uber_quotes || []).filter(function (q) { return q.price_available && q.estimate; });
+      const list = quotes.length
+        ? ("<div class='why'><strong>Uber from this curb</strong><br>" +
+           quotes.slice(0, 5).map(function (q) {
+             return q.product + " " + q.estimate;
+           }).join(" · ") + "</div>")
+        : "";
+      el("here").innerHTML =
+        "<div class='kicker'>📍 You are here</div>" +
+        "<h3>" + (here.at || "") + "</h3>" +
+        sourceBadge(here.maps_source) + sourceBadge(here.uber_source) +
+        "<div class='facts' style='margin-top:12px'>" +
+        "<div><div class='lab'>Next stop</div>" + (here.next || "—") + "</div>" +
+        "<div><div class='lab'>Walk</div>" + (here.walk_min != null ? here.walk_min + " min" : "—") + "</div>" +
+        "<div><div class='lab'>Drive</div>" + (here.drive_min != null ? here.drive_min + " min" : "—") + "</div>" +
+        fareHtml +
+        "</div>" +
+        "<div class='why'>" + (here.speak || "") + "</div>" +
+        list +
+        (here.deeplink
+          ? "<div style='margin-top:12px'><a class='btn btn-brand' href='" + here.deeplink +
+            "' target='_blank' rel='noopener'>See available Ubers</a></div>"
+          : "");
+    }
+
+    const card = data.rideshare_card;
+    el("ride-card").classList.toggle("hidden", !card);
+    if (card) {
+      const price = (card.price_available && card.price != null)
+        ? ("<div><div class='lab'>Price</div>$" + Number(card.price).toFixed(0) + "</div>")
+        : "";
+      el("ride").innerHTML =
+        "<div class='kicker'>🚗 Best rideshare option</div>" +
+        "<h3>" + (card.provider || "") + "</h3>" +
+        sourceBadge(card.data_source) +
+        "<div class='facts' style='margin-top:12px'>" +
+        "<div><div class='lab'>Pickup</div>" + (card.pickup || "—") + "</div>" +
+        "<div><div class='lab'>Drop-off</div>" + (card.dropoff || "—") + "</div>" +
+        "<div><div class='lab'>Travel</div>" + (card.travel_min != null ? card.travel_min + " min" : "—") + "</div>" +
+        "<div><div class='lab'>Walking</div>" + (card.walking_min != null ? card.walking_min + " min" : "—") + "</div>" +
+        price +
+        "</div>" +
+        "<div class='why'><strong>Why Cascade chose this</strong><br>" +
+        (card.why || []).join(" · ") + "</div>";
+    }
+
+    const orig = data.original_stops || [];
+    const opt = data.stops && data.applied
+      ? data.stops
+      : (data.optimized_stops || orig);
+    const changed = changedMap(orig, opt);
+    timeline(el("opt-tl"), opt, changed);
+
+    const recs = el("recs");
+    recs.replaceChildren();
+    (data.transitions || []).filter((t) => t.changed || t.maps_url).forEach((t) => recs.appendChild(recCard(t)));
+    if (!recs.childElementCount) {
+      const empty = document.createElement("div");
+      empty.className = "disclaimer";
+      empty.textContent = "No hop-level mode change after the action loop.";
+      recs.appendChild(empty);
+    }
+
+    const md = data.model || {};
+    const pol = md.policy || md;
+    el("md-name").textContent = pol.production_model || pol.model || md.production_model || "—";
+    el("md-n").textContent = (pol.n_train_rows != null ? pol.n_train_rows : md.n_train) != null
+      ? String(pol.n_train_rows != null ? pol.n_train_rows : md.n_train) : "—";
+    el("md-f").textContent = (pol.n_features != null ? pol.n_features : md.n_features) != null
+      ? String(pol.n_features != null ? pol.n_features : md.n_features) : "—";
+    const acc = pol.action_accuracy;
+    el("md-m").textContent = acc != null
+      ? ("action accuracy " + Number(acc).toFixed(2) + (pol.mae != null ? " · MAE " + Number(pol.mae).toFixed(3) : ""))
+      : (pol.source === "heuristic_fallback" || md.source === "heuristic_fallback"
+        ? "artifact missing (heuristic)" : "—");
+    el("md-eval").textContent = intel.actions_evaluated != null ? String(intel.actions_evaluated) : "—";
+    const src = data.data_sources || {};
+    el("md-src").innerHTML = sourceBadge(src.maps) + " " + sourceBadge(src.rideshare) +
+      (src.uber ? " " + sourceBadge(src.uber) : "");
+    el("md-disc").textContent = pol.dataset_disclaimer || md.dataset_disclaimer || "";
+    const tops = (pol.top_features || md.top_features || []).slice(0, 5).map((f, i) =>
+      (i + 1) + ". " + (f.why || f.feature)).join(" · ");
+    el("md-top").textContent = tops ? ("Top features: " + tops) : "";
+    const tb = el("md-compare").querySelector("tbody");
+    tb.replaceChildren();
+    const cmp = pol.comparison || md.comparison || {};
+    Object.keys(cmp).forEach((name) => {
+      const row = cmp[name];
+      const tr = document.createElement("tr");
+      const mae = row.mae == null ? "—" : Number(row.mae).toFixed(3);
+      const r2 = row.r2 == null ? "—" : Number(row.r2).toFixed(3);
+      const aacc = row.action_accuracy == null ? "—" : Number(row.action_accuracy).toFixed(3);
+      tr.innerHTML = "<td>" + name + "</td><td>" + aacc + "</td><td>" + mae + "</td><td>" + r2 + "</td>";
+      tb.appendChild(tr);
+    });
+  }
+  window.buildApplyVoice = render;
+
+  async function ingest(payload) {
+    showErr("");
+    setStatus("Running analysis on your itinerary…");
+    try {
+      const data = await api("/parse", "POST", Object.assign({ session_id: activeSession() }, payload));
+      setStatus("");
+      if (!data.ok) {
+        let msg = data.reply || "Could not read that itinerary.";
+        if (data.raw_excerpt) msg += " Extracted: " + data.raw_excerpt.slice(0, 180);
+        showErr(msg);
+      }
+      render(data);
+    } catch (err) {
+      setStatus("");
+      showErr(err.message);
+    }
+  }
+
+  async function optimize(priority, apply) {
+    showErr("");
+    try {
+      const data = await api("/optimize", "POST", {
+        session_id: activeSession(),
+        priority: priority || "",
+        apply: !!apply,
+      });
+      if (!data.ok) showErr(data.reply || "Upload or paste an itinerary first.");
+      render(data);
+    } catch (err) {
+      showErr(err.message);
+    }
+  }
+
+  function readDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "")); };
+      reader.onerror = function () { reject(new Error("Could not read that file")); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function ingestPasted() {
+    const text = (el("message").value || "").trim();
+    if (!text) {
+      el("message").focus();
+      el("paste-box").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      return;
+    }
+    ingest({ text: el("message").value });
+  }
+  el("opt-time").addEventListener("click", () => optimize("time", true));
+  el("opt-cost").addEventListener("click", () => optimize("cost", true));
+  el("apply").addEventListener("click", () => optimize("", true));
+  el("upload-btn").addEventListener("click", () => el("file").click());
+  el("paste-toggle").addEventListener("click", ingestPasted);
+  el("message").addEventListener("keydown", (ev) => {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+      ev.preventDefault();
+      ingestPasted();
+    }
+  });
+  el("undo").addEventListener("click", async () => {
+    showErr("");
+    try {
+      const data = await api("/undo", "POST", { session_id: activeSession() });
+      if (!data.ok) showErr(data.reply || "Nothing to undo.");
+      render(data);
+    } catch (err) {
+      showErr(err.message);
+    }
+  });
+  el("file").addEventListener("change", async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      showErr("That file is larger than 8 MB. Paste the timed stops as text instead.");
+      return;
+    }
+    setStatus("Reading " + file.name + "…");
+    showErr("");
+    try {
+      const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+      const isImage = (file.type || "").indexOf("image/") === 0 || /\.(png|jpe?g|webp)$/i.test(file.name);
+      if (isPdf || isImage) {
+        const dataUrl = await readDataUrl(file);
+        const parts = dataUrl.split(",");
+        const b64 = parts.length > 1 ? parts[1] : parts[0];
+        if (isPdf) await ingest({ pdf_base64: b64 });
+        else await ingest({ image_base64: b64, mime: file.type || "image/png" });
+      } else {
+        await ingest({ text: await file.text() });
+      }
+    } catch (err) {
+      setStatus("");
+      showErr(err.message);
+    }
+  });
+})();
+</script>
+
+<script type="module">
+import React, { useState, useCallback, useMemo, useRef } from 'https://esm.sh/react@$react_ver';
+import ReactDOM from 'https://esm.sh/react-dom@$react_ver/client';
+import {
+  VocalBridgeProvider, useVocalBridge, useTranscript, useAIAgent,
+} from 'https://esm.sh/@vocalbridgeai/react@$vb_react_ver?deps=react@$react_ver,react-dom@$react_ver';
+import { ConnectionState } from 'https://esm.sh/@vocalbridgeai/sdk@$vb_sdk_ver';
+
+const e = React.createElement;
+const bridge = window.buildVoice;
+
+function Orb({ tokenError, sessionRef }) {
+  const { state, connect, disconnect, error } = useVocalBridge();
+  const { transcript } = useTranscript();
+  const [queryError, setQueryError] = useState(null);
+  const [lastDelegated, setLastDelegated] = useState(null);
+
+  // Keep a stable onQuery identity — recreating it every render re-subscribes
+  // useAIAgent and can drop query_agent events (VB then invents "need more info").
+  const onQuery = useCallback(async (query) => {
+    setQueryError(null);
+    try {
+      const tripId = (bridge && bridge.tripId && bridge.tripId())
+        || localStorage.getItem("vb_optimize_trip_id")
+        || "";
+      const res = await fetch('/v1/trip_builder/query', {
+        method: 'POST',
+        headers: bridge.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          query,
+          session_name: bridge.session(),
+          trip_id: tripId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (window.buildApplyVoice) window.buildApplyVoice(data);
+      const reply = data.response || "I have your trip — ask me about the first stop or what I recommend.";
+      setLastDelegated(String(query || "").slice(0, 80));
+      return reply;
+    } catch (err) {
+      setQueryError('query failed: ' + err.message);
+      return "Sorry — I couldn't reach the optimizer just then. Try that again.";
+    }
+  }, []);
+
+  useAIAgent({ onQuery });
+
+  const disconnected = state === ConnectionState.Disconnected;
+  const busy = state === ConnectionState.Connecting ||
+    state === ConnectionState.WaitingForAgent;
+  const broken = Boolean(error || tokenError);
+  const orbClass = 'voice-orb' + (
+    busy ? ' is-connecting' : broken ? ' is-error' : disconnected ? '' : ' is-live');
+  const stateLabel = busy ? 'Connecting…'
+    : broken ? 'Connection error'
+    : disconnected ? 'Tap the orb to talk' : 'Live — listening';
+  const lines = transcript.map((t) => ({
+    role: t.role === 'user' ? 'traveler' : 'cascade',
+    text: t.text,
+  }));
+
+  return e('div', null,
+    e('div', {
+      className: orbClass,
+      onClick: disconnected ? connect : disconnect,
+      title: disconnected ? 'Connect' : 'Disconnect',
+    }, '🎙️'),
+    e('div', { className: 'voice-title' }, 'Talk to the optimizer'),
+    e('span', { className: 'voice-state' }, stateLabel),
+    lastDelegated && e('div', { className: 'voice-sub' },
+      'Backend heard: “' + lastDelegated + '”'),
+    (broken || queryError) && e('div', { className: 'voice-error' },
+      String((error && error.message) || tokenError || queryError)),
+    e('div', { className: 'voice-sub' },
+      'Say “what do you recommend?”, “Uber from the first stop”, or “undo that change.”'),
+    lines.length > 0 && e('ul', { className: 'convo' },
+      lines.map((t, i) => e('li', { key: i },
+        e('span', { className: 'who is-' + t.role },
+          t.role === 'traveler' ? 'You' : 'Cascade'),
+        t.text,
+      ))),
+  );
+}
+
+function VoiceApp() {
+  const [tokenError, setTokenError] = useState(null);
+  const sessionRef = useRef(null);
+
+  const tokenProvider = useCallback(async () => {
+    setTokenError(null);
+    const res = await fetch('/v1/trip_builder/token', {
+      method: 'POST', headers: bridge.headers({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.error || ('token mint failed (HTTP ' + res.status + ')');
+      setTokenError(msg);
+      throw new Error(msg);
+    }
+    sessionRef.current = data.session_name;
+    return {
+      url: data.connection_url,
+      token: data.token,
+      room_name: data.session_name,
+      participant_identity: 'optimize-page',
+      expires_in: 3600,
+      agent_mode: data.agent_mode,
+    };
+  }, []);
+
+  const options = useMemo(
+    () => ({ auth: { tokenProvider }, debug: false }), [tokenProvider]);
+  return e(VocalBridgeProvider, { options }, e(Orb, { tokenError, sessionRef }));
+}
+
+const voiceRoot = document.getElementById('voice-root');
+voiceRoot.innerHTML = '';
+ReactDOM.createRoot(voiceRoot).render(e(VoiceApp));
+</script>
+</body>
+</html>

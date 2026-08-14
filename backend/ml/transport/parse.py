@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Alex Morgan's San Francisco weekend from sample_tripwise_itinerary.pdf
 SAMPLE_ITINERARY = """Saturday, August 22
-08:00 Breakfast — Union Square
+08:00 Apple Store — Union Square
 09:30 Golden Gate Bridge Welcome Center
 12:00 Lunch — Fisherman's Wharf
 13:30 Alcatraz Ferry — Pier 33
@@ -65,7 +65,12 @@ Wednesday, September 16
 # Crow-flies coords. Unknown titles fall back to Union Square (this demo city).
 VENUE_COORDS: Dict[str, Tuple[float, float]] = {
     "union square": (37.7880, -122.4075),
-    "hotel": (37.7880, -122.4075),
+    "apple store": (37.7887, -122.4070),
+    "apple store union square": (37.7887, -122.4070),
+    "hotel": (37.7877, -122.4093),
+    "westin": (37.7877, -122.4093),
+    "return to hotel": (37.7877, -122.4093),
+    "hotel checkout": (37.7877, -122.4093),
     "golden gate bridge": (37.8079, -122.4750),
     "golden gate bridge welcome center": (37.8079, -122.4750),
     "welcome center": (37.8079, -122.4750),
@@ -121,7 +126,9 @@ ALT_PICKUPS: Dict[str, str] = {
     "chase center": "Chase Center East Entrance / Terry A Francois Blvd",
     "golden gate": "Welcome Center lower lot (not the plaza curb)",
     "fisherman": "Taylor Street side street",
+    "apple store": "Post / Stockton Apple Store curb",
     "union square": "Geary / Stockton side street",
+    "westin": "Powell Street hotel porte-cochere",
     "alcatraz": "The Embarcadero / Pier 33 side curb",
     "pier 33": "The Embarcadero / Pier 33 side curb",
     "exploratorium": "The Embarcadero / Pier 15 side curb",
@@ -189,17 +196,91 @@ _SF_FALLBACK = (37.7880, -122.4075)
 _NYC_FALLBACK = (40.7549, -73.9840)
 
 
+_GENERIC_VENUE_KEYS = {"airport", "hotel", "center", "park", "union square"}
+_AIRPORT_KEYS = ("jfk airport", "sfo airport", "jfk", "lga", "ewr", "sfo")
+
+
 def geocode(title: str) -> Tuple[float, float]:
     key = (title or "").strip().lower()
     if key in VENUE_COORDS:
         return VENUE_COORDS[key]
-    # Longer names first so "rockefeller center" wins over "center".
-    for name, coords in sorted(VENUE_COORDS.items(), key=lambda kv: -len(kv[0])):
-        if name in key or key in name:
-            return coords
+    last_airport = None
+    last_pos = -1
+    for name in _AIRPORT_KEYS:
+        pos = key.rfind(name)
+        if pos > last_pos:
+            last_airport = name
+            last_pos = pos
+    if last_airport and last_airport in VENUE_COORDS:
+        return VENUE_COORDS[last_airport]
+    matches = [
+        (name, coords)
+        for name, coords in VENUE_COORDS.items()
+        if name in key or key in name
+    ]
+    if matches:
+        matches.sort(key=lambda kv: (kv[0] in _GENERIC_VENUE_KEYS, -len(kv[0])))
+        return matches[0][1]
+    try:
+        from ml.transport.maps import geocode_query
+        live = geocode_query(title)
+        if live:
+            return live
+    except Exception:  # noqa: BLE001
+        logger.exception("live geocode failed for %s", title)
     if any(hint in key for hint in _NYC_HINTS):
         return _NYC_FALLBACK
     return _SF_FALLBACK
+
+
+# Google Maps place queries — names Maps can resolve, not crow-flies pins.
+MAPS_QUERIES: Dict[str, str] = {
+    "apple store": "Apple Union Square, 300 Post St, San Francisco, CA",
+    "union square": "Union Square, San Francisco, CA",
+    "westin": "Westin St. Francis, 335 Powell St, San Francisco, CA",
+    "hotel checkout": "Westin St. Francis, 335 Powell St, San Francisco, CA",
+    "return to hotel": "Westin St. Francis, 335 Powell St, San Francisco, CA",
+    "golden gate": "Golden Gate Bridge Welcome Center, San Francisco, CA",
+    "welcome center": "Golden Gate Bridge Welcome Center, San Francisco, CA",
+    "fisherman": "Fisherman's Wharf, San Francisco, CA",
+    "pier 33": "Pier 33 Alcatraz Landing, San Francisco, CA",
+    "alcatraz": "Pier 33 Alcatraz Landing, San Francisco, CA",
+    "mission": "Valencia Street, Mission District, San Francisco, CA",
+    "chase center": "Chase Center, San Francisco, CA",
+    "exploratorium": "Exploratorium, Pier 15, San Francisco, CA",
+    "pier 15": "Exploratorium, Pier 15, San Francisco, CA",
+    "north beach": "North Beach, San Francisco, CA",
+    "lombard": "Lombard Street, San Francisco, CA",
+    "painted ladies": "Painted Ladies, Steiner St, San Francisco, CA",
+    "alamo": "Alamo Square, San Francisco, CA",
+    "hayes": "Hayes Valley, San Francisco, CA",
+    "sfo": "San Francisco International Airport (SFO)",
+    "jfk": "John F. Kennedy International Airport (JFK)",
+    "financial": "Financial District, New York, NY",
+    "soho": "SoHo, New York, NY",
+    "rockefeller": "Rockefeller Center, New York, NY",
+    "central park": "Central Park, New York, NY",
+    "midtown": "Midtown Manhattan, New York, NY",
+}
+
+
+def maps_query(title: str) -> str:
+    """Address string Google Maps Directions can geocode to the right place."""
+    key = (title or "").strip().lower()
+    if "jfk" in key:
+        return MAPS_QUERIES["jfk"]
+    if "sfo" in key or ("airport" in key and "jfk" not in key and "lga" not in key):
+        return MAPS_QUERIES["sfo"]
+    if "apple store" in key:
+        return MAPS_QUERIES["apple store"]
+    if "return to hotel" in key or "checkout" in key:
+        return MAPS_QUERIES["return to hotel"]
+    for name, query in sorted(MAPS_QUERIES.items(), key=lambda kv: -len(kv[0])):
+        if name in key:
+            return query
+    if any(hint in key for hint in _NYC_HINTS):
+        return f"{title}, New York, NY"
+    return f"{title}, San Francisco, CA"
 
 
 def alt_pickup_label(title: str) -> str:
@@ -383,16 +464,16 @@ def _decode_b64(raw: str) -> bytes:
 
 def structure_with_llm(text: str) -> List[Dict[str, Any]]:
     """Turn messy extracted PDF/OCR text into timed lines, then parse_text."""
-    if not os.environ.get("OPENAI_API_KEY", "").strip():
+    if not os.environ.get("OPENAI_API_KEY", "").strip() and not os.environ.get("FEATHERLESS_API_KEY", "").strip():
         return []
     snippet = (text or "").strip()[:8000]
     if len(snippet) < 20:
         return []
     try:
-        from openai import OpenAI
-        client = OpenAI()
+        from api.llm_client import sync_chat_client, text_model_id
+        client = sync_chat_client()
         resp = client.chat.completions.create(
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            model=text_model_id(),
             messages=[{
                 "role": "user",
                 "content": (

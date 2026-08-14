@@ -520,9 +520,9 @@
   // "MSP-SFO" (item.location) -> "MSP → SFO"
   const fmtRoute = (location) => (location || "").replace("-", " → ");
 
-  // "demo-traveler" -> "Demo Traveler" — the traveler on screen, not an id.
+  // Internal ids like "demo-traveler" stay off the screen.
   function travelerName(userId) {
-    if (!userId) return "Traveler";
+    if (!userId || /demo/i.test(userId)) return "Traveler";
     return userId.split(/[-_]/)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");

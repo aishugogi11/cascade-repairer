@@ -304,8 +304,16 @@ async def trip_status(trip_id: str):
             raise HTTPException(status_code=404, detail=f"trip {trip_id} not found")
 
     details = await _details_for(trip_id, view.items)
+    ordered = sorted(
+        view.items,
+        key=lambda item: (
+            item.start_ts.astimezone(timezone.utc)
+            if item.start_ts and item.start_ts.tzinfo
+            else (item.start_ts.replace(tzinfo=timezone.utc) if item.start_ts else datetime.min.replace(tzinfo=timezone.utc))
+        ),
+    )
     items = []
-    for item in view.items:
+    for item in ordered:
         payload = item.model_dump()
         if item.item_id in details:
             payload["detail"] = details[item.item_id]
@@ -338,6 +346,7 @@ class OptimizePrefsRequest(BaseModel):
 
 class OptimizeDecisionRequest(BaseModel):
     recommendation_id: str
+    fingerprint: str = ""
     chosen: str = ""
     rejected: str = ""
 
@@ -378,14 +387,20 @@ async def optimize_prefs(trip_id: str, req: OptimizePrefsRequest):
 @itinerary_ui.post("/optimize/{trip_id}/apply")
 async def optimize_apply(trip_id: str, req: OptimizeDecisionRequest):
     return await asyncio.to_thread(
-        cascade_optimize.apply_recommendation, trip_id, req.recommendation_id,
+        cascade_optimize.apply_recommendation,
+        trip_id,
+        req.recommendation_id,
+        req.fingerprint,
     )
 
 
 @itinerary_ui.post("/optimize/{trip_id}/reject")
 async def optimize_reject(trip_id: str, req: OptimizeDecisionRequest):
     return await asyncio.to_thread(
-        cascade_optimize.reject_recommendation, trip_id, req.recommendation_id,
+        cascade_optimize.reject_recommendation,
+        trip_id,
+        req.recommendation_id,
+        req.fingerprint,
     )
 
 

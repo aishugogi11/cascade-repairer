@@ -22,13 +22,28 @@ import httpx
 log = logging.getLogger(__name__)
 
 RESEND_API_URL = "https://api.resend.com/emails"
-FROM_ADDRESS = "Cascade <info@talktomytrip.com>"
+FROM_ADDRESS_DEFAULT = "Cascade <info@talktomytrip.com>"
 _TIMEOUT_SECONDS = 8.0  # the standing external-call ceiling (Tavily, PayPal)
 
 
 def _api_key() -> Optional[str]:
     value = os.environ.get("RESEND_API_KEY", "").strip()
     return value or None
+
+
+def _from_address() -> str:
+    """Optional RESEND_FROM override for a verified Resend sender.
+
+    Default stays info@talktomytrip.com. If that domain is unverified on the
+    current API key, set RESEND_FROM to a verified address (or Resend's
+    onboarding sender) so demo emails can still go out.
+    """
+    override = os.environ.get("RESEND_FROM", "").strip()
+    return override or FROM_ADDRESS_DEFAULT
+
+
+# Back-compat for tests/importers that read FROM_ADDRESS.
+FROM_ADDRESS = FROM_ADDRESS_DEFAULT
 
 
 async def send_email(
@@ -49,7 +64,7 @@ async def send_email(
     if not key:
         return {"status": "disabled", "reason": "RESEND_API_KEY not configured"}
 
-    body: dict = {"from": FROM_ADDRESS, "to": [to], "subject": subject}
+    body: dict = {"from": _from_address(), "to": [to], "subject": subject}
     if html:
         body["html"] = html
     if text:
@@ -64,8 +79,23 @@ async def send_email(
                 json=body,
                 headers={"Authorization": f"Bearer {key}"},
             )
-            resp.raise_for_status()
-            return {"status": "sent", "id": resp.json().get("id")}
+            if resp.is_success:
+                return {"status": "sent", "id": resp.json().get("id")}
+            # Surface Resend's own message so ops can see domain/key failures
+            # (403 domain-not-verified, 401 bad key) without opening the dashboard.
+            detail = ""
+            try:
+                payload = resp.json()
+                if isinstance(payload, dict):
+                    err = payload.get("message") or payload.get("name") or ""
+                    detail = str(err).strip()
+            except Exception:  # noqa: BLE001
+                detail = (resp.text or "")[:200].strip()
+            reason = f"HTTP {resp.status_code}"
+            if detail:
+                reason = f"{reason}: {detail}"
+            log.warning("resend send failed: %s", reason)
+            return {"status": "error", "reason": reason}
     except Exception as exc:  # noqa: BLE001
         log.warning("resend send failed: %s: %s", type(exc).__name__, exc)
         return {"status": "error", "reason": type(exc).__name__}

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from api import memory_trips
+from api.saily import plan_for_trip
 from api.optimize import parse_prefs
 from api.repositories import itinerary_items
 from api.repositories.models import ItineraryItem
@@ -117,6 +118,19 @@ def _location_of(item: ItineraryItem) -> str:
     if item.type == "flight" and item.location and "-" in item.location:
         return item.location.split("-", 1)[1].strip()
     return (item.location or _title_of(item)).strip()
+
+
+def _item_ts(item: ItineraryItem) -> datetime:
+    ts = item.start_ts
+    if ts is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _sorted_items(items: Sequence[ItineraryItem]) -> List[ItineraryItem]:
+    return sorted(items, key=_item_ts)
 
 
 def items_to_stops(items: Sequence[ItineraryItem]) -> List[Dict[str, Any]]:
@@ -449,7 +463,7 @@ def _build_recommendations(result: Dict[str, Any], prefs: Prefs) -> List[Dict[st
             "time_saved_minutes": int(orig_min - opt_min),
             "estimated_cost_saved": intel.get("cost_saved_estimate"),
             "cost_is_estimated": True,
-            "reason": "The scored plan reduces total travel time across the day",
+            "reason": "The scored plan reduces typical daily travel time",
             "confidence": 0.72,
             "current_titles": [],
             "recommended_titles": [],
@@ -500,7 +514,26 @@ def _summary(result: Dict[str, Any]) -> Dict[str, Any]:
         "rideshare_source": rideshare,
         "show_time_saved": bool(time_saved),
         "show_cost_saved": bool(cost_saved) and rideshare != "unavailable",
+        "travel_by_day": intel.get("travel_by_day") or [],
+        "travel_is_typical_day": len(intel.get("travel_by_day") or []) > 1,
     }
+
+
+def _saily_for_trip(trip_id: str) -> Dict[str, Any]:
+    view = memory_trips.get(trip_id)
+    origin = ""
+    destinations: list[str] = []
+    extras: list[str] = []
+    if view is not None:
+        origin = view.trip.origin or ""
+        destinations = list(view.trip.destinations or [])
+        extras = [
+            (item.location or (item.details or {}).get("title") or "")
+            for item in view.items
+        ]
+    return plan_for_trip(
+        origin=origin, destinations=destinations, extra_places=extras,
+    )
 
 
 def speak_analysis(payload: Dict[str, Any]) -> str:
@@ -567,6 +600,7 @@ def _payload(trip_id: str, result: Dict[str, Any], recs: List[Dict[str, Any]], p
         "recommendations": [_public_rec(r) for r in open_recs],
         "all_recommendations": [_public_rec(r) for r in visible],
         "spoken": speak_analysis({"recommendations": open_recs}),
+        "saily": _saily_for_trip(trip_id),
         "map": {
             "current_stops": [
                 {
@@ -653,19 +687,77 @@ def analyze_by_id(trip_id: str, *, pref_text: str = "") -> Dict[str, Any]:
     return analyze_trip(trip_id, items, prefs=prefs)
 
 
-def _rec_by_ref(trip_id: str, rec_id: str) -> Optional[Dict[str, Any]]:
+def _open_recs(recs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        r for r in recs
+        if r.get("status") not in ("rejected", "applied")
+    ]
+
+
+def _lookup_rec(
+    trip_id: str, rec_id: str, fingerprint: str = "",
+) -> Optional[Dict[str, Any]]:
     raw = _ANALYSES.get(trip_id) or {}
     recs = raw.get("_recs") or raw.get("recommendations") or []
     rec_id = str(rec_id or "").strip()
+    fp = str(fingerprint or "").strip()
+    if fp:
+        for rec in recs:
+            if rec.get("fingerprint") == fp and rec.get("status") != "rejected":
+                return rec
     if rec_id.isdigit():
         idx = int(rec_id) - 1
-        open_recs = [r for r in recs if r.get("status") != "rejected"]
+        open_recs = _open_recs(recs)
         if 0 <= idx < len(open_recs):
             return open_recs[idx]
     for rec in recs:
         if rec.get("id") == rec_id:
             return rec
+    open_recs = _open_recs(recs)
+    if rec_id and len(open_recs) == 1:
+        return open_recs[0]
     return None
+
+
+def _rec_by_ref(
+    trip_id: str, rec_id: str, fingerprint: str = "",
+) -> Optional[Dict[str, Any]]:
+    rec = _lookup_rec(trip_id, rec_id, fingerprint)
+    if rec is not None:
+        return rec
+    analyze_by_id(trip_id)
+    return _lookup_rec(trip_id, rec_id, fingerprint)
+
+
+def _decision_payload(
+    trip_id: str,
+    *,
+    spoken: str,
+    applied_id: str = "",
+    rejected_id: str = "",
+) -> Dict[str, Any]:
+    """Return the cached analysis with the decided rec removed — no rescore."""
+    raw = _ANALYSES.get(trip_id)
+    if raw and raw.get("_result") is not None:
+        body = _payload(trip_id, raw["_result"], raw.get("_recs") or [], prefs_for(trip_id))
+        body["_result"] = raw["_result"]
+        body["_recs"] = raw.get("_recs") or []
+        _ANALYSES[trip_id] = body
+        public = {k: v for k, v in body.items() if not k.startswith("_")}
+    else:
+        public = analyze_by_id(trip_id)
+    public["ok"] = True
+    public["spoken"] = spoken
+    cached = _ANALYSES.get(trip_id)
+    if applied_id:
+        public["applied_id"] = applied_id
+        if cached is not None:
+            cached["applied_id"] = applied_id
+    if rejected_id:
+        public["rejected_id"] = rejected_id
+        if cached is not None:
+            cached["rejected_id"] = rejected_id
+    return public
 
 
 def log_feedback(
@@ -723,6 +815,22 @@ def _write_item(item: ItineraryItem) -> None:
     )
 
 
+def _match_stop(
+    stop: Dict[str, Any], items: Sequence[ItineraryItem], by_id: Dict[str, ItineraryItem],
+) -> Optional[ItineraryItem]:
+    item_id = stop.get("item_id")
+    if item_id and item_id in by_id:
+        return by_id[item_id]
+    title = (stop.get("title") or "").strip()
+    loc = (stop.get("location") or "").strip()
+    for item in items:
+        if title and (_title_of(item) == title or title.endswith(_location_of(item))):
+            return item
+        if loc and loc == _location_of(item):
+            return item
+    return None
+
+
 def _apply_reorder(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
     items = _load_items(trip_id)
     by_id = {i.item_id: i for i in items}
@@ -732,13 +840,20 @@ def _apply_reorder(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
     new_stops = ((result.get("reorder") or {}).get("stops")) or []
     if not orig_stops or not new_stops:
         return False, "I couldn't match that reorder to the current itinerary."
-    orig_ids = [s.get("item_id") for s in orig_stops if s.get("item_id")]
-    new_ids = [s.get("item_id") for s in new_stops if s.get("item_id")]
-    if len(orig_ids) != len(new_ids) or not all(i in by_id for i in new_ids):
+    orig_items = [_match_stop(s, items, by_id) for s in orig_stops]
+    new_items = [_match_stop(s, items, by_id) for s in new_stops]
+    if (
+        not all(orig_items)
+        or not all(new_items)
+        or len(orig_items) != len(new_items)
+    ):
         return False, "That reorder no longer matches this itinerary."
-    slots = [(by_id[i].start_ts, by_id[i].end_ts) for i in orig_ids]
-    for item_id, (start, end) in zip(new_ids, slots):
-        item = by_id[item_id]
+    slots = [(item.start_ts, item.end_ts) for item in orig_items]
+    seen = set()
+    for item, (start, end) in zip(new_items, slots):
+        if item.item_id in seen:
+            continue
+        seen.add(item.item_id)
         duration = None
         if item.start_ts and item.end_ts:
             duration = item.end_ts - item.start_ts
@@ -749,32 +864,33 @@ def _apply_reorder(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
             "optimization_id": rec.get("id"),
         })
         _write_item(item)
+    view = memory_trips.get(trip_id)
+    if view is not None:
+        memory_trips.put(view.trip, _sorted_items(view.items))
     return True, "Applied. I reordered the flexible stops and kept the fixed ones in place."
 
 
 def _apply_transport(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
-    items = _load_items(trip_id)
+    items = _sorted_items(_load_items(trip_id))
     raw = _ANALYSES.get(trip_id) or {}
     result = raw.get("_result") or {}
     transitions = result.get("transitions") or []
     hop = rec.get("hop")
-    if not isinstance(hop, int) or hop < 0 or hop >= len(transitions):
-        return False, "I couldn't find that transportation change anymore."
-    dest_title = transitions[hop].get("to_title") or ""
     dest_item = None
-    for item in items:
-        title = _title_of(item)
-        loc = _location_of(item)
-        if dest_title and (dest_title == title or dest_title.endswith(loc) or loc in dest_title):
-            dest_item = item
-            break
-    if dest_item is None and hop + 1 < len(items):
-        ordered = sorted(
-            items,
-            key=lambda i: i.start_ts or datetime.min.replace(tzinfo=timezone.utc),
-        )
-        if hop + 1 < len(ordered):
-            dest_item = ordered[hop + 1]
+    dest_title = ""
+    if isinstance(hop, int) and 0 <= hop < len(transitions):
+        dest_title = transitions[hop].get("to_title") or ""
+        if hop + 1 < len(items):
+            dest_item = items[hop + 1]
+    elif not isinstance(hop, int) or hop is None:
+        return False, "I couldn't find that transportation change anymore."
+    if dest_item is None and dest_title:
+        for item in items:
+            title = _title_of(item)
+            loc = _location_of(item)
+            if dest_title == title or dest_title.endswith(loc) or loc in dest_title:
+                dest_item = item
+                break
     if dest_item is None:
         return False, "I couldn't attach that ride to a stop on the itinerary."
     pick = ((rec.get("transport_options") or {}).get("cascade_pick") or {})
@@ -792,15 +908,53 @@ def _apply_transport(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
     return True, f"Applied. I'll use {label} for that leg."
 
 
-def apply_recommendation(trip_id: str, rec_id: str) -> Dict[str, Any]:
-    rec = _rec_by_ref(trip_id, rec_id)
+def _apply_plan(trip_id: str, rec: Dict[str, Any]) -> Tuple[bool, str]:
+    raw = _ANALYSES.get(trip_id) or {}
+    result = raw.get("_result") or {}
+    transitions = result.get("transitions") or []
+    if not transitions:
+        return False, "I couldn't find the scored plan for this itinerary."
+    applied = 0
+    for hop, transition in enumerate(transitions):
+        pick = transition.get("recommended") or {}
+        ok, _spoken = _apply_transport(trip_id, {
+            "id": rec.get("id"),
+            "type": rec.get("type") or "schedule_optimization",
+            "hop": hop,
+            "to_mode": pick.get("label"),
+            "transport_options": {
+                "cascade_pick": {
+                    "mode": pick.get("transportation_mode") or pick.get("mode"),
+                    "label": pick.get("label"),
+                    "travel_time": pick.get("estimated_travel_time"),
+                    "cost": pick.get("estimated_cost"),
+                    "estimated": True,
+                },
+            },
+        })
+        if ok:
+            applied += 1
+    if not applied:
+        return False, "I couldn't attach that plan to the itinerary."
+    saved = rec.get("time_saved_minutes")
+    extra = f" About {int(saved)} minutes less travel." if saved else ""
+    return True, f"Applied. I'll use the scored rides for the day.{extra}"
+
+
+def apply_recommendation(
+    trip_id: str, rec_id: str, fingerprint: str = "",
+) -> Dict[str, Any]:
+    rec = _rec_by_ref(trip_id, rec_id, fingerprint)
     if rec is None:
         return {
             "ok": False,
             "spoken": "I don't have that recommendation on the table anymore.",
         }
-    if rec.get("type") == "route_optimization":
+    rec_type = rec.get("type")
+    if rec_type == "route_optimization":
         ok, spoken = _apply_reorder(trip_id, rec)
+    elif rec_type == "schedule_optimization":
+        ok, spoken = _apply_plan(trip_id, rec)
     else:
         ok, spoken = _apply_transport(trip_id, rec)
     if not ok:
@@ -808,14 +962,17 @@ def apply_recommendation(trip_id: str, rec_id: str) -> Dict[str, Any]:
     rec["status"] = "applied"
     _REJECTED.setdefault(trip_id, set()).add(rec.get("fingerprint") or rec.get("id"))
     log_feedback(trip_id, action="accept", rec=rec, chosen=rec.get("to_mode") or rec.get("type"))
-    refreshed = analyze_by_id(trip_id)
-    refreshed["spoken"] = spoken + " I recalculated the rest of the day."
-    refreshed["applied_id"] = rec.get("id")
-    return refreshed
+    return _decision_payload(
+        trip_id,
+        spoken=spoken + " Your itinerary on the left is updated.",
+        applied_id=rec.get("id") or "",
+    )
 
 
-def reject_recommendation(trip_id: str, rec_id: str) -> Dict[str, Any]:
-    rec = _rec_by_ref(trip_id, rec_id)
+def reject_recommendation(
+    trip_id: str, rec_id: str, fingerprint: str = "",
+) -> Dict[str, Any]:
+    rec = _rec_by_ref(trip_id, rec_id, fingerprint)
     if rec is None:
         return {
             "ok": False,
@@ -824,15 +981,8 @@ def reject_recommendation(trip_id: str, rec_id: str) -> Dict[str, Any]:
     _REJECTED.setdefault(trip_id, set()).add(rec.get("fingerprint") or rec.get("id"))
     rec["status"] = "rejected"
     log_feedback(trip_id, action="reject", rec=rec, rejected=rec.get("type"))
-    raw = _ANALYSES.get(trip_id)
-    if raw and raw.get("_result") is not None:
-        body = _payload(trip_id, raw["_result"], raw.get("_recs") or [], prefs_for(trip_id))
-        body["_result"] = raw["_result"]
-        body["_recs"] = raw.get("_recs") or []
-        _ANALYSES[trip_id] = body
-        public = {k: v for k, v in body.items() if not k.startswith("_")}
-    else:
-        public = analyze_by_id(trip_id)
-    public["spoken"] = "Okay — I'll keep your current plan and won't suggest that same change again."
-    public["rejected_id"] = rec.get("id")
-    return public
+    return _decision_payload(
+        trip_id,
+        spoken="Okay — I'll keep your current plan and won't suggest that same change again.",
+        rejected_id=rec.get("id") or "",
+    )

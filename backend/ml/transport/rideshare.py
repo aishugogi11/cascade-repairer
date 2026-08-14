@@ -5,14 +5,17 @@ live prices. Live Uber estimates are used only when Uber actually returns them.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+import re
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
+from urllib.parse import urlencode
 
 import requests
 
-from ml.transport.maps import route
-from ml.transport.parse import geocode
+from ml.transport.maps import haversine_miles, route
+from ml.transport.parse import geocode, venue_type
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +106,71 @@ def _coords(stop: Dict[str, Any]) -> Tuple[float, float]:
     return geocode(stop.get("title") or stop.get("location") or "")
 
 
-def uber_deeplink(origin: Tuple[float, float], dest: Tuple[float, float]) -> str:
-    return (
-        "https://m.uber.com/ul/?action=setPickup"
-        f"&pickup[latitude]={origin[0]}&pickup[longitude]={origin[1]}"
-        f"&dropoff[latitude]={dest[0]}&dropoff[longitude]={dest[1]}"
-    )
+def _short_name(stop: Dict[str, Any]) -> str:
+    text = (stop.get("title") or stop.get("location") or "this stop").strip()
+    if "airport transfer" in text.lower():
+        airport = re.search(r"\b([A-Z]{3})\b", text)
+        if airport:
+            return f"{airport.group(1)} Airport"
+    for separator in (" — ", " – ", " - "):
+        if separator in text:
+            text = text.split(separator, 1)[-1]
+            break
+    return text[:80] or "this stop"
+
+
+def first_rideshare_pair(
+    stops: Sequence[Dict[str, Any]],
+) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """First city hop a traveler can actually Uber — skip flights and long-haul."""
+    cleaned = [s for s in stops if s]
+    for i in range(len(cleaned) - 1):
+        origin, dest = cleaned[i], cleaned[i + 1]
+        title = (origin.get("title") or origin.get("location") or "").lower()
+        if origin.get("kind") == "flight" or "flight" in title:
+            continue
+        o_type = origin.get("venue_type") or venue_type(origin.get("title") or "")
+        d_type = dest.get("venue_type") or venue_type(dest.get("title") or "")
+        if o_type == "airport" and d_type == "airport":
+            continue
+        o, d = _coords(origin), _coords(dest)
+        if haversine_miles(o, d) > 50:
+            continue
+        return origin, dest
+    if len(cleaned) >= 2:
+        return cleaned[0], cleaned[1]
+    return None
+
+
+def uber_deeplink(
+    origin: Tuple[float, float],
+    dest: Tuple[float, float],
+    *,
+    pickup_name: str = "",
+    dropoff_name: str = "",
+    product_id: str = "",
+) -> str:
+    """Open Uber's looking screen with this pickup/dropoff so available rides show."""
+    pickup = {
+        "latitude": round(float(origin[0]), 6),
+        "longitude": round(float(origin[1]), 6),
+        "addressLine1": (pickup_name or "Pickup")[:80],
+    }
+    drop = {
+        "latitude": round(float(dest[0]), 6),
+        "longitude": round(float(dest[1]), 6),
+        "addressLine1": (dropoff_name or "Next stop")[:80],
+    }
+    params: List[Tuple[str, str]] = [
+        ("pickup", json.dumps(pickup, separators=(",", ":"))),
+        ("drop[0]", json.dumps(drop, separators=(",", ":"))),
+    ]
+    client = os.environ.get("UBER_CLIENT_ID", "").strip()
+    if client:
+        params.append(("client_id", client))
+    if product_id:
+        params.append(("product_id", product_id))
+    return "https://m.uber.com/looking?" + urlencode(params)
 
 
 def uber_configured() -> bool:
@@ -212,11 +274,13 @@ def build_here_now(
     walk_min = float(walk.get("duration_min") or 0)
     drive_min = float(drive.get("duration_min") or 0)
     over_walk = max_walk_minutes is not None and walk_min > max_walk_minutes + 0.5
+    at = _short_name(origin)
+    nxt = _short_name(dest)
     speak = (
-        f"You're at {origin.get('title')}, as if you're standing there now. "
-        f"Next stop is {dest.get('title')}. "
-        f"Walking is {walk_min:.0f} minutes ({walk.get('source')}). "
-        f"Driving is {drive_min:.0f} minutes ({drive.get('source')}). "
+        f"You're at the first stop, {at}, as if you're standing there now. "
+        f"Next stop is {nxt}. "
+        f"Walking is {walk_min:.0f} minutes. "
+        f"Driving is {drive_min:.0f} minutes. "
     )
     if over_walk:
         speak += (
@@ -227,18 +291,25 @@ def build_here_now(
         eta = cheapest.get("eta_min")
         eta_bit = f", about {eta:.0f} minutes away" if eta else ""
         speak += (
-            f"The cheapest live Uber from here is {cheapest.get('product')}, "
+            f"The cheapest Uber from the first stop is {cheapest.get('product')}, "
             f"{cheapest.get('estimate')}{eta_bit}."
         )
-    elif cheapest and cheapest.get("product") and not cheapest.get("price_available"):
-        speak += f"Uber offered {cheapest.get('product')} but did not return a fare."
+        extras = [
+            q for q in priced[1:3]
+            if q.get("product") and q.get("estimate")
+        ]
+        if extras:
+            speak += " Also available: " + ", ".join(
+                f"{q['product']} {q['estimate']}" for q in extras
+            ) + "."
+        speak += " I put a See available Ubers link on the first-stop card."
     else:
         speak += (
-            "I don't have a live Uber fare for this curb. "
-            "Open Uber from this pin to see the cheapest product right now."
+            "Use the See available Ubers link to open Uber with this pickup "
+            "and dropoff and view the rides currently available."
         )
     return {
-        "at": origin.get("title"),
+        "at": at,
         "next": dest.get("title"),
         "at_time": origin.get("start_time"),
         "origin": {"lat": o[0], "lon": o[1]},
@@ -251,6 +322,10 @@ def build_here_now(
         "uber_quotes": quotes,
         "cheapest": cheapest,
         "uber_source": "uber_live" if quotes else "uber_unavailable",
-        "deeplink": uber_deeplink(o, d),
+        "deeplink": uber_deeplink(
+            o, d,
+            pickup_name=at,
+            dropoff_name=nxt,
+        ),
         "speak": speak.strip(),
     }

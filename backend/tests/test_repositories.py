@@ -76,6 +76,18 @@ def test_create_trip_generates_uuid_and_parameterized_insert(bq):
     assert params["destinations"].values == ["SFO", "MTV"]  # REPEATED field
 
 
+def test_create_trip_falls_back_to_memory_without_credentials(monkeypatch):
+    from api import memory_trips
+
+    memory_trips.clear()
+    monkeypatch.setattr(bq_helper, "credentials_ready", lambda: False)
+    trip = Trip(user_id="josh", title="Local demo")
+    success, created, error = trips.create_trip(trip)
+    assert success is True and error is None and created is trip
+    assert memory_trips.get(trip.trip_id) is not None
+    memory_trips.clear()
+
+
 def test_get_trip_maps_row_to_model_with_repeated_destinations(bq):
     bq.select.return_value = (
         True,

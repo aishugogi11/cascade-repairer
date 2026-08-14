@@ -29,7 +29,7 @@ sabre_tools = APIRouter()
 
 class SeedTripRequest(BaseModel):
     user_id: str = "demo-traveler"
-    title: str = "The Complete Trip — hackathon demo"
+    title: str = "The Complete Trip"
 
 
 # Everything displayed or spoken to a user is Pacific time (decision
@@ -311,11 +311,91 @@ def search_log():
     return {"searches": sabre_client.search_log()}
 
 
+@sabre_tools.get("/pending_options")
+def pending_options():
+    """Flight times the Concierge is currently reading out — in-memory,
+    no trip_id required, so the cascade awaiting view can show options
+    before a booking exists."""
+    from api import concierge
+    block = concierge.current_pending_options()
+    return {"pending_options": block} if block else {"pending_options": None}
+
+
+class SelectDateRequest(BaseModel):
+    depart_date: str
+
+
+@sabre_tools.post("/select_date")
+async def select_date(req: SelectDateRequest):
+    """Re-shop the current route on a date from the available-dates strip."""
+    from api import concierge
+    spoken = await concierge.select_search_date_impl(req.depart_date)
+    return {
+        "spoken": spoken,
+        "pending_options": concierge.current_pending_options(),
+    }
+
+
+class BookOptionRequest(BaseModel):
+    option_number: int
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+
+
+@sabre_tools.post("/book_option")
+async def book_option(req: BookOptionRequest):
+    """Book one of the numbered flights currently on the options board —
+    the tap path for the same choice the traveler can speak."""
+    from api import concierge
+    session_id = (req.session_id or "").strip()
+    slot = concierge._LATEST_SEARCH
+    if not session_id and slot is not None:
+        session_id = slot.session_id
+    if not session_id:
+        return {
+            "ok": False,
+            "spoken": (
+                "I don't have flight options in front of me yet — tell me "
+                "where you're headed and I'll search first."
+            ),
+            "booking": None,
+            "pending_options": None,
+        }
+    if req.trip_id:
+        await concierge.ensure_trip_context(session_id, trip_id=req.trip_id)
+    spoken = await concierge.book_flight_impl(session_id, req.option_number)
+    ok = spoken.startswith("Done")
+    return {
+        "ok": ok,
+        "spoken": spoken,
+        "booking": concierge.latest_booking() if ok else None,
+        "pending_options": concierge.current_pending_options(),
+    }
+
+
+@sabre_tools.get("/latest_booking")
+def latest_booking():
+    """The flight just booked by voice, for the cascade dashboard card."""
+    from api import concierge
+    booking = concierge.latest_booking()
+    if not booking:
+        raise HTTPException(status_code=404, detail="no voice booking yet")
+    return booking
+
+
 @sabre_tools.get("/latest_trip_id")
 def latest_trip_id():
     """Return the most recently created trip_id, for the walkthrough's
     convenience (feeds the <TRIP_ID> in the validation queries). Trips carry
     created_at (stamped on insert); only itinerary_items has updated_at."""
+    from api import memory_trips
+    mem = memory_trips.list_recent()
+    if mem:
+        trip = mem[0]
+        created = trip.created_at or datetime.now(timezone.utc)
+        return {"trip_id": trip.trip_id, "created_at": created.isoformat()}
+    if not trips.bq_helper.credentials_ready():
+        raise HTTPException(status_code=404, detail="no trips found")
     query = f"""
         SELECT trip_id, created_at
         FROM `{trips._table()}`
@@ -324,6 +404,9 @@ def latest_trip_id():
     """
     success, rows, error = trips.bq_helper.run_select(query)
     if not success:
+        err = (error or "").lower()
+        if "credential" in err:
+            raise HTTPException(status_code=404, detail="no trips found")
         raise HTTPException(status_code=500, detail=f"could not fetch latest trip: {error}")
     if not rows:
         raise HTTPException(status_code=404, detail="no trips found")

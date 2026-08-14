@@ -23,7 +23,9 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
-_PUBLIC_PREFIXES = ("/v1/legal/",)
+# Legal pages + sample PDF downloads under /v1/build/sample/*.pdf stay
+# public so App Store / judges can open them without an access-code header.
+_PUBLIC_PREFIXES = ("/v1/legal/", "/v1/build/sample/")
 _PUBLIC_POSTS = {"/v1/auth/validate"}
 # The static HTML shells (with or without the trailing slash, so FastAPI's
 # 307 redirect to the canonical path stays reachable too).

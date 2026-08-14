@@ -77,7 +77,7 @@ def test_routes_registered_with_lesson_summaries():
 
 def test_landing_page_links_lessons():
     body = client.get("/v1/hello/").text
-    assert "Course lesson demos" in body
+    assert "Course lessons" in body
     assert "/v1/vb_test/" in body            # L2
     assert "/docs#/cascade_demo" in body      # L2/L3
     assert "/docs#/outbound_call" in body     # L4

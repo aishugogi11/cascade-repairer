@@ -31,6 +31,10 @@ from api.whatsapp_ui import whatsapp_ui
 from api.whatsapp_demo import whatsapp_demo
 
 
+from api.llm_client import configure_agents_sdk
+
+configure_agents_sdk()
+
 app = FastAPI(
     title="Vocal Bridge Training API",
     version="1.0",

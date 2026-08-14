@@ -29,6 +29,7 @@ PUBLIC_GETS = (
     "/v1/booking/",
     "/v1/cascade/",
     "/v1/build/",
+    "/v1/build/sample/nyc.pdf",
     "/v1/whatsapp/",
 )
 

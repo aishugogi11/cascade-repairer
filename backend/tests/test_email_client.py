@@ -104,6 +104,31 @@ def test_non_2xx_returns_error_without_raising(monkeypatch):
     _install_transport(monkeypatch, handler)
     result = asyncio.run(send_email(to="a@example.com", subject="s", text="t"))
     assert result["status"] == "error"
+    assert "422" in result["reason"]
+    assert "invalid" in result["reason"]
+
+
+def test_forbidden_surfaces_resend_domain_message(monkeypatch):
+    monkeypatch.setenv("RESEND_API_KEY", KEY)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={
+                "statusCode": 403,
+                "name": "validation_error",
+                "message": (
+                    "The talktomytrip.com domain is not verified. "
+                    "Please, add and verify your domain on https://resend.com/domains"
+                ),
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    result = asyncio.run(send_email(to="a@example.com", subject="s", text="t"))
+    assert result["status"] == "error"
+    assert "403" in result["reason"]
+    assert "not verified" in result["reason"]
 
 
 def test_timeout_returns_error_without_raising(monkeypatch):

@@ -34,7 +34,10 @@ def teardown_function():
 
 
 def test_unpinned_session_gets_the_no_trip_line():
+    from api import memory_trips
+
     concierge._SESSION_TRIPS.clear()
+    memory_trips.clear()
     reply = asyncio.run(concierge.trip_status_impl("fresh-session"))
     assert reply == concierge._NO_TRIP_SPOKEN
 

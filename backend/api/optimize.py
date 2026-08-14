@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from api import memory_trips
+from api.pdf_itinerary import build_from_stops
+from api.saily import plan_for_trip
 from ml.transport.optimize import Prefs, optimize_stops, rebuild_after_undo
 from ml.transport.parse import SAMPLE_ITINERARY, SAMPLE_PREFS, parse_upload
 from ml.transport.predict import model_metrics
@@ -23,15 +27,82 @@ def _blank_session() -> Dict[str, Any]:
     return {
         "stops": [],
         "parsed_stops": [],
-        "prefs": Prefs(),
+        "prefs": Prefs(priority="time", max_walk_minutes=10),
         "result": None,
         "applied": False,
         "snapshots": [],
+        "trip_id": None,
     }
 
 
 def _has_trip(sess: Dict[str, Any]) -> bool:
     return len(sess.get("parsed_stops") or sess.get("stops") or []) >= 2
+
+
+_CITY_DEST = {
+    "JFK": "New York",
+    "LGA": "New York",
+    "EWR": "New York",
+    "SFO": "San Francisco",
+    "SJC": "San Jose",
+    "OAK": "Oakland",
+    "LAX": "Los Angeles",
+    "MSP": "Minneapolis",
+}
+
+
+def _short_title(title: str) -> str:
+    text = (title or "").strip()
+    for sep in (" — ", " – ", " - "):
+        if sep in text:
+            text = text.split(sep, 1)[-1].strip()
+            break
+    return text or "this stop"
+
+
+def _cascade_title(stops: list) -> str:
+    """Prefer the flight route (SFO → New York) over first→last stop titles."""
+    for stop in stops or []:
+        title = (stop.get("title") or stop.get("location") or "").strip()
+        if not title:
+            continue
+        route = re.search(
+            r"\b([A-Z]{3})\s*(?:-|–|—|to|→)\s*([A-Z]{3})\b", title
+        )
+        if not route:
+            continue
+        if "flight" not in title.lower() and not re.search(
+            r"\b[A-Z]{2}\s*\d{1,4}\b", title
+        ):
+            continue
+        origin, dest = route.group(1), route.group(2)
+        return f"{origin} → {_CITY_DEST.get(dest, dest)}"
+    first = _short_title((stops[0] or {}).get("title") or "Uploaded trip")
+    last = _short_title((stops[-1] or {}).get("title") or "")
+    if last and last.lower() != first.lower() and last != "this stop":
+        return f"{first} → {last}"
+    return first if first != "this stop" else "Uploaded trip"
+
+
+def _publish_cascade(sess: Dict[str, Any]) -> Optional[str]:
+    """Write the uploaded/optimized stops onto the Cascade itinerary store."""
+    stops = sess.get("stops") or sess.get("parsed_stops") or []
+    if len(stops) < 2:
+        return None
+    built = build_from_stops(
+        user_id="optimize-upload",
+        title=_cascade_title(stops),
+        stops=stops,
+        trip_id=sess.get("trip_id") or "",
+    )
+    if built is None:
+        return None
+    trip, items = built
+    trip.created_at = datetime.now(timezone.utc)
+    seeded = memory_trips.put(trip, items)
+    trip_id = seeded.get("trip_id") or trip.trip_id
+    sess["trip_id"] = trip_id
+    return trip_id
 
 
 def _session(session_id: str) -> Dict[str, Any]:
@@ -40,10 +111,16 @@ def _session(session_id: str) -> Dict[str, Any]:
     return _SESSIONS[session_id]
 
 
-def _attach(session_id: str) -> Dict[str, Any]:
+def _attach(session_id: str, trip_id: str = "") -> Dict[str, Any]:
     """Page UUID and Vocal Bridge room ids must share the same trip."""
     global _CANONICAL
+    want = (trip_id or "").strip()
     sess = _session(session_id)
+    if want:
+        _ensure_stops(sess, want)
+        if _has_trip(sess):
+            _CANONICAL = session_id
+            return sess
     if _has_trip(sess):
         _CANONICAL = session_id
         return sess
@@ -55,6 +132,12 @@ def _attach(session_id: str) -> Dict[str, Any]:
             _SESSIONS[session_id] = other
             _CANONICAL = sid
             return other
+    # uvicorn --reload (and Cloud Run cold starts) wipe _SESSIONS while the
+    # uploaded trip still lives in memory_trips — adopt it so voice does not
+    # claim the itinerary is missing.
+    _ensure_stops(sess)
+    if _has_trip(sess):
+        _CANONICAL = session_id
     return sess
 
 
@@ -67,6 +150,119 @@ def clear_sessions() -> None:
     global _CANONICAL
     _SESSIONS.clear()
     _CANONICAL = None
+
+
+def _items_to_stops(items: list) -> list:
+    from zoneinfo import ZoneInfo
+
+    from ml.transport.parse import geocode, venue_type
+
+    pacific = ZoneInfo("America/Los_Angeles")
+    stops = []
+    base_day = None
+    for item in items:
+        details = item.details or {}
+        title = (details.get("title") or item.location or item.type or "").strip()
+        if not title:
+            continue
+        lat = details.get("lat")
+        lon = details.get("lon")
+        if lat is None or lon is None:
+            lat, lon = geocode(title)
+        start_time = ""
+        day = 0
+        if item.start_ts is not None:
+            local = (
+                item.start_ts.astimezone(pacific)
+                if item.start_ts.tzinfo
+                else item.start_ts.replace(tzinfo=pacific)
+            )
+            start_time = f"{local.hour:02d}:{local.minute:02d}"
+            if base_day is None:
+                base_day = local.date()
+            day = max((local.date() - base_day).days, 0)
+        stops.append({
+            "title": title,
+            "location": item.location or title,
+            "lat": lat,
+            "lon": lon,
+            "kind": item.type,
+            "venue_type": venue_type(title),
+            "start_time": start_time,
+            "day": day,
+        })
+    return stops
+
+
+def _stops_from_memory(trip_id: str = "") -> tuple:
+    """Return (stops, trip_id) from Cascade memory, preferring Optimize uploads."""
+    want = (trip_id or "").strip()
+    if want:
+        view = memory_trips.get(want)
+        if view is not None and len(view.items) >= 2:
+            return _items_to_stops(view.items), want
+    preferred = []
+    other = []
+    for trip in memory_trips.list_recent():
+        view = memory_trips.get(trip.trip_id)
+        if view is None or len(view.items) < 2:
+            continue
+        bucket = preferred if (trip.user_id or "").startswith("optimize") else other
+        bucket.append((trip.trip_id, view))
+    for tid, view in preferred + other:
+        return _items_to_stops(view.items), tid
+    return [], None
+
+
+def _ensure_stops(sess: Dict[str, Any], trip_id: str = "") -> Dict[str, Any]:
+    """Hydrate an empty optimize session from a Cascade memory trip."""
+    want = (trip_id or "").strip()
+    if _has_trip(sess) and (not want or sess.get("trip_id") == want):
+        return sess
+    stops, bound_id = _stops_from_memory(want)
+    if len(stops) < 2:
+        return sess
+    sess["parsed_stops"] = [dict(s) for s in stops]
+    sess["stops"] = list(stops)
+    if bound_id:
+        sess["trip_id"] = bound_id
+    sess["result"] = None
+    sess["applied"] = False
+    try:
+        result = optimize_stops(sess["parsed_stops"], sess["prefs"])
+        sess["snapshots"] = result.pop("snapshots", [])
+        sess["result"] = result
+        if result.get("optimized_stops"):
+            sess["stops"] = result["optimized_stops"]
+            sess["applied"] = True
+    except Exception:  # noqa: BLE001 — still expose the loaded stops
+        logger.exception("optimize recover from memory failed")
+    return sess
+
+
+def speak_first_stop_uber(session_id: str = "", trip_id: str = "") -> str:
+    """Speak cheapest Uber from the first city hop on the loaded itinerary."""
+    from ml.transport.rideshare import build_here_now, first_rideshare_pair
+
+    sid = (session_id or "").strip() or "opt-voice"
+    sess = _attach(sid, trip_id=trip_id)
+    stops = sess.get("parsed_stops") or sess.get("stops") or []
+    if len(stops) < 2:
+        return (
+            "I don't see your itinerary loaded yet. Open it on Cascade or "
+            "Optimize My Trip, then ask again about the first stop."
+        )
+    pair = first_rideshare_pair(stops)
+    if not pair:
+        return "I need two nearby stops to look up an Uber from the first one."
+    here = build_here_now(
+        pair[0], pair[1],
+        max_walk_minutes=sess["prefs"].max_walk_minutes,
+    )
+    if sess.get("result") is None:
+        sess["result"] = {}
+    sess["result"]["here_now"] = here
+    return here.get("speak") or "I have your first-stop Uber context."
 
 
 def parse_prefs(text: str, existing: Optional[Prefs] = None) -> Prefs:
@@ -117,13 +313,6 @@ def parse_prefs(text: str, existing: Optional[Prefs] = None) -> Prefs:
     )
 
 
-def _short_title(title: str) -> str:
-    text = (title or "").strip()
-    if " — " in text:
-        text = text.split(" — ", 1)[-1]
-    return text or "this stop"
-
-
 def _hop_phrase(result: Dict[str, Any], hop: Any) -> str:
     stops = result.get("original_stops") or result.get("optimized_stops") or []
     if not isinstance(hop, int) or hop < 0 or hop + 1 >= len(stops):
@@ -157,8 +346,10 @@ def speak_recommendations(result: Dict[str, Any], prefs: Optional[Prefs] = None)
         f"Here's what I recommend. The model made {n} transportation change"
         f"{'' if n == 1 else 's'}"
     )
+    days = intel.get("travel_by_day") or []
+    per_day = " per day" if len(days) > 1 else ""
     if saved:
-        headline += f", cutting travel time by about {saved} minutes"
+        headline += f", cutting travel time by about {saved} minutes{per_day}"
         if orig_min is not None and opt_min is not None:
             headline += f", from {orig_min} down to {opt_min}"
     parts.append(headline + ".")
@@ -199,6 +390,14 @@ def speak_recommendations(result: Dict[str, Any], prefs: Optional[Prefs] = None)
             hop_line += f" {why}."
         parts.append(hop_line)
 
+    walk = next((t for t in trans if t.get("maps_url")), None)
+    if walk:
+        parts.append(
+            f"There's a walking hop from {_short_title(walk.get('from_title') or '')} "
+            f"to {_short_title(walk.get('to_title') or '')} — open the Google Maps "
+            "route on the After timeline."
+        )
+
     need: list[str] = []
     if here.get("over_walk_cap") and prefs and prefs.max_walk_minutes is not None:
         need.append(
@@ -238,10 +437,23 @@ def _payload(session_id: str, reply: str, **extra: Any) -> Dict[str, Any]:
             "frozen": list(sess["prefs"].frozen),
         },
         "applied": sess.get("applied", False),
+        "trip_id": sess.get("trip_id"),
+        "cascade_path": (
+            f"/v1/cascade/?trip_id={sess['trip_id']}" if sess.get("trip_id") else ""
+        ),
         **result,
         **extra,
     }
     body.pop("snapshots", None)
+    stops = body.get("stops") or []
+    dests = [s.get("title") or s.get("location") or "" for s in stops]
+    origin = next(
+        (s.get("location") or "" for s in stops if s.get("kind") == "flight"),
+        "",
+    )
+    body["saily"] = plan_for_trip(
+        origin=origin, destinations=dests, extra_places=dests,
+    )
     return body
 
 
@@ -253,6 +465,7 @@ def ingest(
     image_base64: str = "",
     mime: str = "image/png",
     sample: bool = False,
+    sample_kind: str = "",
 ) -> Dict[str, Any]:
     sess = _session(session_id)
     parsed = parse_upload(
@@ -261,6 +474,7 @@ def ingest(
         image_base64=image_base64,
         mime=mime,
         sample=sample,
+        sample_kind=sample_kind,
     )
     if not parsed["ok"]:
         hint = (
@@ -308,6 +522,7 @@ def ingest(
     if result.get("optimized_stops"):
         sess["stops"] = result["optimized_stops"]
         sess["applied"] = True
+    _publish_cascade(sess)
     _remember(session_id)
     opener = f"I extracted {len(parsed['stops'])} stops. "
     reply = opener + speak_recommendations(result, sess["prefs"])
@@ -334,6 +549,7 @@ def reoptimize(session_id: str, prefs: Optional[Prefs] = None) -> Dict[str, Any]
     if sess["result"].get("optimized_stops"):
         sess["stops"] = sess["result"]["optimized_stops"]
         sess["applied"] = True
+    _publish_cascade(sess)
     reply = (
         f"Re-ran the action loop with {sess['prefs'].describe()}. "
         + speak_recommendations(sess["result"], sess["prefs"])
@@ -349,6 +565,7 @@ def apply_recommendations(session_id: str) -> Dict[str, Any]:
     if result.get("optimized_stops"):
         sess["stops"] = result["optimized_stops"]
     sess["applied"] = True
+    _publish_cascade(sess)
     return _payload(
         session_id,
         speak_recommendations(result, sess["prefs"])
@@ -379,50 +596,75 @@ def undo_last(session_id: str) -> Dict[str, Any]:
     )
 
 
-async def apply_turn(session_id: str, message: str) -> Dict[str, Any]:
+def _wants_itinerary_confirm(text: str) -> bool:
+    lower = (text or "").lower()
+    if not any(w in lower for w in ("itinerary", "my trip", "my plan", "my stops")):
+        return False
+    return any(w in lower for w in (
+        "have my", "got my", "see my", "get my", "getting my",
+        "know my", "loaded", "on file", "do you have", "can you see",
+        "what's on", "what is on", "tell me about",
+    ))
+
+
+def _confirm_itinerary_reply(sess: Dict[str, Any]) -> str:
+    stops = sess.get("parsed_stops") or sess.get("stops") or []
+    n = len(stops)
+    title = _cascade_title(stops) if n >= 2 else "your trip"
+    first = _short_title((stops[0] or {}).get("title") or "") if stops else ""
+    last = _short_title((stops[-1] or {}).get("title") or "") if n > 1 else ""
+    span = f" from {first} to {last}" if first and last and first != last else ""
+    return (
+        f"Yes — I have your {title} itinerary with {n} stops{span}. "
+        "Ask what I recommend, or say Uber from the first stop."
+    )
+
+
+async def apply_turn(
+    session_id: str, message: str, trip_id: str = "",
+) -> Dict[str, Any]:
     text = (message or "").strip()
     lower = text.lower()
-    sess = _attach(session_id)
+    sess = _attach(session_id, trip_id=trip_id)
 
     if lower in ("sample", "try sample", "demo trip", "use the sample"):
         return ingest(session_id, sample=True)
 
     wants_here = any(w in lower for w in (
         "cheapest uber", "cheap uber", "uber from here", "uber should i",
-        "what uber", "live uber", "first stop", "from union square",
+        "what uber", "live uber", "first stop", "from the first",
+        "from union square", "uber from the first",
         "i'm at the first", "im at the first", "standing at",
+        "best option", "best way", "best rideshare", "from this stop",
     ))
     wants_run = any(w in lower for w in (
         "optimize", "improve", "better pickup", "best rideshare",
         "as fast", "cheapest", "apply", "do it", "go ahead",
     ))
-    if (wants_run or wants_here) and not _has_trip(sess):
-        ingest(session_id, sample=True)
-        sess = _attach(session_id)
-
     if any(w in lower for w in ("undo", "roll back", "revert")):
         return undo_last(session_id)
 
+    if _wants_itinerary_confirm(text):
+        if not _has_trip(sess):
+            return _payload(
+                session_id,
+                "I don't see an itinerary on this page yet. Upload or paste "
+                "your trip, or say 'try sample'.",
+                ok=False,
+            )
+        return _payload(session_id, _confirm_itinerary_reply(sess), ok=True)
+
     if wants_here:
-        result = sess.get("result") or {}
-        here = result.get("here_now")
-        if not here and _has_trip(sess):
-            from ml.transport.rideshare import build_here_now
-            stops = sess.get("parsed_stops") or sess.get("stops") or []
-            if len(stops) >= 2:
-                here = build_here_now(
-                    stops[0], stops[1],
-                    max_walk_minutes=sess["prefs"].max_walk_minutes,
-                )
-                if sess.get("result") is not None:
-                    sess["result"]["here_now"] = here
-        if here:
-            return _payload(session_id, here.get("speak") or "I have your first-stop Uber context.", ok=True)
-        return _payload(
-            session_id,
-            "Load the itinerary first and I'll treat you as standing at the first stop.",
-            ok=False,
-        )
+        mem_stops, _ = _stops_from_memory()
+        if not _has_trip(sess) and not mem_stops:
+            ingest(session_id, sample=True)
+        reply = speak_first_stop_uber(session_id)
+        ok = "Load the itinerary" not in reply and "need two" not in reply.lower()
+        return _payload(session_id, reply, ok=ok)
+
+    if wants_run and not _has_trip(sess):
+        ingest(session_id, sample=True)
+        sess = _attach(session_id, trip_id=trip_id)
 
     if any(w in lower for w in (
         "why did you", "why lyft", "why uber", "why that pickup",
@@ -477,8 +719,8 @@ async def apply_turn(session_id: str, message: str) -> Dict[str, Any]:
     if not sess.get("stops"):
         return _payload(
             session_id,
-            "Already have a trip? Paste it, upload a PDF or screenshot, or say "
-            "'try sample' for a San Francisco weekend. I'll run the ML action loop on every hop.",
+            "I don't see an itinerary on this page yet. Upload or paste your "
+            "trip, or say 'try sample', and I'll score every hop.",
             ok=False,
         )
 
@@ -488,14 +730,14 @@ async def apply_turn(session_id: str, message: str) -> Dict[str, Any]:
         return _payload(
             session_id,
             speak_recommendations(result, sess["prefs"])
-            + " Ask me about the cheapest Uber from here, or say undo.",
+            + " Ask me about the cheapest Uber from the first stop, or say undo.",
             ok=True,
         )
     return _payload(
         session_id,
         f"This trip’s model score is {intel.get('optimization_score', '—')} / 100 "
         f"with {intel.get('potential_improvements', 0)} executed actions. "
-        "Say 'what do you recommend', 'cheapest Uber from here', or 'undo'.",
+        "Say 'what do you recommend', 'cheapest Uber from the first stop', or 'undo'.",
         ok=True,
     )
 

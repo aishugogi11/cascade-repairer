@@ -44,6 +44,16 @@ class BigQueryHelper:
             for name, table_id in TABLE_IDS.items()
         }
 
+    def credentials_ready(self) -> bool:
+        """False on a laptop/container with no ADC — skip the ~12s metadata
+        wait. Tests and Cloud Run still go through the real client path."""
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return True
+        if os.environ.get("K_SERVICE"):
+            return True
+        path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        return bool(path and Path(path).is_file())
+
     @property
     def client(self) -> bigquery.Client:
         """Lazy client so importing this module (and unit tests) never needs
@@ -74,6 +84,8 @@ class BigQueryHelper:
             (column → value); empty on failure. Never raises — failures are
             returned in the tuple so callers can surface them.
         """
+        if not self.credentials_ready():
+            return False, [], "BigQuery credentials are not configured"
         try:
             job_config = (
                 bigquery.QueryJobConfig(query_parameters=params) if params else None
@@ -96,6 +108,8 @@ class BigQueryHelper:
             job's num_dml_affected_rows (0 when unreported); 0 on failure.
             Never raises — failures are returned in the tuple.
         """
+        if not self.credentials_ready():
+            return False, 0, "BigQuery credentials are not configured"
         try:
             job_config = (
                 bigquery.QueryJobConfig(query_parameters=params) if params else None

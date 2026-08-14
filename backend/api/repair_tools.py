@@ -196,11 +196,12 @@ def _pick_replacement(
       unfiltered pool with a warning — a repaired-if-identical flight beats
       a crashed repair (the demo pins a pair with multiple itineraries).
 
-    Among the survivors, return the option whose PT arrival is closest to
-    the original flight's arrival time, protecting downstream hotel/ground
-    timing. With no original arrival known, take the first option (response
-    order — cheapest/earliest by the parser's contract). Assumes a
-    non-empty list (the caller guarantees it via the mock fallback)."""
+    Among the survivors, the delay-risk model ranks remaining options with
+    arrival closeness to the original as the arrival feature (so hotel and
+    ground timing stay protected) and lowest disruption risk as the
+    default priority. With no original arrival known, ranking still runs
+    with earliest-arrival as the arrival feature. Assumes a non-empty list
+    (the caller guarantees it via the mock fallback)."""
     candidates = options
     if cancelled_flight is not None:
         survivors = [
@@ -222,16 +223,15 @@ def _pick_replacement(
             "flight repair: every candidate matches the cancelled flight; "
             "falling back to the unfiltered pool"
         )
-    if not original_arrive_time:
-        return candidates[0]
-    target = _minutes_of_day(original_arrive_time)
-    # Circular minute-of-day distance: the original arrival carries a PT
-    # time-of-day but no date, so compare on the 24-hour clock (23:50 vs
-    # 00:10 is 20 minutes apart, not 1420) — the honest closest-arrival read.
-    return min(
+    from ml.ranking import TravelerPrefs, rank_options
+    ranked = rank_options(
         candidates,
-        key=lambda o: _clock_distance(_minutes_of_day(o.arrive_time), target),
+        TravelerPrefs(priority="risk"),
+        arrive_target=original_arrive_time,
     )
+    if ranked:
+        return ranked[0].option
+    return candidates[0]
 
 
 def _minutes_of_day(hhmm: str) -> int:

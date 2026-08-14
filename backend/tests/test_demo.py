@@ -148,7 +148,7 @@ def test_book_places_call_before_seeding_and_returns_exact_shape(monkeypatch):
     }
     # The phone rings while the screen changes, not after: call first.
     assert [e[0] for e in events] == ["place_call", "seed"]
-    assert events[1][1:] == ("demo-traveler", "The Complete Trip — hackathon demo")
+    assert events[1][1:] == ("demo-traveler", "The Complete Trip")
     assert FAKE_CALLEE not in resp.text
     assert FAKE_API_KEY not in resp.text
 
@@ -238,14 +238,21 @@ def _wire_disrupt(monkeypatch, events, trip_id="t-7"):
     return items
 
 
-def test_disrupt_missing_env_is_503_naming_the_var(monkeypatch):
+def test_disrupt_missing_env_cascades_on_screen(monkeypatch):
     for missing in ("VOCAL_BRIDGE_API_KEY", "VOCAL_BRIDGE_CALLER_AGENT_ID",
                     "VOCAL_BRIDGE_CALLEE_PHONE"):
         _set_env(monkeypatch)
         monkeypatch.delenv(missing)
-        resp = client.post("/v1/demo/disrupt", json={"trip_id": "t-1"})
-        assert resp.status_code == 503
-        assert missing in resp.json()["error"]
+        events = []
+        _wire_disrupt(monkeypatch, events)
+        resp = client.post("/v1/demo/disrupt", json={"trip_id": "t-7"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["call_status"] == "skipped"
+        assert body["consent"] == "screen_only"
+        assert missing in body["error"]
+        assert ("break", "t-7") in events
+        assert any(e[0] == "launch" for e in events)
 
 
 def test_disrupt_calls_breaks_and_awaits_consent_without_repairs(monkeypatch):
@@ -360,7 +367,7 @@ def test_disrupt_404s_before_dialing_when_trip_cannot_break(monkeypatch):
     assert calls == []
 
 
-def test_disrupt_call_failure_is_502_and_breaks_nothing(monkeypatch):
+def test_disrupt_call_failure_still_cascades_on_screen(monkeypatch):
     _set_env(monkeypatch)
     events = []
     _wire_disrupt(monkeypatch, events, trip_id="t-1")
@@ -368,15 +375,15 @@ def test_disrupt_call_failure_is_502_and_breaks_nothing(monkeypatch):
         vb_cli, "place_call",
         lambda purpose, name=None: (False, None, f"could not dial {FAKE_CALLEE}"),
     )
-    broke = []
-    monkeypatch.setattr(
-        demo_module, "break_trip_flight", lambda trip_id: broke.append(1)
-    )
 
     resp = client.post("/v1/demo/disrupt", json={"trip_id": "t-1"})
-    assert resp.status_code == 502
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["call_status"] == "skipped"
+    assert body["consent"] == "screen_only"
     assert FAKE_CALLEE not in resp.text
-    assert broke == []
+    assert ("break", "t-1") in events
+    assert any(e[0] == "launch" for e in events)
 
 
 def test_disrupt_requires_trip_id(monkeypatch):

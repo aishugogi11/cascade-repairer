@@ -482,13 +482,17 @@
     }
     card.hidden = false;
     const rows = [];
-    rows.push(`Original travel time: <b>${summary.original_travel_min} min</b>`);
+    const perDay = summary.travel_is_typical_day ? " / day" : "";
+    rows.push(`Original travel time: <b>${summary.original_travel_min} min${perDay}</b>`);
     if (summary.optimized_travel_min != null) {
-      rows.push(`Optimized: <b>${summary.optimized_travel_min} min</b>`);
+      rows.push(`Optimized: <b>${summary.optimized_travel_min} min${perDay}</b>`);
     }
     if (summary.show_time_saved && summary.potential_time_saved_min) {
-      rows.push(`Potential time saved: <b>${summary.potential_time_saved_min} min</b>`);
+      rows.push(`Potential time saved: <b>${summary.potential_time_saved_min} min${perDay}</b>`);
     }
+    (summary.travel_by_day || []).forEach((d) => {
+      rows.push(`${d.label || ("Day " + ((d.day || 0) + 1))}: <b>${d.original_min} → ${d.optimized_min} min</b>`);
+    });
     if (summary.show_cost_saved && summary.potential_cost_saved) {
       rows.push(`Potential savings: <b>~$${Math.round(summary.potential_cost_saved)}</b> (estimated)`);
     }

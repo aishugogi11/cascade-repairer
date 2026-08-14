@@ -245,4 +245,7 @@ ios/**/build/
 *.xcuserstate
 CORPUS_*
 # PR evidence drafts (used by git_pull_dev.sh as the PR description)
-PR_BODY.md
+backend/.data/
+# Optimize My Trip UI lives under assets/build/ — do not ignore it
+!backend/api/assets/build/
+!backend/api/assets/build/**

@@ -275,3 +275,78 @@ def build_from_upload(
     for item in items:
         item.trip_id = filled.trip_id
     return filled, items
+
+
+def _flights_from_stops(
+    stops: List[Dict[str, Any]], day0: date
+) -> List[Dict[str, Any]]:
+    """Recover Sabre-shaped flight rows from Optimize stop titles.
+
+    Optimize parses "08:00 Flight UA 215 SFO-JFK" as a stop title. Without
+    this, Cascade demotes it to a ground card titled "Flight" and loses
+    the SFO → New York route on the trip header.
+    """
+    lines = []
+    for stop in stops:
+        clock = (stop.get("start_time") or "").strip()
+        label = (stop.get("title") or stop.get("location") or "").strip()
+        if label:
+            lines.append(f"{clock} {label}".strip())
+    flights = _parse_flights("\n".join(lines), day0)
+    if not flights:
+        return []
+    for stop in stops:
+        clock = (stop.get("start_time") or "").strip()
+        label = (stop.get("title") or stop.get("location") or "").strip()
+        if not clock or not label:
+            continue
+        match = _FLIGHT.search(label)
+        route = _ROUTE.search(label)
+        if not match or not route:
+            continue
+        airline, number = match.group(1), int(match.group(2))
+        origin, dest = route.group(1), route.group(2)
+        for flight in flights:
+            if (
+                flight["airline"] == airline
+                and flight["flight_number"] == number
+                and flight["origin"] == origin
+                and flight["destination"] == dest
+            ):
+                try:
+                    offset = int(stop.get("day") or 0)
+                    flight["start"] = _ts(day0, clock, offset)
+                    flight["end"] = (
+                        flight["start"]
+                        + timedelta(hours=_duration_hours("flight"))
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+    return flights
+
+
+def build_from_stops(
+    *,
+    user_id: str,
+    title: str,
+    stops: List[Dict[str, Any]],
+    trip_id: str = "",
+    base: Optional[date] = None,
+) -> Optional[Tuple[Trip, List[ItineraryItem]]]:
+    """Project already-parsed Optimize My Trip stops onto a Cascade trip."""
+    if len(stops or []) < 2:
+        return None
+    trip = Trip(user_id=user_id, title=title, status="booked")
+    if trip_id:
+        trip.trip_id = trip_id
+    day0 = base or date.today()
+    flights = _flights_from_stops(list(stops), day0)
+    items = stops_to_items(trip.trip_id, list(stops), flights, day0)
+    if not items:
+        return None
+    filled = _trip_fields(items, title, user_id)
+    filled.trip_id = trip.trip_id
+    for item in items:
+        item.trip_id = filled.trip_id
+    return filled, items

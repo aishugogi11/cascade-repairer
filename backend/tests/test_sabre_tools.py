@@ -21,6 +21,8 @@ app.include_router(sabre_tools, prefix="/v1/sabre_tools")
 @pytest.fixture
 def bq(monkeypatch):
     """Mock the helper's query primitives on the shared singleton."""
+    from api import memory_trips
+    memory_trips.clear()
     dml = MagicMock(return_value=(True, 1, None))
     select = MagicMock(return_value=(True, [], None))
     monkeypatch.setattr(bq_helper, "run_dml", dml)
@@ -214,6 +216,89 @@ def test_latest_trip_id_failed_select_is_500(bq):
         resp = client.get("/v1/sabre_tools/latest_trip_id")
     assert resp.status_code == 500
     assert "connection refused" in resp.json()["detail"]
+
+
+def test_latest_trip_id_without_credentials_is_404(monkeypatch, bq):
+    from api.helpers.bigquery_helper import bq_helper
+    monkeypatch.setattr(bq_helper, "credentials_ready", lambda: False)
+    with TestClient(app) as client:
+        resp = client.get("/v1/sabre_tools/latest_trip_id")
+    assert resp.status_code == 404
+
+
+def test_pending_options_empty_when_no_search(bq):
+    from api import concierge
+    concierge._LATEST_SEARCH = None
+    with TestClient(app) as client:
+        resp = client.get("/v1/sabre_tools/pending_options")
+    assert resp.status_code == 200
+    assert resp.json()["pending_options"] is None
+
+
+def test_select_date_without_a_search_is_speakable(bq):
+    from api import concierge
+    concierge._LATEST_SEARCH = None
+    with TestClient(app) as client:
+        resp = client.post(
+            "/v1/sabre_tools/select_date", json={"depart_date": "2026-07-18"}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "destination" in body["spoken"].lower()
+    assert body["pending_options"] is None
+
+
+def test_book_option_without_search_is_speakable(bq):
+    from api import concierge
+    concierge._LATEST_SEARCH = None
+    concierge._SESSION_FLIGHT_OPTIONS.clear()
+    with TestClient(app) as client:
+        resp = client.post(
+            "/v1/sabre_tools/book_option", json={"option_number": 1}
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "options" in body["spoken"].lower()
+    assert body["booking"] is None
+
+
+def test_book_option_books_the_latest_search(bq):
+    import asyncio
+    from api import concierge, memory_trips
+
+    memory_trips.clear()
+    concierge._LATEST_SEARCH = None
+    concierge._LATEST_BOOKING = None
+    concierge._SESSION_FLIGHT_OPTIONS.clear()
+    concierge._SESSION_TRIPS.clear()
+    asyncio.run(
+        concierge.search_flights_impl("cascade-page", "MSP", "SFO", "2026-08-20")
+    )
+    seeded = memory_trips.seed("whatsapp-demo", "PDF trip")
+    view = memory_trips.get(seeded["trip_id"])
+    concierge._SESSION_TRIPS["cascade-page"] = concierge.TripContext(
+        trip=view.trip, items=list(view.items), summary="pdf",
+    )
+    with TestClient(app) as client:
+        resp = client.post(
+            "/v1/sabre_tools/book_option",
+            json={"option_number": 1, "trip_id": seeded["trip_id"]},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["booking"]["trip_id"] == seeded["trip_id"]
+    assert body["pending_options"] is None
+    memory_trips.clear()
+
+
+def test_latest_booking_404_when_none(bq):
+    from api import concierge
+    concierge._LATEST_BOOKING = None
+    with TestClient(app) as client:
+        resp = client.get("/v1/sabre_tools/latest_booking")
+    assert resp.status_code == 404
 
 
 # --- main.py wiring -------------------------------------------------------------

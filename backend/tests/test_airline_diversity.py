@@ -230,7 +230,7 @@ def test_concierge_request_carries_limit_15_and_shapes_default_stays_10(
     captured = {}
 
     async def capture_search(request):
-        captured["request"] = request
+        captured.setdefault("request", request)
         return shapes.InstaFlightsResponse(**_FIVE_ITINERARY_RESPONSE)
 
     monkeypatch.setattr(
@@ -254,8 +254,8 @@ def test_search_stores_diverse_menu_and_booking_resolves_new_numbers(
     monkeypatch,
 ):
     """Against the multi-carrier mock: the stored menu is one option per
-    airline in fare order (UA $155, AA $187.60, DL $242) and book_flight
-    resolves 'option two' against the renumbered list."""
+    airline, ML-ranked (not fare order), and book_flight resolves 'option
+    two' against the renumbered list."""
     session = "phase41-flow"
     created = {}
     monkeypatch.setattr(
@@ -289,21 +289,23 @@ def test_search_stores_diverse_menu_and_booking_resolves_new_numbers(
             concierge.search_flights_impl(session, "MSP", "SFO", _DAY)
         )
         menu = concierge._SESSION_FLIGHT_OPTIONS[session]
-        assert [o.airline for o in menu] == ["UA", "AA", "DL"]
-        assert [o.option_number for o in menu] == [1, 2, 3]
-        assert [o.price for o in menu] == [155.0, 187.6, 242.0]
-        assert "Option one on United" in spoken
-        assert "Option two on American" in spoken
-        assert "Option three on Delta" in spoken
+        airlines = {o.airline for o in menu}
+        assert airlines >= {"UA", "AA", "DL"}
+        assert [o.option_number for o in menu] == list(range(1, len(menu) + 1))
+        assert {o.price for o in menu} >= {155.0, 187.6, 242.0}
+        assert "Option one on" in spoken
+        assert "I recommend option one" in spoken
         assert concierge._LATEST_SEARCH is not None
         assert concierge._LATEST_SEARCH.options == menu
+        second = menu[1]
 
         result = asyncio.run(concierge.book_flight_impl(session, 2))
         assert "booked" in result
         item = created["item"]
-        assert item.details["airline"] == "AA"
-        assert item.details["airline_name"] == "American"
+        assert item.details["airline"] == second.airline
+        assert item.details["airline_name"] == second.airline_name
     finally:
         concierge._SESSION_FLIGHT_OPTIONS.pop(session, None)
         concierge._LATEST_SEARCH = None
         concierge._SESSION_TRIPS.pop(session, None)
+        concierge._SESSION_PREFS.pop(session, None)

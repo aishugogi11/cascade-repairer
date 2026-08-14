@@ -1,0 +1,109 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 3121 >>
+stream
+0.145 0.388 0.922 rg
+0.0 752.0 612.0 40.0 re f
+1.000 1.000 1.000 rg
+BT /F2 11 Tf 1 0 0 1 48.0 766.0 Tm (CASCADE) Tj ET
+BT /F1 10 Tf 1 0 0 1 400.0 766.0 Tm (Sample business itinerary) Tj ET
+0.059 0.090 0.165 rg
+BT /F2 22 Tf 1 0 0 1 48.0 708.0 Tm (SFO to New York Business Trip) Tj ET
+0.278 0.333 0.412 rg
+BT /F1 11 Tf 1 0 0 1 48.0 686.0 Tm (Upload this PDF to Optimize My Trip or Cascade) Tj ET
+0.886 0.910 0.941 RG
+1 w 48.0 672.0 m 564.0 672.0 l S
+0.580 0.639 0.722 rg
+BT /F2 8 Tf 1 0 0 1 48.0 652.0 Tm (TRAVELER) Tj ET
+BT /F2 8 Tf 1 0 0 1 220.0 652.0 Tm (DATES) Tj ET
+BT /F2 8 Tf 1 0 0 1 400.0 652.0 Tm (ROUTE) Tj ET
+0.059 0.090 0.165 rg
+BT /F2 12 Tf 1 0 0 1 48.0 636.0 Tm (Alex Morgan) Tj ET
+BT /F1 12 Tf 1 0 0 1 220.0 636.0 Tm (September 14-16, 2026) Tj ET
+BT /F1 12 Tf 1 0 0 1 400.0 636.0 Tm (SFO to JFK) Tj ET
+0.937 0.965 1.000 rg
+48.0 548.0 516.0 70.0 re f
+0.145 0.388 0.922 rg
+BT /F2 8 Tf 1 0 0 1 60.0 598.0 Tm (TRIP OVERVIEW) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 10 Tf 1 0 0 1 60.0 580.0 Tm (Outbound UA 215 from San Francisco, Midtown hotel, a Financial District) Tj ET
+BT /F1 10 Tf 1 0 0 1 60.0 566.0 Tm (client meeting, and Manhattan sightseeing. First in-city hop is the JFK) Tj ET
+BT /F1 10 Tf 1 0 0 1 60.0 552.0 Tm (airport transfer to Midtown.) Tj ET
+0.145 0.388 0.922 rg
+BT /F2 13 Tf 1 0 0 1 48.0 520.0 Tm (Monday, September 14) Tj ET
+0.886 0.910 0.941 RG
+0.7 w 48.0 512.0 m 564.0 512.0 l S
+0.973 0.980 0.988 rg
+48.0 486.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 492.0 Tm (08:00 Flight UA 215 SFO-JFK) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 468.0 Tm (16:30 Airport transfer - JFK) Tj ET
+0.973 0.980 0.988 rg
+48.0 438.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 444.0 Tm (18:00 Hotel check-in - Midtown) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 420.0 Tm (19:30 Dinner - Rockefeller Center) Tj ET
+0.145 0.388 0.922 rg
+BT /F2 13 Tf 1 0 0 1 48.0 386.0 Tm (Tuesday, September 15) Tj ET
+0.886 0.910 0.941 RG
+0.7 w 48.0 378.0 m 564.0 378.0 l S
+0.973 0.980 0.988 rg
+48.0 352.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 358.0 Tm (09:00 Client meeting - Financial District) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 334.0 Tm (12:00 Rockefeller Center - Midtown) Tj ET
+0.973 0.980 0.988 rg
+48.0 304.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 310.0 Tm (15:00 Lunch - SoHo) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 286.0 Tm (17:00 Central Park) Tj ET
+0.973 0.980 0.988 rg
+48.0 256.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 262.0 Tm (19:00 Dinner - Midtown) Tj ET
+0.145 0.388 0.922 rg
+BT /F2 13 Tf 1 0 0 1 48.0 228.0 Tm (Wednesday, September 16) Tj ET
+0.886 0.910 0.941 RG
+0.7 w 48.0 220.0 m 564.0 220.0 l S
+0.973 0.980 0.988 rg
+48.0 194.0 516.0 22.0 re f
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 200.0 Tm (09:00 Hotel checkout - Midtown) Tj ET
+0.059 0.090 0.165 rg
+BT /F1 11 Tf 1 0 0 1 60.0 176.0 Tm (11:00 Airport transfer - JFK) Tj ET
+0.580 0.639 0.722 rg
+BT /F1 8 Tf 1 0 0 1 48.0 36.0 Tm (Cascade  |  NYC business sample  |  September 14-16, 2026) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000185 00000 n 
+0000000260 00000 n 
+0000000396 00000 n 
+trailer << /Size 7 /Root 1 0 R >>
+startxref
+3569
+%%EOF

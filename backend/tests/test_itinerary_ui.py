@@ -37,6 +37,8 @@ def item_rows(*types_and_statuses):
 @pytest.fixture
 def bq(monkeypatch):
     """Mock the helper's query primitives on the shared singleton."""
+    from api import memory_trips
+    memory_trips.clear()
     dml = MagicMock(return_value=(True, 1, None))
     select = MagicMock(return_value=(True, [], None))
     monkeypatch.setattr(bq_helper, "run_dml", dml)

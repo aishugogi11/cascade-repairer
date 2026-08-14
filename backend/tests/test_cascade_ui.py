@@ -182,6 +182,7 @@ def test_page_center_column_is_the_live_voice_orb():
     assert "latencyMs" in text  # per-turn round-trip readout
     # The displayed trip pins the voice session (the Phase 19 contract).
     assert "bridge.tripId()" in text
+    assert "vb_cascade_trip_id" in text
     # The conversation feed labels the two speakers.
     assert "Traveler" in text and "Cascade" in text
 
@@ -221,21 +222,47 @@ def test_page_renders_the_consent_treatments():
     assert "repairs are starting now" not in text
 
 
+def test_page_renames_airport_transfer_on_timeline():
+    """Airport transfer titles show as 'JFK Airport' — the word 'transfer'
+    is stripped from both the timeline title and the location subtitle."""
+    text = page_text()
+    assert "function friendlyTitle" in text
+    assert "function itemTitle" in text
+    assert "function itemWhere" in text
+    assert "itemWhere(item)" in text
+    assert "airport\\s+transfer" in text
+    assert 'replace(/\\btransfer\\b/gi' in text or "\\btransfer\\b" in text
+    assert "itemTitle(item, kind)" in text
+
+
+def test_page_timeline_starts_from_flight_origin():
+    """SFO→JFK trips pin the timeline start to SFO Airport even when the
+    trip header's origin was dropped or wrong."""
+    text = page_text()
+    assert "function tripStartAirport" in text
+    assert "function airportLabel" in text
+    assert "Where the trip starts" in text
+    assert "airportLabel(start)" in text
+    assert "SFO" in text or "tripStartAirport(trip, items)" in text
+
+
 def test_page_has_the_new_trip_clean_slate_control():
     """Phase 23 QA finding (the Phase 18 trap, rebuilt client-side): with a
     trip on screen the orb pins every fresh session to it and guided
     booking is unreachable. The New trip control clears the display, ends
     the live voice session (server pins are per session), drops the
-    ?trip_id= pin, and keeps latestSeen so only a newly *booked* trip
-    re-adopts."""
+    ?trip_id= pin, and baselines both latest-trip feeds so only a newly
+    *booked* trip re-adopts."""
     text = page_text()
     assert 'id="btn-new-trip"' in text
     assert "function startNewTrip" in text
     assert "window.cascadeVoiceDisconnect" in text  # both sides of the hook
     assert 'searchParams.delete("trip_id")' in text
-    assert "state.latestSeen is\n  // deliberately kept" in text.replace(
-        "\r\n", "\n"
-    ) or "latestSeen is" in text
+    assert "state.latestSeen = clearedTripId" in text
+    assert "state.latestBookingSeen = clearedTripId" in text
+    assert 'el("timeline").replaceChildren()' in text
+    assert 'el("traveler-card-name").textContent = "Waiting for a trip"' in text
+    assert "state.tripId !== polledTripId" in text
     assert "tap the orb" in text  # the operator is told to reconnect
 
 
@@ -354,6 +381,8 @@ def test_page_has_optimization_cards():
     assert "Keep current" in text
     assert "decideOptimization" in text
     assert "/optimize/" in text
+    assert 'id="saily-card"' in text
+    assert "Get Saily eSIM" in text
     assert "transport_options" in text
     assert "cheapest" in text
     assert "best_value" in text

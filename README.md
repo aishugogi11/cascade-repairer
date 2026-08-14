@@ -20,7 +20,8 @@ The stack boots fine with placeholder values — you only need real keys for the
 
 | Variable | Needed for |
 |----------|------------|
-| `OPENAI_API_KEY` | Agent endpoints (`/v1/hello/agents*`), cascaded pipeline (`/v1/cascade_demo`) |
+| `OPENAI_API_KEY` | Agent endpoints (`/v1/hello/agents*`), cascaded pipeline (`/v1/cascade_demo`), Whisper STT / TTS |
+| `FEATHERLESS_API_KEY` | Spoken text LLM (Concierge, Cascade, consent). Unset → OpenAI `gpt-5.4-mini`. STT/TTS stay on OpenAI. |
 | `VOCAL_BRIDGE_API_KEY`, `VOCAL_BRIDGE_AGENT_ID` | Voice smoke-test page (`/v1/vb_test/`) |
 | `VOCAL_BRIDGE_CALLER_AGENT_ID`, `VOCAL_BRIDGE_CALLEE_PHONE` | Outbound-call tool (`/v1/outbound_call`) |
 
@@ -62,6 +63,7 @@ Tests are hermetic: no GCP credentials or `OPENAI_API_KEY` required. The agent e
 | Path | What it is |
 |------|------------|
 | `backend/` | FastAPI app (Docker): OpenAI Agents SDK endpoints, BigQuery/GCS helpers, MCP servers, devops + promotion scripts, tests |
+| `backend/ml/` | Delay-risk training + inference (separate from request path). Artifact in `backend/ml/artifacts/` |
 | `jupyter_notebook/` | Dockerized JupyterLab with the reworked DeepLearning.AI course notebooks (L2–L5), glossary, and transcript — the reference source for all voice code |
 | `specs/` | Project constitution (mission, tech stack, roadmap) and per-feature specs — spec-driven development lives here |
 | `skills/` | Agent skills (source of truth; `make copy-skills` mirrors them into `.claude/skills/` and `.agents/skills/`) |
@@ -75,8 +77,113 @@ Tests are hermetic: no GCP credentials or `OPENAI_API_KEY` required. The agent e
 - **Voice:** Vocal Bridge web client (WebRTC) in front of three course architectures — cascaded (STT → LLM → TTS), real-time voice-to-voice, and the hybrid "Concierge" pattern (demo target) — ported from the L2–L5 notebooks as the roadmap progresses.
 - **Data:** BigQuery (dataset `vocal_bridge`) for trips/itineraries/conversations/evals, GCS for audio artifacts — both via config-driven helpers in `backend/api/helpers/`.
 - **Travel APIs:** Sabre (hackathon requirement) — mocked docs-accurate first, real credentials swapped in at the event.
+- **ML:** scikit-learn logistic regression predicts P(arrival delay ≥ 15 min) for each Sabre option; a preference ranker mixes that risk with price, arrival, stops, and duration.
 
 Details and decisions: [`specs/tech-stack.md`](specs/tech-stack.md).
+
+## Problem
+
+Travel disruptions force travelers to search across fragmented sources and decide under stress. A cancelled flight is not just a new ticket — it is a ranking problem: which alternative actually gets you there with the least chance of breaking again?
+
+## Solution
+
+An ML-powered conversational travel recovery agent on top of Cascade Repairer. Vocal Bridge is the voice. Sabre InstaFlights is the inventory. A trained delay-risk model scores every alternative. A preference layer reranks when you say "price matters more" or "I need to arrive before 9."
+
+## Machine Learning
+
+**What it predicts.** Probability a flight arrives 15+ minutes late (the BTS On-Time definition). Output example: `predicted_delay_risk = 0.18`.
+
+**Data.** Training uses a BTS-calibrated synthetic On-Time set (`backend/ml/data.py`): published national delay rate (~18%), higher evening banks, connections, congested hubs, and carrier differences. Optional `--csv` ingests a real labeled file with the same columns. CI never downloads a giant BTS dump.
+
+**Features.** Departure/arrival hour, day of week, month, stops, scheduled duration, connection flag, evening/early flags, origin/destination hub pressure, airline.
+
+**Model.** Logistic regression in a sklearn pipeline (median impute + scale + one-hot airline). Chosen because it trains in seconds, coefficients are readable in a demo, and it does not need a GPU.
+
+**Training.** Separate from serving:
+
+```bash
+docker compose exec backend python -m ml.train
+```
+
+Writes `backend/ml/artifacts/delay_risk.joblib` and `metrics.json`. Requests never retrain.
+
+**Evaluation.** Hold-out on 2,400 flights from the 12,000-row set:
+
+| Metric | Value |
+|--------|-------|
+| ROC-AUC | 0.76 |
+| Accuracy | 0.69 |
+| Precision | 0.44 |
+| Recall | 0.69 |
+| F1 | 0.54 |
+| Delay rate in test set | 26% |
+
+Numbers also live in `backend/ml/artifacts/metrics.json` and `GET /v1/ml/metrics`. The cascade page shows ROC-AUC under Available flights.
+
+**Inference.** `ml.inference.predict_delay_risk` loads the artifact once per process. Missing artifact → documented heuristic fallback so a voice turn cannot die.
+
+### Optimize My Trip — action-selection model
+
+Most travel AI generates itineraries. **Cascade starts with the itinerary you already have.** Upload a PDF, screenshot, or pasted schedule at [http://localhost:1019/v1/build/](http://localhost:1019/v1/build/).
+
+Google Maps (or labeled demo geometry if no key) answers *what routes exist*. A trained forest answers *which action to take* (change pickup, rideshare provider, mode, leave earlier, reorder, …). The optimizer enforces hard constraints. Voice extracts preferences and explains — it does not pick the winner.
+
+**What it predicts.** `action_utility` for (current hop state + candidate action). The loop executes the highest-scoring feasible action, then re-observes.
+
+**Data.** Synthetic urban hops with a documented data-generating process (`backend/ml/transport/data.py` + `policy.py`). This is **not** real labeled ride-quality or Uber/Lyft data. Simulated rideshare quotes are tagged `demo_simulated` and prices are never shown as live. `GOOGLE_MAPS_API_KEY` is optional; without it, routes are `demo_geometry`.
+
+**Training.**
+
+```bash
+docker compose exec backend python -m ml.transport.train
+docker compose exec backend python -m ml.transport.policy_train
+```
+
+Writes quality + action-policy artifacts under `backend/ml/transport/artifacts/`. Requests never retrain.
+
+**Quality model hold-out (2,400 hops from 12,000):** see `GET /v1/ml/transport` / `metrics.json`.
+
+**Action model:** see `GET /v1/ml/transport/policy` / `policy_metrics.json` (action accuracy vs a rules baseline and linear regression). Numbers are from that training run — never hardcoded in the UI.
+
+## AI Agent
+
+Vocal Bridge STT/TTS delegates every substantive turn to `/v1/web_call/query` (Concierge). The agent:
+
+1. Extracts origin, destination, date, and constraints from speech.
+2. Calls `search_flights` (Sabre InstaFlights).
+3. The tool scores each itinerary with the delay-risk model, then ranks with current traveler prefs (default: lowest disruption risk).
+4. Speaks the recommendation **and the delay percent from the model** — it is instructed not to invent percentages.
+5. On "I'd rather pay less" / "avoid connections" / "arrive before 9", calls `set_recovery_preferences` and reranks the **same** stored options. No second search.
+6. Auto-repair (`fix_trip`) also uses the model: remaining candidates are ranked by low delay risk with arrival closeness to the cancelled flight.
+
+The LLM does not decide which flight is best. The model + ranker do. The LLM explains that output.
+
+## Impact
+
+- Less tab-switching during a cancellation.
+- Delay risk is visible, not vibes.
+- Preferences update the ranking live, so "cheaper" and "must land before 9" are different recommended flights.
+- The screen shows predicted disruption risk, match score, and why — the same facts the agent speaks.
+
+## Demo script (ML recovery)
+
+On [http://localhost:1019/v1/cascade/](http://localhost:1019/v1/cascade/), tap the orb:
+
+1. "My flight was canceled. I need to get from JFK to LAX tomorrow morning."
+2. Agent searches, model scores, cards appear with **Recommended** + disruption risk.
+3. "Actually, price matters more." → rank flips toward the cheaper (often connecting) option; the agent explains the higher delay risk.
+4. "Never mind — I really need to arrive before 9 AM." → JetBlue 8:50 AM (mock) or the earliest live option that makes the window.
+
+Then book by saying "option one" if you want the rest of the Cascade Repairer beat.
+
+## Demo script (Optimize My Trip)
+
+On [http://localhost:1019/v1/build/](http://localhost:1019/v1/build/):
+
+1. Click **Try sample San Francisco weekend** (Alex Morgan’s Chase Center itinerary) or upload that PDF.
+2. Analysis stages complete from real parse → maps → rideshare → ML action loop. Trip Optimized shows calculated original vs optimized travel minutes (cost is hidden unless a live price API exists).
+3. Say **optimize my trip for time**, **what's the best rideshare?**, **why did you choose Lyft?**, or **undo that change**.
+4. **Model Intelligence** shows the real action-model hold-out accuracy / MAE and Rules vs Linear vs Random Forest from `policy_metrics.json`.
 
 ## Course integration patterns
 

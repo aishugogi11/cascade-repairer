@@ -52,7 +52,7 @@ def landing_page():
       <li>Concurrency spike (Phase 5): POST /v1/concurrency_spike/talk_while_tool_runs and POST /v1/concurrency_spike/cascade (see /docs)</li>
       <li>Sabre tools (Phase 6): POST /v1/sabre_tools/seed_trip, POST /v1/disruption/break_flight, POST /v1/sabre_tools/repair_trip (see /docs)</li>
     </ul>
-    <h2>Course lesson demos (Phase 7)</h2>
+    <h2>Course lessons (Phase 7)</h2>
     <ul>
       <li>L2 — Voice in your App: <a href="/v1/vb_test/">live web-client call</a> (token mint + managed widget)</li>
       <li>L2/L3 — Cascaded architecture: <a href="/docs#/cascade_demo">/v1/cascade_demo</a> (STT, LLM, TTS stages + full /converse; /llm is the L3 query-server pattern)</li>

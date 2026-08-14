@@ -29,7 +29,7 @@ from api.sabre.airport_tz import airport_zone
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
 # Speakable option numbers — spoken copy never uses digits-as-labels.
-_NUMBER_WORDS = {1: "one", 2: "two", 3: "three"}
+_NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 
 _MAX_SPOKEN_OPTIONS = 3
 

@@ -81,7 +81,7 @@ struct AboutSheetView: View {
                     NotificationCenter.default.post(name: .accessCodeRejected, object: nil)
                 }
             } message: {
-                Text("You'll need to enter the code from your demo invitation again.")
+                Text("You'll need to enter the code from your invitation again.")
             }
             .navigationTitle("About")
             .navigationBarTitleDisplayMode(.inline)

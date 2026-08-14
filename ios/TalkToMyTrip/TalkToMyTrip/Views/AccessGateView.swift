@@ -25,7 +25,7 @@ struct AccessGateView: View {
             Text("Talk to My Trip")
                 .font(.title.bold())
 
-            Text("Enter the access code from your demo invitation")
+            Text("Enter the access code from your invitation")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

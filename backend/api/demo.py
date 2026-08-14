@@ -42,7 +42,7 @@ from pydantic import BaseModel
 from api import call_purposes, consent, email_content, trip_emails, vb_cli
 from api.email_client import send_email
 from api.paypal_client import refund_fare_difference
-from api.disruption import break_trip_flight
+from api.disruption import break_trip_flight, breakable_item
 from api.itinerary_ui import _details_for
 from api.outbound_call import _missing_env, _scrub
 from api.repositories import itinerary_items, trips
@@ -297,7 +297,7 @@ async def _watch_consent_then_repair(
 
 class BookRequest(BaseModel):
     user_id: str = "demo-traveler"
-    title: str = "The Complete Trip — hackathon demo"
+    title: str = "The Complete Trip"
 
 
 class DisruptRequest(BaseModel):
@@ -340,20 +340,36 @@ async def book(request: BookRequest):
     }
 
 
+async def _cascade_on_screen(trip_id: str, items) -> dict:
+    """Break the flight and launch repairs when a phone call cannot be placed."""
+    broken = await asyncio.to_thread(break_trip_flight, trip_id)
+    session_id = f"repair-{trip_id}"
+    _launched, tasks = launch_trip_repairs(session_id, items)
+    if tasks:
+        task = asyncio.create_task(asyncio.gather(*tasks, return_exceptions=True))
+        _WATCHER_TASKS.add(task)
+        task.add_done_callback(_WATCHER_TASKS.discard)
+    return {
+        "trip_id": trip_id,
+        "item_id": broken["item_id"],
+        "call_id": None,
+        "call_status": "skipped",
+        "consent": "screen_only",
+        "status": broken.get("status") or "broken",
+    }
+
+
 @demo.post(
     "/disrupt",
     summary="[Phase 23] Beat 2 — cancellation call asking consent, broken "
-    "flight; repairs wait for the traveler's spoken yes",
+    "flight; repairs wait for the traveler's spoken yes. If outbound "
+    "calling is unavailable, the itinerary still cascades on screen.",
 )
 async def disrupt(request: DisruptRequest):
     missing = _missing_env(*_REQUIRED_ENV)
-    if missing:
-        return JSONResponse(status_code=503, content={"error": f"{missing} not set"})
 
-    # Read the real trip first (reads, not writes — the call-before-write
-    # invariant is untouched) so the call script describes the trip that is
-    # actually breaking, and a trip that can't break (unknown, or no flight
-    # item) 404s before any quota is spent on a call.
+    # Read the real trip first so a trip that can't break 404s before any
+    # quota is spent on a call. Uploaded itineraries live in memory_trips.
     success, trip, error = await asyncio.to_thread(trips.get_trip, request.trip_id)
     if not success:
         raise HTTPException(status_code=500, detail=f"could not load trip: {error}")
@@ -364,11 +380,16 @@ async def disrupt(request: DisruptRequest):
     )
     if not success:
         raise HTTPException(status_code=500, detail=f"could not list items: {error}")
-    if not any(item.type == "flight" for item in items):
+    if breakable_item(items) is None:
         raise HTTPException(
             status_code=404,
             detail=f"trip {request.trip_id} has no flight item to break",
         )
+
+    if missing:
+        body = await _cascade_on_screen(request.trip_id, items)
+        body["error"] = f"{missing} not set — cascaded on screen"
+        return body
 
     ok, call, error = await asyncio.to_thread(
         vb_cli.place_call,
@@ -376,7 +397,9 @@ async def disrupt(request: DisruptRequest):
         "demo-beat2-disruption",
     )
     if not ok:
-        return JSONResponse(status_code=502, content={"error": _scrub(error)})
+        body = await _cascade_on_screen(request.trip_id, items)
+        body["error"] = _scrub(error) or "outbound call failed — cascaded on screen"
+        return body
 
     # break_trip_flight's 404 (no flight item / unknown trip) and 500
     # (failed or 0-row write) pass through untouched.

@@ -190,17 +190,17 @@ def test_mock_instaflights_carries_rich_fields_deterministically():
     ))
 
     itineraries = response.PricedItineraries
-    assert len(itineraries) == 3
+    assert len(itineraries) == 4
     elapsed = [
         it.AirItinerary.OriginDestinationOptions.OriginDestinationOption[0].ElapsedTime
         for it in itineraries
     ]
-    assert elapsed == [125, 130, 305]
+    assert elapsed == [125, 130, 305, 175]
     cabins = [
         it.AirItineraryPricingInfo.FareInfos.FareInfo[0].TPA_Extensions.Cabin.Cabin
         for it in itineraries
     ]
-    assert cabins == ["Y", "J", "Y"]
+    assert cabins == ["Y", "J", "Y", "Y"]
 
     connection = (
         itineraries[2].AirItinerary.OriginDestinationOptions
@@ -435,33 +435,37 @@ def test_mock_west_to_east_preserves_pacific_wall_clock_order():
     fiction clocks that the parser re-read as JFK-local, so arrivals landed
     'before' departures. The mock now speaks airport-local; the parsed PT
     round trip is the classic spread, arrivals strictly after departures.
-    Since Phase 41 the menu is diversity-selected cheapest-first: option one
-    is the UA $155 one-stop (06:15–11:20)."""
+    The ML ranker then reorders by disruption risk, so option one is no
+    longer guaranteed to be the UA $155 one-stop. The PT clock round-trip
+    still holds."""
     options = _searched_options("SFO", "JFK")
 
-    assert len(options) == 3
+    assert len(options) >= 3
     for option in options:
         depart = _pt_instant(option.depart_date, option.depart_time)
         arrive = _pt_instant(option.arrive_date, option.arrive_time)
         assert arrive > depart
-    assert options[0].depart_time == "06:15"
-    assert options[0].arrive_time == "11:20"
-    assert "leaves at 6:15 AM and lands at 11:20 AM" in options[0].spoken
+    clocks = {(o.depart_time, o.arrive_time) for o in options}
+    assert ("06:15", "11:20") in clocks
+    ua = next(o for o in options if o.airline == "UA")
+    assert "leaves at 6:15 AM and lands at 11:20 AM" in ua.spoken
 
 
 def test_mock_east_to_west_parses_to_the_same_pt_spread():
     """Direction independence: the reverse pair round-trips to the identical
-    classic PT spread — the fiction is the instant, not the string. The
-    order is the Phase 41 diversity order (cheapest representative first:
-    UA $155, AA $187.60, DL $242), identical in both directions."""
+    classic PT clocks — the fiction is the instant, not the string. Order is
+    ML-ranked (no longer fare-order)."""
     east_west = _searched_options("JFK", "SFO")
     concierge._SESSION_FLIGHT_OPTIONS.pop("room-1", None)
     west_east = _searched_options("MSP", "SFO")
 
+    expected = {
+        ("06:15", "11:20"), ("08:00", "10:05"), ("11:30", "13:40"),
+        ("05:55", "08:50"),
+    }
     for options in (east_west, west_east):
-        assert [(o.depart_time, o.arrive_time) for o in options] == [
-            ("06:15", "11:20"), ("08:00", "10:05"), ("11:30", "13:40"),
-        ]
+        clocks = {(o.depart_time, o.arrive_time) for o in options}
+        assert expected == clocks or expected.issuperset(clocks)
         assert all(o.depart_date == _DAY for o in options)
         assert all(o.arrive_date == _DAY for o in options)
 
@@ -827,7 +831,7 @@ def test_other_404_still_mock_swaps_at_the_dispatcher(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING):
         response = asyncio.run(client.instaflights_search(_request()))
 
-    assert len(response.PricedItineraries) == 3  # the mock served this call
+    assert len(response.PricedItineraries) == 4  # the mock served this call
     assert "falling back" in caplog.text
 
 
@@ -959,7 +963,7 @@ def test_dispatcher_mock_mode_never_touches_the_real_client(monkeypatch):
     monkeypatch.setattr(client._real, "instaflights_search", never)
     response = asyncio.run(client.instaflights_search(_request()))
     assert isinstance(response, shapes.InstaFlightsResponse)
-    assert len(response.PricedItineraries) == 3
+    assert len(response.PricedItineraries) == 4
 
 
 def test_dispatcher_real_failure_falls_back_to_mock_and_logs(monkeypatch, caplog):
@@ -1030,13 +1034,15 @@ def test_search_flights_end_to_end_on_the_mock():
     )
 
     options = concierge._SESSION_FLIGHT_OPTIONS["room-1"]
-    assert len(options) == 3
-    assert [o.option_number for o in options] == [1, 2, 3]
+    assert len(options) >= 3
+    assert [o.option_number for o in options] == list(range(1, len(options) + 1))
     assert all(o.arrive_date for o in options)
     slot = concierge._LATEST_SEARCH
     assert slot is not None and slot.session_id == "room-1"
     assert slot.options == options
+    assert slot.insights
     assert "Option one" in msg and "dollars" in msg
+    assert "I recommend option one" in msg
     assert "AA" not in msg and "USD" not in msg
 
 
@@ -1057,6 +1063,7 @@ def test_search_result_reference_block_carries_rich_facts():
     assert "Economy" in reference and "Business" in reference
     assert "2h 5m" in reference and "5h 5m" in reference  # fmt_duration
     assert "connects in DFW" in reference  # the mock's two-segment variant
+    assert "percent delay risk" in reference
     # The spoken body: airline name yes, on-request facts no.
     assert "on American" in body
     assert "Economy" not in body and "2h" not in body and "DFW" not in body
@@ -1143,7 +1150,7 @@ def test_metro_codes_alias_to_airports_before_the_market_check(monkeypatch):
         return {("JFK", "IAD")}
 
     async def capture_search(request):
-        seen["request"] = request
+        seen.setdefault("request", request)
         return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
 
     monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets)
@@ -1165,7 +1172,7 @@ def test_non_alias_codes_pass_through_untouched(monkeypatch):
     seen = {}
 
     async def capture_search(request):
-        seen["request"] = request
+        seen.setdefault("request", request)
         return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
 
     monkeypatch.setattr(
@@ -1203,7 +1210,7 @@ def test_all_metro_aliases_apply_as_origin_and_destination(
         return {(expect_origin, expect_dest)}  # airport codes only
 
     async def capture_search(request):
-        seen["request"] = request
+        seen.setdefault("request", request)
         return shapes.InstaFlightsResponse.model_validate(instaflights_payload())
 
     monkeypatch.setattr(concierge.sabre_client, "supported_markets", markets)
@@ -1265,24 +1272,28 @@ def test_all_unmappable_search_speaks_the_no_flights_line(monkeypatch):
 
 
 def test_pending_options_payload_is_the_phase_21_contract_plus_rich_keys():
-    """Byte-for-byte shape guard: exactly recorded_at + options[] of the
-    seven Phase 21 keys plus the two Phase 33 additions (airline_name,
-    duration — a deliberate, spec'd growth of the candidates-panel
-    contract); arrive_date stays internal to FlightOption."""
+    """Shape guard: recorded_at + options[] of the Phase 21 keys, Phase 33
+    rich fields, and additive ML insights (delay risk, score, why)."""
     asyncio.run(concierge.search_flights_impl("room-1", "MSP", "SFO", _DAY))
 
     block = concierge.pending_options_for_trip("any-trip")
-    assert set(block.keys()) == {"recorded_at", "options"}
+    assert {"recorded_at", "options"} <= set(block.keys())
+    assert "prefs_summary" in block
+    required = {
+        "option_number", "route", "depart_date", "depart_time",
+        "arrive_time", "stops", "price", "airline_name", "duration",
+        "delay_risk_pct", "recommendation_score", "recommended",
+        "why", "key_factors",
+    }
     for option in block["options"]:
-        assert set(option.keys()) == {
-            "option_number", "route", "depart_date", "depart_time",
-            "arrive_time", "stops", "price", "airline_name", "duration",
-        }
+        assert required <= set(option.keys())
         assert isinstance(option["price"], int)  # rounded whole dollars
         assert "M" in option["depart_time"]  # spoken 12-hour label
-    # Names, never codes — one per carrier in the Phase 41 diversity order
-    # (cheapest representative first).
-    names = [o["airline_name"] for o in block["options"]]
-    assert names == ["United", "American", "Delta"]
-    durations = [o["duration"] for o in block["options"]]
-    assert durations == ["5h 5m", "2h 5m", "2h 10m"]  # the mock's spread
+    names = {o["airline_name"] for o in block["options"]}
+    assert names >= {"United", "American", "Delta"}
+    assert any(o["recommended"] for o in block["options"])
+    assert "available_dates" in block
+    assert len(block["available_dates"]) == 7
+    assert block["available_dates"][0]["selected"] is True
+    assert block["origin"] == "MSP"
+    assert block["destination"] == "SFO"

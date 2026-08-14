@@ -7,15 +7,16 @@ Hard constraints live here. The LLM does not pick the winner.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from ml.transport.maps import maps_source, route
-from ml.transport.parse import geocode, venue_type
+from ml.transport.maps import directions_url, maps_configured, maps_source, prefetch, route
+from ml.transport.parse import geocode, maps_query, venue_type
 from ml.transport.policy import action_row
-from ml.transport.policy_predict import policy_metrics, predict_action_utility
-from ml.transport.predict import model_metrics, predict_quality
-from ml.transport.rideshare import build_here_now, default_provider
+from ml.transport.policy_predict import policy_metrics, predict_action_utility_many
+from ml.transport.predict import model_metrics, predict_quality_many
+from ml.transport.rideshare import build_here_now, default_provider, first_rideshare_pair
 
 MODE_LABELS = {
     "uber": "Uber",
@@ -83,9 +84,23 @@ def _ranking_cost(mode: str, miles: float, drive_min: float, eta: float) -> floa
 
 
 def _clock_minutes(clock: str) -> int:
+    raw = (clock or "12:00").strip()
+    ampm = None
+    match = re.search(r"([ap])\.?m\.?\s*$", raw, flags=re.I)
+    if match:
+        ampm = match.group(1).lower()
+        raw = raw[: match.start()].strip()
     try:
-        h, m = (clock or "12:00").split(":")
-        return int(h) * 60 + int(m[:2])
+        if ":" in raw:
+            h_s, m_s = raw.split(":", 1)
+            hour, minute = int(h_s), int(m_s[:2])
+        else:
+            hour, minute = int(raw), 0
+        if ampm == "am":
+            hour = 0 if hour == 12 else hour
+        elif ampm == "pm":
+            hour = hour if hour == 12 else hour + 12
+        return hour * 60 + minute
     except (TypeError, ValueError):
         return 12 * 60
 
@@ -256,7 +271,7 @@ def generate_candidates(
         )
         cand["rideshare_source"] = default_provider().source
         cand["price_available"] = False
-        predicted = predict_quality(cand)
+    for cand, predicted in zip(cands, predict_quality_many(cands)):
         cand["ml_score"] = predicted["score"]
         cand["ml_source"] = predicted["source"]
         cand["ml_factors"] = predicted["factors"]
@@ -324,6 +339,108 @@ def _baseline(cands: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = None) ->
     if walk and float(walk["estimated_travel_time"]) <= limit + 0.5:
         return walk
     return by_mode.get("uber") or cands[0]
+
+
+def _best_feasible(cands: Sequence[Dict[str, Any]], prefs: Prefs) -> Dict[str, Any]:
+    for row in rank_candidates(cands, prefs):
+        if row.get("feasible"):
+            return row
+    return _baseline(cands, prefs)
+
+
+def _daily_minutes(
+    origin: Dict[str, Any],
+    dest: Dict[str, Any],
+    raw_min: float,
+) -> float:
+    """City-day transportation only. Skip flights; cap runaway Maps units."""
+    minutes = float(raw_min or 0)
+    miles = haversine_miles(_coords(origin), _coords(dest))
+    if minutes > 8 * 60 and miles < 80:
+        minutes = minutes / 60.0
+    origin_type = origin.get("venue_type") or venue_type(origin.get("title") or "")
+    dest_type = dest.get("venue_type") or venue_type(dest.get("title") or "")
+    airport = origin_type == "airport" or dest_type == "airport"
+    if miles > 50 and not airport:
+        return 0.0
+    cap = 150.0 if airport else 90.0
+    return min(minutes, cap)
+
+
+def _travel_min(cand: Dict[str, Any]) -> float:
+    return float(cand.get("estimated_travel_time") or 0)
+
+
+def _faster(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return _travel_min(a) + 0.4 < _travel_min(b)
+
+
+def _hop_maps_url(
+    origin: Dict[str, Any],
+    dest: Dict[str, Any],
+    *,
+    mode: str = "walking",
+) -> Optional[str]:
+    o, d = _coords(origin), _coords(dest)
+    if haversine_miles(o, d) < 0.05:
+        return None
+    return directions_url(
+        o, d, mode=mode,
+        origin_query=maps_query(origin.get("title") or origin.get("location") or ""),
+        dest_query=maps_query(dest.get("title") or dest.get("location") or ""),
+    )
+
+
+def _same_day_hop(origin: Dict[str, Any], dest: Dict[str, Any]) -> bool:
+    return int(origin.get("day") or 0) == int(dest.get("day") or 0)
+
+
+def _hop_choice(
+    stops: Sequence[Dict[str, Any]],
+    i: int,
+    prefs: Prefs,
+    *,
+    plan: Optional[Sequence[Dict[str, Any]]] = None,
+    use_baseline: bool = False,
+) -> Dict[str, Any]:
+    nxt = stops[i + 2] if i + 2 < len(stops) else None
+    cands = generate_candidates(stops[i], stops[i + 1], prev_stops=i, next_stop=nxt)
+    if use_baseline:
+        return _baseline(cands, prefs)
+    if plan is not None and i < len(plan) and plan[i]:
+        return plan[i]
+    return _best_feasible(cands, prefs)
+
+
+def _travel_by_day(
+    stops: Sequence[Dict[str, Any]],
+    prefs: Prefs,
+    *,
+    plan: Optional[Sequence[Dict[str, Any]]] = None,
+    use_baseline: bool = False,
+) -> Dict[int, float]:
+    """Minutes of same-day transportation, grouped by itinerary day.
+
+    Overnight gaps (hotel → next-morning breakfast) are not a ride.
+    """
+    days: Dict[int, float] = {}
+    for i in range(max(0, len(stops) - 1)):
+        if not _same_day_hop(stops[i], stops[i + 1]):
+            continue
+        hop = _hop_choice(stops, i, prefs, plan=plan, use_baseline=use_baseline)
+        day = int(stops[i].get("day") or 0)
+        days[day] = days.get(day, 0.0) + _travel_min(hop)
+    return days
+
+
+def _path_travel(
+    stops: Sequence[Dict[str, Any]],
+    prefs: Prefs,
+    *,
+    plan: Optional[Sequence[Dict[str, Any]]] = None,
+    use_baseline: bool = False,
+) -> float:
+    return float(sum(_travel_by_day(stops, prefs, plan=plan, use_baseline=use_baseline).values()))
 
 
 def _why(rec: Dict[str, Any], current: Dict[str, Any]) -> List[str]:
@@ -414,7 +531,7 @@ def _hop_actions(
     dest_anchored: bool = False,
 ) -> List[Dict[str, Any]]:
     by_mode = {c["transportation_mode"]: c for c in cands}
-    out: List[Dict[str, Any]] = []
+    drafts: List[Dict[str, Any]] = []
 
     def add(action: str, proposed: Dict[str, Any], **meta: Any) -> None:
         feat = action_row(
@@ -422,7 +539,6 @@ def _hop_actions(
             priority=prefs.priority, remaining_stops=remaining,
             min_buffer_needed=float(prefs.min_buffer or 0),
         )
-        pred = predict_action_utility(feat)
         walk_ok = _feasible(proposed, prefs)
         frozen = prefs.is_frozen(str(proposed.get("dest_title") or ""))
         if action in ("REORDER_ACTIVITY", "REMOVE_UNNECESSARY_STOP", "CHANGE_DEPARTURE_TIME") and frozen:
@@ -430,15 +546,14 @@ def _hop_actions(
         if prefs.min_buffer is not None and action == "KEEP_CURRENT_PLAN":
             if float(current.get("schedule_buffer") or 0) < prefs.min_buffer:
                 walk_ok = False
-        out.append({
+        drafts.append({
             "action": action,
             "label": action.replace("_", " ").title(),
             "proposed": proposed,
-            "utility": pred["utility"],
-            "ml_source": pred["source"],
             "feasible": walk_ok,
             "hop": hop,
             "why": _why(proposed, current) if action != "KEEP_CURRENT_PLAN" else ["Keep the current plan"],
+            "_feat": feat,
             **meta,
         })
 
@@ -478,7 +593,33 @@ def _hop_actions(
     reroute["estimated_travel_time"] = max(4.0, float(current.get("estimated_travel_time") or 20) - 3.0)
     reroute["route_label"] = "Lower-traffic alternative"
     add("CHANGE_ROUTE", reroute, from_value="current route", to_value="lower-traffic alternative")
-    return out
+    preds = predict_action_utility_many([row.pop("_feat") for row in drafts])
+    for row, pred in zip(drafts, preds):
+        row["utility"] = pred["utility"]
+        row["ml_source"] = pred["source"]
+    return drafts
+
+
+def _prefetch_stops(stops: Sequence[Dict[str, Any]]) -> None:
+    if not maps_configured() or len(stops) < 2:
+        return
+    pairs = [
+        (_coords(stops[i]), _coords(stops[i + 1]), _trip_minutes(stops[i]) // 60 % 24)
+        for i in range(len(stops) - 1)
+    ]
+    prefetch(pairs)
+
+
+def _cands_along(stops: Sequence[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    return [
+        generate_candidates(
+            stops[i],
+            stops[i + 1],
+            prev_stops=i,
+            next_stop=stops[i + 2] if i + 2 < len(stops) else None,
+        )
+        for i in range(max(0, len(stops) - 1))
+    ]
 
 
 def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = None) -> Dict[str, Any]:
@@ -498,11 +639,10 @@ def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = Non
         {"id": "ml", "label": "ML action selection", "state": "active"},
     ]
 
-    hop_plan: List[Dict[str, Any]] = []
-    for i in range(len(working) - 1):
-        nxt = working[i + 2] if i + 2 < len(working) else None
-        cands = generate_candidates(working[i], working[i + 1], prev_stops=i, next_stop=nxt)
-        hop_plan.append(_baseline(cands, prefs))
+    _prefetch_stops(working)
+    working_cands = _cands_along(working)
+    orig_cands = working_cands
+    hop_plan: List[Dict[str, Any]] = [_baseline(cands, prefs) for cands in working_cands]
 
     history: List[Dict[str, Any]] = []
     snapshots = []
@@ -510,9 +650,7 @@ def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = Non
     for _step in range(5):
         pool: List[Dict[str, Any]] = []
         remaining = max(1, len(working) - 1)
-        for i in range(len(working) - 1):
-            nxt = working[i + 2] if i + 2 < len(working) else None
-            cands = generate_candidates(working[i], working[i + 1], prev_stops=i, next_stop=nxt)
+        for i, cands in enumerate(working_cands):
             current = hop_plan[i] if i < len(hop_plan) else _baseline(cands, prefs)
             pool.extend(_hop_actions(
                 current, cands, prefs, hop=i, remaining=remaining,
@@ -526,7 +664,7 @@ def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = Non
             proposed["estimated_travel_time"] = max(4.0, float(dummy.get("estimated_travel_time") or 20) - 6)
             feat = action_row(dummy, proposed, action_type="REORDER_ACTIVITY",
                               priority=prefs.priority, remaining_stops=remaining)
-            pred = predict_action_utility(feat)
+            pred = predict_action_utility_many([feat])[0]
             pool.append({
                 "action": "REORDER_ACTIVITY",
                 "label": "Reorder Activity",
@@ -551,18 +689,14 @@ def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = Non
         })
         if best["action"] == "REORDER_ACTIVITY" and best.get("reorder"):
             working = [dict(s) for s in best["reorder"]["stops"]]
-            hop_plan = []
-            for i in range(len(working) - 1):
-                nxt = working[i + 2] if i + 2 < len(working) else None
-                cands = generate_candidates(working[i], working[i + 1], prev_stops=i, next_stop=nxt)
-                hop_plan.append(_baseline(cands, prefs))
+            _prefetch_stops(working)
+            working_cands = _cands_along(working)
+            hop_plan = [_baseline(cands, prefs) for cands in working_cands]
         elif best["action"] == "REMOVE_UNNECESSARY_STOP" and 1 < best["hop"] < len(working) - 1:
             del working[best["hop"]]
-            hop_plan = []
-            for i in range(len(working) - 1):
-                nxt = working[i + 2] if i + 2 < len(working) else None
-                cands = generate_candidates(working[i], working[i + 1], prev_stops=i, next_stop=nxt)
-                hop_plan.append(_baseline(cands, prefs))
+            _prefetch_stops(working)
+            working_cands = _cands_along(working)
+            hop_plan = [_baseline(cands, prefs) for cands in working_cands]
         else:
             hop_i = int(best["hop"])
             if 0 <= hop_i < len(hop_plan):
@@ -586,12 +720,37 @@ def optimize_stops(stops: Sequence[Dict[str, Any]], prefs: Optional[Prefs] = Non
             "ml_source": best.get("ml_source"),
         })
 
+    # Policy may KEEP every hop. Still adopt a faster scored option so
+    # "potential improvement" is the ranked plan, not a zero leftover.
+    for i, cands in enumerate(working_cands):
+        current = hop_plan[i] if i < len(hop_plan) else _baseline(cands, prefs)
+        best = _best_feasible(cands, prefs)
+        if not _faster(best, current):
+            continue
+        hop_plan[i] = dict(best)
+        action = (
+            "CHANGE_PICKUP_LOCATION"
+            if best.get("pickup_label") != current.get("pickup_label")
+            else "CHANGE_TRANSPORTATION_MODE"
+        )
+        history.append({
+            "action": action,
+            "label": action.replace("_", " ").title(),
+            "utility": 0.0,
+            "hop": i,
+            "from_value": current.get("label") or current.get("pickup_label"),
+            "to_value": best.get("label") or best.get("pickup_label"),
+            "why": _why(best, current),
+            "ml_source": best.get("ml_source"),
+        })
+
     stages[-1]["state"] = "done"
     stages.append({"id": "improvements", "label": "Trip improvements found", "state": "done",
                    "detail": str(len(history))})
     packed = _pack_result(
         original, working, hop_plan, history, prefs,
         n_evaluated=n_evaluated, snapshots=snapshots, stages=stages,
+        hop_cands=orig_cands,
     )
     return packed
 
@@ -626,13 +785,18 @@ def _pack_result(
     n_evaluated: int,
     snapshots: Sequence[Dict[str, Any]],
     stages: Sequence[Dict[str, Any]],
+    hop_cands: Optional[Sequence[Sequence[Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     transitions = []
     rec_scores = []
     cur_scores = []
+    orig_by_day: Dict[int, float] = {}
     for i in range(len(original) - 1):
         nxt = original[i + 2] if i + 2 < len(original) else None
-        cands = generate_candidates(original[i], original[i + 1], prev_stops=i, next_stop=nxt)
+        if hop_cands is not None and i < len(hop_cands):
+            cands = hop_cands[i]
+        else:
+            cands = generate_candidates(original[i], original[i + 1], prev_stops=i, next_stop=nxt)
         ranked = rank_candidates(cands, prefs)
         current = _baseline(cands, prefs)
         rec = hop_plan[i] if i < len(hop_plan) else (ranked[0] if ranked else current)
@@ -654,6 +818,9 @@ def _pack_result(
             or rec.get("leave_minutes_earlier")
             or rec.get("route_label")
         )
+        maps_url = None
+        if rec.get("transportation_mode") == "walk":
+            maps_url = _hop_maps_url(original[i], original[i + 1], mode="walking")
         transitions.append({
             "from_title": original[i]["title"],
             "to_title": original[i + 1]["title"],
@@ -665,10 +832,41 @@ def _pack_result(
             "changed": changed,
             "time_delta_min": round(dt, 1),
             "cost_delta": round(dc, 2),
+            "maps_url": maps_url,
         })
+        if _same_day_hop(original[i], original[i + 1]):
+            day = int(original[i].get("day") or 0)
+            orig_by_day[day] = orig_by_day.get(day, 0.0) + _daily_minutes(
+                original[i], original[i + 1], _travel_min(current),
+            )
 
-    orig_time = sum(float(t["current"]["estimated_travel_time"]) for t in transitions) if transitions else 0.0
-    opt_time = sum(float(t["recommended"].get("estimated_travel_time") or 0) for t in transitions) if transitions else 0.0
+    opt_by_day: Dict[int, float] = {}
+    for i in range(max(0, len(working) - 1)):
+        if not _same_day_hop(working[i], working[i + 1]):
+            continue
+        if i >= len(hop_plan) or not hop_plan[i]:
+            continue
+        day = int(working[i].get("day") or 0)
+        opt_by_day[day] = opt_by_day.get(day, 0.0) + _daily_minutes(
+            working[i], working[i + 1], _travel_min(hop_plan[i]),
+        )
+    day_keys = sorted(set(orig_by_day) | set(opt_by_day))
+    travel_by_day = []
+    for day in day_keys:
+        orig_m = round(orig_by_day.get(day, 0.0))
+        opt_m = round(opt_by_day.get(day, 0.0))
+        travel_by_day.append({
+            "day": day,
+            "label": f"Day {day + 1}",
+            "original_min": orig_m,
+            "optimized_min": opt_m,
+            "saved_min": max(0, orig_m - opt_m),
+        })
+    n_days = max(1, len(travel_by_day))
+    orig_total = sum(row["original_min"] for row in travel_by_day)
+    opt_total = sum(row["optimized_min"] for row in travel_by_day)
+    orig_time = orig_total / n_days
+    opt_time = opt_total / n_days
     orig_cost = sum(float(t["current"].get("estimated_cost") or 0) for t in transitions) if transitions else 0.0
     opt_cost = sum(float(t["recommended"].get("estimated_cost") or 0) for t in transitions) if transitions else 0.0
     walk_hops = sum(1 for t in transitions if t["recommended"].get("transportation_mode") == "walk")
@@ -703,16 +901,38 @@ def _pack_result(
     policy = policy_metrics()
     stamped = [dict(s) for s in working]
     for i, rec in enumerate(hop_plan):
-        if i < len(stamped):
-            stamped[i]["leg_mode"] = rec.get("label")
-            if rec.get("transportation_mode") != "walk":
-                stamped[i]["pickup_label"] = rec.get("pickup_label")
+        if i >= len(stamped):
+            continue
+        stamped[i]["leg_mode"] = rec.get("label")
+        if rec.get("transportation_mode") != "walk":
+            stamped[i]["pickup_label"] = rec.get("pickup_label")
+            continue
+        nxt = working[i + 1] if i + 1 < len(working) else None
+        if nxt:
+            url = _hop_maps_url(working[i], nxt, mode="walking")
+            if url:
+                stamped[i]["maps_url"] = url
+                stamped[i]["maps_label"] = "Open walking route"
+    airport = next(
+        (
+            s for s in working
+            if venue_type(s.get("title") or "") == "airport"
+            or "sfo" in (s.get("title") or "").lower()
+        ),
+        None,
+    )
+    if airport and stamped:
+        to_sfo = _hop_maps_url(stamped[0], airport, mode="driving")
+        if to_sfo:
+            stamped[0]["maps_url"] = to_sfo
+            stamped[0]["maps_label"] = "Open route to SFO"
+    pair = first_rideshare_pair(original)
     here_now = (
         build_here_now(
-            original[0], original[1],
+            pair[0], pair[1],
             max_walk_minutes=prefs.max_walk_minutes,
         )
-        if len(original) >= 2 else None
+        if pair else None
     )
     return {
         "original_stops": list(original),
@@ -741,6 +961,9 @@ def _pack_result(
             "travel_time_saved_min": round(max(0.0, orig_time - opt_time)),
             "original_travel_min": round(orig_time),
             "optimized_travel_min": round(opt_time),
+            "original_travel_total_min": orig_total,
+            "optimized_travel_total_min": opt_total,
+            "travel_by_day": travel_by_day,
             "actions_evaluated": n_evaluated,
             "cost_saved": None,
             "cost_saved_estimate": round(max(0.0, orig_cost - opt_cost)),

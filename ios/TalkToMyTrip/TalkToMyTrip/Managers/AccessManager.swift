@@ -63,7 +63,7 @@ final class AccessManager {
                 errorMessage = "That code didn't match — double-check your invitation."
             }
         } catch {
-            errorMessage = "Couldn't reach the demo backend — try again in a moment."
+            errorMessage = "Couldn't reach the backend — try again in a moment."
         }
     }
 }

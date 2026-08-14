@@ -152,6 +152,7 @@ def test_agent_instructions_carry_authoritative_snapshot(monkeypatch, bq):
 
 def test_agent_uses_fast_model_and_exposes_guided_toolset(monkeypatch):
     monkeypatch.delenv("CONCIERGE_LLM_MODEL", raising=False)
+    monkeypatch.delenv("FEATHERLESS_API_KEY", raising=False)
     agent = concierge.build_agent("room-1")
     assert agent.model == "gpt-5.4-mini"
     # The Phase 17 guided flow replaces the Phase 16 magic utterance;
@@ -166,6 +167,7 @@ def test_agent_uses_fast_model_and_exposes_guided_toolset(monkeypatch):
         "trip_status", "destination_info", "check_return_flights",
         "email_itinerary",
         "analyze_itinerary", "apply_optimization", "reject_optimization",
+        "esim_plan", "first_stop_uber", "reschedule_hotel",
     }
     # Without a pinned trip, the agent is told so instead of guessing.
     assert concierge._NO_TRIP_LINE in agent.instructions
@@ -269,6 +271,57 @@ def test_answer_query_trip_id_pins_the_displayed_trip(monkeypatch, bq):
     instructions = captured["agent"].instructions
     assert "TRIP CONTEXT" in instructions
     assert "MSP" in instructions and "SFO, Mountain View" in instructions
+
+
+def test_answer_query_confirms_loaded_itinerary_without_llm(monkeypatch, bq):
+    """'Do you have my itinerary?' must not invent a no-trip answer when a
+    Cascade/Optimize trip is already in memory — bypass the LLM."""
+    from api import memory_trips
+
+    memory_trips.clear()
+    seeded = memory_trips.seed("optimize-upload", "SFO → New York")
+    calls = _mock_runner(monkeypatch)
+    reply = asyncio.run(concierge.answer_query(
+        "confirm-room",
+        "Do you have my itinerary?",
+        trip_id=seeded["trip_id"],
+    ))
+    assert calls == []
+    assert "yes" in reply.lower()
+    assert "itinerary" in reply.lower()
+    assert "sfo" in reply.lower() or "new york" in reply.lower()
+    assert concierge._SESSION_TRIPS["confirm-room"].trip.trip_id == seeded["trip_id"]
+    memory_trips.clear()
+
+
+def test_answer_query_adopts_memory_trip_for_look_at_itinerary(monkeypatch, bq):
+    """Even without trip_id, itinerary questions must adopt the loaded trip
+    instead of answering from the unpinned no-trip line."""
+    from api import memory_trips
+
+    memory_trips.clear()
+    seeded = memory_trips.seed("optimize-upload", "SFO → New York")
+    calls = _mock_runner(monkeypatch)
+    reply = asyncio.run(concierge.answer_query(
+        "adopt-room",
+        "Look at my itinerary",
+    ))
+    assert calls == []
+    assert "yes" in reply.lower()
+    assert concierge._SESSION_TRIPS["adopt-room"].trip.trip_id == seeded["trip_id"]
+    memory_trips.clear()
+
+
+def test_fresh_booking_detector_ignores_first_stop_asks():
+    assert concierge._wants_fresh_booking(
+        "book me a flight from Minneapolis to Dallas on 2026-07-13"
+    )
+    assert not concierge._wants_fresh_booking(
+        "What is the best option for the first stop?"
+    )
+    assert concierge._wants_first_stop_uber(
+        "What is the best option for the first stop?"
+    )
 
 
 def test_answer_query_trip_id_never_clobbers_an_existing_pin(monkeypatch, bq):
@@ -1132,7 +1185,9 @@ def test_instructions_carry_the_guided_script():
                    "destination", "pick by number",
                    "set_recovery_preferences", "offer_rebook",
                    "trip to airport cancelled",
-                   "analyze_itinerary", "apply_optimization"):
+                   "analyze_itinerary", "apply_optimization",
+                   "even if the live status",
+                   "reschedule_hotel", "hotel reservation"):
         assert phrase in concierge.BASE_INSTRUCTIONS
     assert "same turn" in concierge.BASE_INSTRUCTIONS
     assert "do not confirm first" in concierge.BASE_INSTRUCTIONS

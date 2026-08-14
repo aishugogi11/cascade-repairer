@@ -26,7 +26,7 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             DemoView(voiceManager: voiceManager, demoManager: demoManager)
-                .tabItem { Label("Demo", systemImage: "sparkles") }
+                .tabItem { Label("Trip", systemImage: "sparkles") }
                 .tag(AppTab.demo)
 
             ReferenceHomeView(

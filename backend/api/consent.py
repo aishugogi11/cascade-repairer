@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from agents import Agent, Runner
+
+from api.llm_client import agents_model, configure_agents_sdk
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -156,8 +158,8 @@ _EMAIL_OFFER_INSTRUCTIONS = (
 )
 
 
-def _consent_model() -> str:
-    return os.environ.get("CONSENT_LLM_MODEL", DEFAULT_CONSENT_MODEL)
+def _consent_model():
+    return agents_model()
 
 
 async def _classify_transcript(
@@ -170,6 +172,7 @@ async def _classify_transcript(
     if not (transcript_text or "").strip():
         return "ambiguous"
     try:
+        configure_agents_sdk()
         agent = Agent(
             name=name,
             model=_consent_model(),

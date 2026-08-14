@@ -24,6 +24,8 @@ from typing import Dict, List, Optional
 from agents import Agent, Runner
 from openai import OpenAI
 
+from api.llm_client import agents_model, configure_agents_sdk
+
 DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_LLM_MODEL = "gpt-5.4-mini"
 DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
@@ -34,7 +36,7 @@ DEFAULT_TTS_VOICE = "alloy"
 _TTS_MAX_CHARS = 4096
 
 AGENT_INSTRUCTIONS = (
-    "You are the voice of a travel assistant for a demo of the cascaded "
+    "You are the voice of a travel assistant using a cascaded "
     "voice architecture (speech-to-text, then you, then text-to-speech). "
     "Your replies are spoken aloud: keep them to one or two short, "
     "conversational sentences. No markdown, no lists, no stage directions."
@@ -47,8 +49,8 @@ def _stt_model() -> str:
     return os.environ.get("CASCADE_STT_MODEL", DEFAULT_STT_MODEL)
 
 
-def _llm_model() -> str:
-    return os.environ.get("CASCADE_LLM_MODEL", DEFAULT_LLM_MODEL)
+def _llm_model():
+    return agents_model()
 
 
 def _tts_model() -> str:
@@ -74,6 +76,7 @@ async def agent_reply(text: str, session_id: Optional[str] = None) -> str:
     """Stage 2 — the agent turn, a plain `await Runner.run(...)` (the
     concurrency_core pattern). With a session_id, prior turns of that
     session are replayed as input so the conversation is multi-turn."""
+    configure_agents_sdk()
     agent = Agent(
         name="Cascade Demo Agent",
         model=_llm_model(),

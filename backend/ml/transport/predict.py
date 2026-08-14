@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas as pd
 
@@ -18,6 +18,8 @@ from ml.transport.model import load_artifact
 from ml.transport import model as transport_model
 
 logger = logging.getLogger(__name__)
+
+_IMPORTANCES: Dict[int, List[Tuple[str, float]]] = {}
 
 
 def _heuristic_score(row: Dict[str, Any]) -> float:
@@ -58,39 +60,70 @@ def model_metrics() -> Dict[str, Any]:
 
 def reset_cache() -> None:
     _loaded.cache_clear()
+    _IMPORTANCES.clear()
 
 
 def predict_quality(option: Dict[str, Any]) -> Dict[str, Any]:
-    row = row_from_option(option)
+    return predict_quality_many([option])[0]
+
+
+def predict_quality_many(options: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not options:
+        return []
+    rows = [row_from_option(option) for option in options]
     pipeline, metrics = _loaded()
     if pipeline is None:
-        score = _heuristic_score(row)
-        return {
+        return [
+            {
+                "score": round(_heuristic_score(row), 4),
+                "source": "heuristic_fallback",
+                "factors": ["model artifact missing — heuristic score"],
+                "row": row,
+            }
+            for row in rows
+        ]
+    frame = pd.DataFrame(rows, columns=FEATURE_COLUMNS)
+    scores = pipeline.predict(frame)
+    ranked = _importances(pipeline)
+    model = metrics.get("production_model") or "RandomForestRegressor"
+    out = []
+    for row, raw in zip(rows, scores):
+        score = max(0.0, min(1.0, float(raw)))
+        out.append({
             "score": round(score, 4),
-            "source": "heuristic_fallback",
-            "factors": ["model artifact missing — heuristic score"],
+            "source": "trained_artifact",
+            "model": model,
+            "factors": _labels_from_importances(ranked, row),
             "row": row,
-        }
-    frame = pd.DataFrame([row], columns=FEATURE_COLUMNS)
-    score = float(pipeline.predict(frame)[0])
-    score = max(0.0, min(1.0, score))
-    return {
-        "score": round(score, 4),
-        "source": "trained_artifact",
-        "model": metrics.get("production_model") or "RandomForestRegressor",
-        "factors": _local_factors(pipeline, row),
-        "row": row,
-    }
+        })
+    return out
+
+
+def _importances(pipeline) -> List[Tuple[str, float]]:
+    key = id(pipeline)
+    cached = _IMPORTANCES.get(key)
+    if cached is not None:
+        return cached
+    try:
+        names = list(pipeline.named_steps["prep"].get_feature_names_out())
+        weights = pipeline.named_steps["reg"].feature_importances_
+        ranked = sorted(zip(names, weights), key=lambda p: p[1], reverse=True)
+    except Exception:  # noqa: BLE001
+        ranked = []
+    _IMPORTANCES[key] = ranked
+    return ranked
 
 
 def _local_factors(pipeline, row: Dict[str, Any], k: int = 4) -> List[str]:
     """Global importances, phrased for the hop the traveler is looking at."""
-    try:
-        names = list(pipeline.named_steps["prep"].get_feature_names_out())
-        weights = pipeline.named_steps["reg"].feature_importances_
-    except Exception:  # noqa: BLE001
-        return []
-    ranked = sorted(zip(names, weights), key=lambda p: p[1], reverse=True)
+    return _labels_from_importances(_importances(pipeline), row, k=k)
+
+
+def _labels_from_importances(
+    ranked: Sequence[Tuple[str, float]],
+    row: Dict[str, Any],
+    k: int = 4,
+) -> List[str]:
     labels: List[str] = []
     for name, _ in ranked:
         short = name.split("__", 1)[-1]

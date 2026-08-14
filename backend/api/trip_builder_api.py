@@ -1,5 +1,7 @@
 """HTTP surface for Optimize My Trip."""
+import logging
 import os
+import re
 
 import requests
 from fastapi import APIRouter
@@ -9,7 +11,46 @@ from pydantic import BaseModel
 from api import optimize
 from api.web_call import VB_API_URL
 
+logger = logging.getLogger(__name__)
+
 trip_builder_api = APIRouter()
+
+_AGENT_UUID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _looks_like_agent_id(value: str) -> bool:
+    """True for Vocal Bridge agent UUIDs — rejects API keys (vb_…)."""
+    text = (value or "").strip()
+    if not text or text.startswith("vb_"):
+        return False
+    return bool(_AGENT_UUID.match(text))
+
+
+def _build_credentials() -> tuple[str, str]:
+    """Resolve Optimize token credentials.
+
+    VOCAL_BRIDGE_BUILD_AGENT_ID is often mis-set to an API key. When that
+    happens, fall back to the Cascade web agent + main API key so the orb
+    lands in the same AI-Agent delegation path (useAIAgent → /query) instead
+    of a cascaded voice agent that answers \"need more info\" itself.
+    """
+    build_key = os.environ.get("VOCAL_BRIDGE_BUILD_API_KEY", "").strip()
+    main_key = os.environ.get("VOCAL_BRIDGE_API_KEY", "").strip()
+    build_agent = os.environ.get("VOCAL_BRIDGE_BUILD_AGENT_ID", "").strip()
+    web_agent = os.environ.get("VOCAL_BRIDGE_WEB_AGENT_ID", "").strip()
+
+    if _looks_like_agent_id(build_agent):
+        return (build_key or main_key), build_agent
+    if build_agent:
+        logger.warning(
+            "VOCAL_BRIDGE_BUILD_AGENT_ID looks like an API key, not an agent "
+            "UUID — falling back to VOCAL_BRIDGE_WEB_AGENT_ID"
+        )
+    return (main_key or build_key), (
+        web_agent if _looks_like_agent_id(web_agent) else ""
+    )
 
 
 class ParseRequest(BaseModel):
@@ -19,6 +60,7 @@ class ParseRequest(BaseModel):
     image_base64: str = ""
     mime: str = "image/png"
     sample: bool = False
+    sample_kind: str = ""
 
 
 class OptimizeRequest(BaseModel):
@@ -37,19 +79,13 @@ class TurnRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     session_name: str = "opt-voice"
+    trip_id: str = ""
 
 
 @trip_builder_api.post("/token")
 def mint_token():
     """Mint a Vocal Bridge token for the Optimize My Trip orb."""
-    api_key = (
-        os.environ.get("VOCAL_BRIDGE_BUILD_API_KEY", "").strip()
-        or os.environ.get("VOCAL_BRIDGE_API_KEY", "").strip()
-    )
-    agent_id = (
-        os.environ.get("VOCAL_BRIDGE_BUILD_AGENT_ID", "").strip()
-        or os.environ.get("VOCAL_BRIDGE_WEB_AGENT_ID", "").strip()
-    )
+    api_key, agent_id = _build_credentials()
     if not api_key:
         return JSONResponse(
             status_code=503,
@@ -103,6 +139,7 @@ def parse(req: ParseRequest):
         image_base64=req.image_base64,
         mime=req.mime,
         sample=req.sample,
+        sample_kind=req.sample_kind,
     )
 
 
@@ -154,5 +191,7 @@ async def turn(req: TurnRequest):
 
 @trip_builder_api.post("/query")
 async def query(req: QueryRequest):
-    result = await optimize.apply_turn(req.session_name, req.query)
+    result = await optimize.apply_turn(
+        req.session_name, req.query, trip_id=req.trip_id,
+    )
     return {"response": result["reply"], **{k: v for k, v in result.items() if k != "reply"}}

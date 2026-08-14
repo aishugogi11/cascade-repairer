@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas as pd
 
@@ -42,17 +42,28 @@ def policy_metrics() -> Dict[str, Any]:
 
 
 def predict_action_utility(row: Dict[str, Any]) -> Dict[str, Any]:
+    return predict_action_utility_many([row])[0]
+
+
+def predict_action_utility_many(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
     pipeline, metrics = _loaded()
-    frame = pd.DataFrame([row], columns=ACTION_COLUMNS)
     if pipeline is None:
-        # Directional stand-in only, tagged so we never claim the forest ran.
-        score = 0.02 * float(row.get("delta_travel") or 0) + 0.01 * float(row.get("delta_congestion") or 0)
-        if row.get("action_type") == "KEEP_CURRENT_PLAN":
-            score = 0.0
-        return {"utility": round(score, 4), "source": "heuristic_fallback"}
-    util = float(pipeline.predict(frame)[0])
-    return {
-        "utility": round(util, 4),
-        "source": "trained_artifact",
-        "model": metrics.get("production_model") or "RandomForestRegressor",
-    }
+        out = []
+        for row in rows:
+            score = (
+                0.02 * float(row.get("delta_travel") or 0)
+                + 0.01 * float(row.get("delta_congestion") or 0)
+            )
+            if row.get("action_type") == "KEEP_CURRENT_PLAN":
+                score = 0.0
+            out.append({"utility": round(score, 4), "source": "heuristic_fallback"})
+        return out
+    frame = pd.DataFrame(list(rows), columns=ACTION_COLUMNS)
+    utils = pipeline.predict(frame)
+    model = metrics.get("production_model") or "RandomForestRegressor"
+    return [
+        {"utility": round(float(util), 4), "source": "trained_artifact", "model": model}
+        for util in utils
+    ]

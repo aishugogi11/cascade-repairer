@@ -31,7 +31,7 @@ def fresh_state(monkeypatch):
 def _pin_trip(session_id="room-1", origin="JFK", destinations=("LAX",)):
     trip = Trip(
         trip_id="t-1", user_id="demo-traveler",
-        title="The Complete Trip — hackathon demo", status="booked",
+        title="The Complete Trip", status="booked",
         origin=origin, destinations=list(destinations),
         start_date=date(2026, 7, 21), end_date=date(2026, 7, 23),
     )

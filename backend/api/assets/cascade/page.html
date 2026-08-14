@@ -511,10 +511,32 @@
     font: inherit; font-size: 13px; font-weight: 700;
     padding: 8px 12px; border-radius: 10px; cursor: pointer; border: none;
   }
+  .opt-actions button:disabled { opacity: 0.55; cursor: wait; }
   .opt-apply { background: var(--brand); color: #fff; }
   .opt-keep { background: var(--card); color: var(--ink); border: 1px solid var(--line) !important; }
   .opt-note { font-size: 12px; color: var(--ink-faint); }
+  .opt-note.is-applied { color: #166534; font-weight: 600; }
   .opt-empty { font-size: 14px; color: var(--ink-soft); }
+
+  .saily-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 16px 18px;
+    display: grid; gap: 8px;
+  }
+  .saily-card .kicker {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--brand);
+  }
+  .saily-card h3 { font-size: 16px; font-weight: 800; margin: 0; }
+  .saily-card .price { font-size: 14px; font-weight: 700; }
+  .saily-card .why { font-size: 13px; color: var(--ink-soft); line-height: 1.45; }
+  a.saily-cta {
+    display: inline-flex; align-items: center;
+    background: var(--brand); color: #fff;
+    font-size: 13px; font-weight: 700;
+    padding: 8px 12px; border-radius: 10px;
+    text-decoration: none; width: fit-content;
+  }
 
   /* candidates panel (mockup's "AI Recommended" card) */
   .candidates-panel {
@@ -821,6 +843,14 @@
       </div>
     </div>
 
+    <div class="saily-card" id="saily-card" hidden>
+      <div class="kicker" id="saily-kicker">Stay online</div>
+      <h3 id="saily-title">Saily eSIM</h3>
+      <div class="price" id="saily-price"></div>
+      <p class="why" id="saily-why"></p>
+      <a class="saily-cta" id="saily-link" target="_blank" rel="noopener">Get Saily eSIM</a>
+    </div>
+
     <div id="candidates" hidden>
       <div class="candidates-panel">
         <div class="candidates-head">✨ AI Recommended</div>
@@ -956,6 +986,7 @@
     bookingOption: false,
     analyzedTrip: null,
     optimizing: false,
+    deciding: false,
   };
 
   // ---- formatting ----
@@ -991,6 +1022,74 @@
 
   // "MSP-SFO" (item.location) -> "MSP → SFO"
   const fmtRoute = (location) => (location || "").replace("-", " → ");
+
+  // "Airport transfer — JFK" -> "JFK Airport" (drop the word "transfer").
+  function friendlyTitle(raw, fallback) {
+    let text = (raw || "").trim();
+    if (!text) return fallback || "";
+    const airport = text.match(/airport\s+transfer\s*[—–-]\s*([A-Za-z]{3})\b/i);
+    if (airport) return airport[1].toUpperCase() + " Airport";
+    // Any leftover "transfer" next to airport (location lines, odd dashes).
+    text = text.replace(/\bairport\s+transfer\b/gi, "Airport");
+    text = text.replace(/\btransfer\b/gi, "").replace(/\s+/g, " ").trim();
+    text = text.replace(/\s*[—–-]\s*/g, " — ").replace(/^—\s*|\s*—$/g, "").trim();
+    const codeOnly = text.match(/^([A-Za-z]{3})$/);
+    if (codeOnly) return codeOnly[1].toUpperCase() + " Airport";
+    const airportDash = text.match(/^Airport\s*[—–-]\s*([A-Za-z]{3})\b/i);
+    if (airportDash) return airportDash[1].toUpperCase() + " Airport";
+    return text || fallback || "";
+  }
+
+  function itemTitle(item, kind) {
+    const raw = (item.details && (item.details.title || item.details.description))
+      || (kind && kind.label)
+      || item.type
+      || "";
+    return friendlyTitle(raw, (kind && kind.label) || item.type || "");
+  }
+
+  function itemWhere(item) {
+    return friendlyTitle(item.location || "", "");
+  }
+
+  function airportLabel(code) {
+    const c = (code || "").trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(c)) return c + " Airport";
+    return (code || "").trim();
+  }
+
+  // Prefer the outbound flight's origin (SFO-JFK → SFO) over a stale trip
+  // header — Optimize used to drop the flight row and leave origin blank.
+  function tripStartAirport(trip, items) {
+    for (const item of byStart(items)) {
+      const loc = (item.location || "").trim();
+      if (item.type === "flight" && /^[A-Z]{3}\s*[-–—→]\s*[A-Z]{3}$/i.test(loc)) {
+        return loc.split(/[-–—→]/)[0].trim().toUpperCase();
+      }
+      const blob = [loc, (item.details && item.details.title) || ""].join(" ");
+      const route = blob.match(/\b([A-Z]{3})\s*[-–—→]\s*([A-Z]{3})\b/);
+      if (route && /flight|ua\b|aa\b|dl\b|as\b|b6\b|wn\b/i.test(blob)) {
+        return route[1].toUpperCase();
+      }
+    }
+    return (trip && trip.origin) || "";
+  }
+
+  function tripDestAirport(trip, items) {
+    for (const item of byStart(items)) {
+      const loc = (item.location || "").trim();
+      if (item.type === "flight" && /^[A-Z]{3}\s*[-–—→]\s*[A-Z]{3}$/i.test(loc)) {
+        return loc.split(/[-–—→]/)[1].trim().toUpperCase();
+      }
+      const blob = [loc, (item.details && item.details.title) || ""].join(" ");
+      const route = blob.match(/\b([A-Z]{3})\s*[-–—→]\s*([A-Z]{3})\b/);
+      if (route && /flight|ua\b|aa\b|dl\b|as\b|b6\b|wn\b/i.test(blob)) {
+        return route[2].toUpperCase();
+      }
+    }
+    const dests = (trip && trip.destinations) || [];
+    return dests[0] || "";
+  }
 
   // Internal ids like "demo-traveler" stay off the screen.
   function travelerName(userId) {
@@ -1168,25 +1267,55 @@
     el("fact-provider").textContent =
       flight && flight.provider === "sabre" ? "Sabre" : (flight ? "Partner" : "—");
     el("fact-ref").textContent = (flight && flight.provider_ref) || "—";
-    const route = [trip.origin, ...(trip.destinations || [])].filter(Boolean).join(" → ");
+    const start = tripStartAirport(trip, items);
+    const dest = tripDestAirport(trip, items);
+    const route = [start, dest].filter(Boolean).join(" → ");
     el("route-summary").textContent =
       route + (trip.start_date ? ` · ${trip.start_date} to ${trip.end_date || "?"}` : "");
+  }
+
+  function rideLabel(item) {
+    const d = item.details || {};
+    return d.transport_label || d.transport_mode || "";
+  }
+
+  function byStart(items) {
+    return [...(items || [])].sort((a, b) => {
+      const ta = a.start_ts ? Date.parse(a.start_ts) : 0;
+      const tb = b.start_ts ? Date.parse(b.start_ts) : 0;
+      return ta - tb;
+    });
   }
 
   function renderTimeline(trip, items) {
     const timeline = el("timeline");
     const nodes = [];
-    if (trip.origin) {
-      nodes.push(makeNode("📍", trip.origin, "Where the trip starts", "", "booked"));
+    const start = tripStartAirport(trip, items);
+    if (start) {
+      nodes.push(makeNode(
+        "📍",
+        airportLabel(start),
+        "Where the trip starts",
+        "",
+        "booked",
+      ));
     }
-    for (const item of items) {
+    for (const item of byStart(items)) {
       const kind = KIND[item.type] || { icon: "📍", label: item.type };
-      const title = (item.details && item.details.title) || kind.label;
+      const title = itemTitle(item, kind);
       const keep = item.details && (item.details.must_keep || item.details.importance === "must_keep");
+      const ride = rideLabel(item);
+      const where = itemWhere(item);
+      const subBits = [];
+      if (where && where !== title && where !== title.replace(" ⭐", "")) {
+        subBits.push(where);
+      }
+      if (ride) subBits.push("via " + ride);
+      const sub = subBits.join(" · ");
       nodes.push(makeNode(
         kind.icon,
         keep ? title + " ⭐" : title,
-        item.location || "",
+        sub,
         fmtWhen(item),
         item.status,
       ));
@@ -1274,7 +1403,7 @@
   }
 
   function renderReservations(items) {
-    const rest = items.filter((i) => i.type !== "flight");
+    const rest = byStart(items).filter((i) => i.type !== "flight");
     el("reservations-section").hidden = rest.length === 0;
     const list = el("reservations");
     const seen = new Set();
@@ -1284,15 +1413,20 @@
       if (!card) {
         card = template.content.firstElementChild.cloneNode(true);
         state.cards.set(item.item_id, card);
-        list.appendChild(card);
       }
+      list.appendChild(card);
       const kind = KIND[item.type] || { icon: "📍", label: item.type };
       card.dataset.status = item.status;
       card.querySelector(".icon").textContent = kind.icon;
-      const title = (item.details && (item.details.title || item.details.description)) || kind.label;
+      const title = itemTitle(item, kind);
       const keep = item.details && (item.details.must_keep || item.details.importance === "must_keep");
       card.querySelector(".kind").textContent = keep ? title + " ⭐ Must keep" : title;
-      card.querySelector(".where").textContent = item.location || "";
+      const ride = rideLabel(item);
+      const where = itemWhere(item);
+      const whereBits = [];
+      if (where && where !== title) whereBits.push(where);
+      if (ride) whereBits.push("via " + ride);
+      card.querySelector(".where").textContent = whereBits.join(" · ");
       card.querySelector(".when").textContent = fmtWhen(item);
       card.querySelector(".price").textContent = fmtPrice(item.price);
       card.querySelector(".chip").textContent = item.status;
@@ -1600,8 +1734,9 @@
 
   function fmtMins(n) {
     if (n == null) return "—";
-    const m = Math.round(n);
-    if (m < 60) return m + " min";
+    let m = Math.round(Number(n));
+    if (m > 16 * 60) m = Math.round(m / 60);
+    if (m < 90) return m + " min";
     return Math.floor(m / 60) + "h " + (m % 60) + "m";
   }
 
@@ -1651,25 +1786,67 @@
     return svg;
   }
 
-  function renderOptimization(opt) {
-    const card = el("opt-card");
-    if (!opt || !opt.ok) {
-      card.hidden = true;
-      return;
-    }
-    const recs = opt.recommendations || [];
-    const summary = opt.summary || {};
-    if (!recs.length && !summary.original_travel_min) {
+  function renderSaily(saily) {
+    const card = el("saily-card");
+    if (!card) return;
+    if (!saily || !saily.checkout_url) {
       card.hidden = true;
       return;
     }
     card.hidden = false;
+    const kicker = el("saily-kicker");
+    if (kicker) kicker.textContent = saily.needed ? "Travel eSIM" : "Optional eSIM";
+    const title = el("saily-title");
+    if (title) title.textContent = "Saily — " + (saily.label || "travel data");
+    const price = el("saily-price");
+    if (price) price.textContent = [saily.from_price, saily.data].filter(Boolean).join(" · ");
+    const why = el("saily-why");
+    if (why) {
+      why.textContent = saily.blurb || (saily.needed
+        ? ("Prepaid data for " + (saily.label || "this trip") +
+           ". Starting catalog price — checkout is on Saily; we don't install the eSIM from here.")
+        : "This trip looks domestic. Keep a Saily plan handy if you add an international leg.");
+    }
+    const link = el("saily-link");
+    if (link) link.href = saily.checkout_url;
+  }
+
+  function renderOptimization(opt) {
+    const card = el("opt-card");
+    if (!opt || !opt.ok) {
+      card.hidden = true;
+      renderSaily(opt && opt.saily);
+      return;
+    }
+    const recs = opt.recommendations || [];
+    const summary = opt.summary || {};
+    if (!recs.length && !summary.original_travel_min && !opt.applied_id && !opt.spoken) {
+      card.hidden = true;
+      renderSaily(opt.saily);
+      return;
+    }
+    card.hidden = false;
+    const head = card.querySelector(".opt-head");
+    if (head) {
+      head.textContent = opt.applied_id
+        ? "Applied — itinerary updated"
+        : opt.rejected_id
+          ? "Kept your current plan"
+          : "Cascade found an optimization";
+    }
     const metrics = [];
     if (summary.show_time_saved && summary.potential_time_saved_min) {
-      metrics.push(["Time saved", fmtMins(summary.potential_time_saved_min),
-        fmtMins(summary.original_travel_min) + " → " + fmtMins(summary.optimized_travel_min)]);
+      const perDay = summary.travel_is_typical_day ? " per day" : "";
+      const dayLine = (summary.travel_by_day || []).length > 1
+        ? (summary.travel_by_day.map((d) =>
+            (d.label || ("Day " + ((d.day || 0) + 1))) + " " +
+            fmtMins(d.original_min) + " → " + fmtMins(d.optimized_min)
+          ).join(" · "))
+        : (fmtMins(summary.original_travel_min) + " → " + fmtMins(summary.optimized_travel_min));
+      metrics.push(["Time saved", fmtMins(summary.potential_time_saved_min) + perDay, dayLine]);
     } else if (summary.original_travel_min != null) {
-      metrics.push(["Travel time", fmtMins(summary.original_travel_min), "from scored routes"]);
+      const perDay = summary.travel_is_typical_day ? "typical day" : "from scored routes";
+      metrics.push(["Travel time", fmtMins(summary.original_travel_min), perDay]);
     }
     if (summary.show_cost_saved && summary.potential_cost_saved) {
       const est = summary.cost_is_estimated ? "estimated" : "";
@@ -1740,25 +1917,28 @@
       apply.type = "button";
       apply.className = "opt-apply";
       apply.textContent = "Apply";
-      apply.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "apply"));
+      apply.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "apply", rec.fingerprint));
       const keep = document.createElement("button");
       keep.type = "button";
       keep.className = "opt-keep";
       keep.textContent = "Keep current";
-      keep.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "reject"));
+      keep.addEventListener("click", () => decideOptimization(rec.id || String(idx + 1), "reject", rec.fingerprint));
       actions.append(apply, keep);
       wrap.appendChild(actions);
       return wrap;
     }));
     const note = el("opt-note");
-    const src = (opt.model && opt.model.maps_source) || "";
-    note.textContent = src === "demo_geometry"
-      ? "Travel times use mapped geometry until a live Maps key is set. Costs are estimated."
-      : "Savings shown only from scored route data.";
+    note.classList.toggle("is-applied", !!opt.applied_id);
+    if (opt.spoken && (opt.applied_id || opt.rejected_id || opt.ok === false)) {
+      note.textContent = opt.spoken;
+    } else {
+      note.textContent = "Tap Apply to put the recommended rides on your itinerary.";
+    }
+    renderSaily(opt.saily);
   }
 
   async function ensureOptimization(tripId, existing) {
-    if (!tripId) return;
+    if (!tripId || state.deciding) return;
     if (existing) {
       renderOptimization(existing);
       state.analyzedTrip = tripId;
@@ -1777,21 +1957,44 @@
     finally { state.optimizing = false; }
   }
 
-  async function decideOptimization(id, action) {
-    if (!state.tripId || !id) return;
+  async function decideOptimization(id, action, fingerprint) {
+    if (!state.tripId || !id || state.deciding) return;
+    state.deciding = true;
+    const note = el("opt-note");
+    document.querySelectorAll(".opt-actions button").forEach((b) => { b.disabled = true; });
+    if (note) {
+      note.classList.remove("is-applied");
+      note.textContent = action === "apply" ? "Applying that change…" : "Keeping your current plan…";
+    }
     try {
       const resp = await fetch(
         `${API}/optimize/${encodeURIComponent(state.tripId)}/${action}`,
         {
           method: "POST",
           headers: codeHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ recommendation_id: id }),
+          body: JSON.stringify({
+            recommendation_id: id,
+            fingerprint: fingerprint || "",
+          }),
         }
       );
       const body = await resp.json().catch(() => ({}));
-      if (body && body.ok !== false) renderOptimization(body);
-      poll();
-    } catch { /* next poll */ }
+      if (!resp.ok || body.ok === false) {
+        if (note) {
+          const detail = typeof body.detail === "string" ? body.detail : "";
+          note.textContent = body.spoken || detail || "Could not apply that change.";
+        }
+        document.querySelectorAll(".opt-actions button").forEach((b) => { b.disabled = false; });
+        return;
+      }
+      renderOptimization(body);
+      await poll();
+    } catch {
+      if (note) note.textContent = "Could not apply that change — retrying on the next refresh.";
+      document.querySelectorAll(".opt-actions button").forEach((b) => { b.disabled = false; });
+    } finally {
+      state.deciding = false;
+    }
   }
 
   function showAwaiting(pendingOptions) {
@@ -1803,6 +2006,7 @@
     renderCandidates(pendingOptions);
     el("impact-card").hidden = true;
     el("opt-card").hidden = true;
+    renderSaily(null);
     resetScore();
     renderAwaitingMood(pendingOptions);
   }
@@ -1893,15 +2097,20 @@
       showAwaiting(null);
       return;
     }
+    const polledTripId = state.tripId;
     let resp;
     try {
-      resp = await fetch(`${API}/status/${encodeURIComponent(state.tripId)}`,
+      resp = await fetch(`${API}/status/${encodeURIComponent(polledTripId)}`,
                          { headers: codeHeaders() });
     } catch {
+      if (state.tripId !== polledTripId) return;
       banner.className = "banner is-stale";
       bannerText.textContent = "Connection hiccup — catching back up…";
       return;
     }
+    // "New trip" may have cleared the page while this request was in
+    // flight. Never let that stale response repaint the previous trip.
+    if (state.tripId !== polledTripId) return;
     if (resp.status === 404 || !resp.ok) {
       const booking = await fetchLatestBooking();
       if (booking && booking.trip_id === state.tripId) {
@@ -1951,15 +2160,25 @@
     state.consent = null;
     state.analyzedTrip = null;
     el("opt-card").hidden = true;
+    renderSaily(null);
     el("reservations").replaceChildren();
     feed.replaceChildren();
     feedEmpty.hidden = false;
     el("feed-section").hidden = true;
+    el("traveler-name").textContent = "—";
+    el("traveler-card-name").textContent = "Waiting for a trip";
+    el("avatar").textContent = "—";
+    el("fact-provider").textContent = "—";
+    el("fact-ref").textContent = "—";
+    el("route-summary").innerHTML = "&nbsp;";
+    el("timeline").replaceChildren();
+    el("timeline-empty").hidden = false;
     resetScore();
   }
 
   function resetForTrip(tripId) {
     state.tripId = tripId;
+    try { localStorage.setItem("vb_cascade_trip_id", tripId); } catch {}
     clearTripState();
     const url = new URL(window.location);
     url.searchParams.set("trip_id", tripId);
@@ -1972,10 +2191,9 @@
   // "New trip" (Phase 23 QA finding): with a trip on screen, the orb pins
   // every fresh voice session to it and guided booking becomes unreachable
   // — the Phase 18 trap, rebuilt client-side. This clears the display so
-  // the next voice session starts unpinned. state.latestSeen is
-  // deliberately kept: the page will NOT re-adopt the trip it just
-  // cleared; only a *change* in latest_trip_id — i.e. the newly booked
-  // trip — repopulates the screen.
+  // the next voice session starts unpinned. The latest-trip and
+  // latest-booking baselines are kept: polling will NOT re-adopt the trip
+  // it just cleared; only a newly booked trip repopulates the screen.
   function startNewTrip() {
     // The server pins trips per voice session, so a live session stays
     // pinned no matter what the page displays — end it; the next tap of
@@ -1983,8 +2201,14 @@
     try {
       if (window.cascadeVoiceDisconnect) window.cascadeVoiceDisconnect();
     } catch { /* an already-dead session is fine */ }
+    const clearedTripId = state.tripId;
+    if (clearedTripId) {
+      state.latestSeen = clearedTripId;
+      state.latestBookingSeen = clearedTripId;
+    }
     state.tripId = null;
     state.disruptedTrip = null;
+    try { localStorage.removeItem("vb_cascade_trip_id"); } catch {}
     clearTripState();
     const url = new URL(window.location);
     url.searchParams.delete("trip_id");
@@ -2005,7 +2229,10 @@
   // the 1.5s poll.
   window.cascadeVoice = {
     headers: (extra) => codeHeaders(extra),
-    tripId: () => state.tripId || "",
+    tripId: () => state.tripId
+      || new URL(window.location).searchParams.get("trip_id")
+      || localStorage.getItem("vb_cascade_trip_id")
+      || "",
   };
   window.cascadeShowFlights = renderOptionsBoard;
 
@@ -2195,7 +2422,11 @@
     }
     const body = await resp.json();
     state.disruptedTrip = tripId;
-    showStatus("📞", `Calling the traveler — repairs wait for their go-ahead (call ${body.call_status}).`, "live");
+    if (body.call_status === "skipped") {
+      showStatus("🔧", "Flight cancelled — cascading the itinerary on screen (no outbound call).", "live");
+    } else {
+      showStatus("📞", `Calling the traveler — repairs wait for their go-ahead (call ${body.call_status}).`, "live");
+    }
     updateControls();
   });
 
@@ -2203,7 +2434,8 @@
 
   async function init() {
     await refreshTrips();
-    const requested = new URL(window.location).searchParams.get("trip_id");
+    const requested = new URL(window.location).searchParams.get("trip_id")
+      || localStorage.getItem("vb_cascade_trip_id");
     if (requested) {
       resetForTrip(requested);
     } else {
@@ -2256,43 +2488,49 @@ function Orb({ tokenError, sessionRef }) {
   const { transcript } = useTranscript();
   const [latencyMs, setLatencyMs] = useState(null);
   const [queryError, setQueryError] = useState(null);
+  const [lastDelegated, setLastDelegated] = useState(null);
 
-  // The AI Agent hook (the L3 pattern): every delegated spoken question
-  // lands here; whatever string we return, VB speaks. The displayed trip
-  // rides along so the session pins what's on screen (the server ignores
-  // it once pinned); the round trip is the latency readout.
-  useAIAgent({
-    onQuery: async (query) => {
-      setQueryError(null);
-      const started = performance.now();
+  // Stable onQuery — a new function every render re-binds useAIAgent and can
+  // miss query_agent events, letting the voice layer invent answers.
+  const onQuery = useCallback(async (query) => {
+    setQueryError(null);
+    const started = performance.now();
+    try {
+      const body = { query, session_name: sessionRef.current || 'cascade-page' };
+      const tripId = (bridge && bridge.tripId && bridge.tripId())
+        || localStorage.getItem("vb_cascade_trip_id")
+        || new URL(window.location).searchParams.get("trip_id")
+        || "";
+      if (tripId) body.trip_id = tripId;
+      const res = await fetch('/v1/web_call/query', {
+        method: 'POST',
+        headers: (bridge && bridge.headers)
+          ? bridge.headers({ 'Content-Type': 'application/json' })
+          : { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      setLatencyMs(Math.round(performance.now() - started));
+      setLastDelegated(String(query || "").slice(0, 80));
       try {
-        const body = { query, session_name: sessionRef.current || 'cascade-page' };
-        const tripId = bridge.tripId();
-        if (tripId) body.trip_id = tripId;
-        const res = await fetch('/v1/web_call/query', {
-          method: 'POST',
-          headers: bridge.headers({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify(body),
+        const pendingRes = await fetch('/v1/sabre_tools/pending_options', {
+          headers: (bridge && bridge.headers) ? bridge.headers() : {},
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        setLatencyMs(Math.round(performance.now() - started));
-        try {
-          const pendingRes = await fetch('/v1/sabre_tools/pending_options', {
-            headers: bridge.headers(),
-          });
-          const pendingBody = await pendingRes.json().catch(() => ({}));
-          if (window.cascadeShowFlights) {
-            window.cascadeShowFlights(pendingBody.pending_options || null);
-          }
-        } catch { /* poll will retry */ }
-        return data.response;
-      } catch (err) {
-        setQueryError('query failed: ' + err.message);
-        return "Sorry — I couldn't reach my backend brain. Try that again in a moment.";
-      }
-    },
-  });
+        const pendingBody = await pendingRes.json().catch(() => ({}));
+        if (window.cascadeShowFlights) {
+          window.cascadeShowFlights(pendingBody.pending_options || null);
+        }
+      } catch { /* poll will retry */ }
+      return data.response
+        || "I have your trip loaded — ask me about status, the first stop, or optimization.";
+    } catch (err) {
+      setQueryError('query failed: ' + err.message);
+      return "Sorry — I couldn't reach my backend brain. Try that again in a moment.";
+    }
+  }, [sessionRef]);
+
+  useAIAgent({ onQuery });
 
   const disconnected = state === ConnectionState.Disconnected;
   const busy = state === ConnectionState.Connecting ||
@@ -2326,6 +2564,8 @@ function Orb({ tokenError, sessionRef }) {
     e('span', { className: 'voice-state' }, stateLabel),
     latencyMs !== null &&
       e('div', { className: 'voice-latency' }, `last reply ${latencyMs} ms`),
+    lastDelegated &&
+      e('div', { className: 'voice-latency' }, `backend heard: “${lastDelegated}”`),
     (broken || queryError) && e('div', { className: 'voice-error' },
       String((error && error.message) || tokenError || queryError)),
     lines.length === 0

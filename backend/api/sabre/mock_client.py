@@ -3,8 +3,8 @@
 Every return value is a shapes.py model instance, so a drift between mock
 and documentation is a validation error, not a demo-day surprise.
 Deterministic given the same request: refs and ids are derived from request
-fields by hashing, never random. `latency_seconds` adds a small artificial
-delay (network feel for the demo); tests pass 0.
+fields by hashing, never random. `latency_seconds` defaults to 0 so mock
+searches return immediately; tests can still inject a delay.
 """
 import asyncio
 import hashlib
@@ -33,7 +33,7 @@ _TIMESTAMP = "2026-07-08T00:00:00"  # fixed: deterministic, and clearly canned
 class MockSabreClient:
     """Same interface as RealSabreClient; returns documented shapes."""
 
-    def __init__(self, latency_seconds: float = 0.2):
+    def __init__(self, latency_seconds: float = 0):
         self.latency_seconds = latency_seconds
 
     async def _lag(self) -> None:
@@ -143,14 +143,14 @@ class MockSabreClient:
     # genuine two-segment connection through a hub, so layover_airports has
     # mock data to exercise:
     # (depart, arrive, stops, price, cabin, elapsed, carrier).
-    # Phase 41: three distinct carriers so the airline-diversity selection
-    # (select_airline_diverse) fires deterministically in mock mode — the
-    # hermetic suite and zero-quota rehearsals see a multi-airline menu,
-    # reordered cheapest-representative first (UA $155, AA $187.60, DL $242).
+    # Phase 41: distinct carriers so airline-diversity fires in mock mode.
+    # JetBlue early nonstop lands before 9 AM so the recovery demo can
+    # rerank on an arrival window the other three miss.
     _INSTA_VARIANTS = [
         ("08:00:00", "10:05:00", 0, 187.6, "Y", 125, "AA"),
         ("11:30:00", "13:40:00", 0, 242.0, "J", 130, "DL"),
         ("06:15:00", "11:20:00", 1, 155.0, "Y", 305, "UA"),
+        ("05:55:00", "08:50:00", 0, 198.0, "Y", 175, "B6"),
     ]
 
     # The connecting variant's Pacific-fiction leg clocks: origin→hub,
