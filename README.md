@@ -41,8 +41,8 @@ Placeholder values boot the stack. Add keys only for the surfaces you exercise:
 |----------|------------|
 | `OPENAI_API_KEY` | Concierge / agent endpoints, Whisper STT / TTS |
 | `FEATHERLESS_API_KEY` | Spoken-text LLM. Unset → OpenAI `gpt-5.4-mini`. STT/TTS stay on OpenAI. |
-| `VOCAL_BRIDGE_API_KEY`, `VOCAL_BRIDGE_WEB_AGENT_ID` | Voice orb on Cascade / Optimize (`/v1/web_call/token`) |
-| `VOCAL_BRIDGE_CALLER_AGENT_ID`, `VOCAL_BRIDGE_CALLEE_PHONE` | Outbound consent / results callbacks |
+| Voice API key + web agent ID | Voice orb on Cascade / Optimize (`/v1/web_call/token`) |
+| Caller agent ID + callee phone | Outbound consent / results callbacks |
 | `SABRE_*` + `SABRE_MODE` | Flight shopping (`mock` or `real`) |
 | `GOOGLE_MAPS_API_KEY` | Live directions on Optimize My Trip (unset → labeled demo geometry) |
 | `UBER_SERVER_TOKEN` | Live first-stop fares (unset → no live prices) |
@@ -64,7 +64,7 @@ Tests (hermetic — no GCP or LLM keys):
 
 ```bash
 docker compose build backend
-docker run --rm hackathon-vocal-bridge-backend python -m pytest tests/ -v
+docker compose run --rm backend python -m pytest tests/ -v
 ```
 
 ## Repo layout
@@ -173,7 +173,7 @@ On http://localhost:1019/v1/build/:
 
 ## Database
 
-Six tables in BigQuery dataset `vocal_bridge` (`us-west1`). Schema: [`specs/tech-stack.md`](specs/tech-stack.md). Typed repositories in `backend/api/repositories/`.
+Six tables in BigQuery (`us-west1`). Schema: [`specs/tech-stack.md`](specs/tech-stack.md). Typed repositories in `backend/api/repositories/`.
 
 ```mermaid
 erDiagram
@@ -218,7 +218,7 @@ Local mock (`SABRE_MODE=mock`, voice env unset): page still serves; drive the ag
 Access-gated JSON needs `X-Access-Code` (browser `?code=` persists to localStorage).
 
 ```
-https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade/?code=cascade2026
+https://talktomytrip.com/v1/cascade/?code=cascade2026
 ```
 
 1. **New trip** if a trip is already pinned (a pinned session will not book).
@@ -228,7 +228,7 @@ https://vocal-bridge-be-dev-24105435206.us-west1.run.app/v1/cascade/?code=cascad
 5. **Cancel flight → cascade** once. Answer **yes** on Call 1. Cards animate; Call 2 follows (~35 s).
 
 ```bash
-BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
+BASE="https://talktomytrip.com"
 CODE="cascade2026"
 curl -s -H "X-Access-Code: $CODE" "$BASE/v1/itinerary/status/<TRIP_ID>" | python3 -m json.tool
 curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/latest_trip_id"
@@ -240,7 +240,7 @@ curl -s -H "X-Access-Code: $CODE" "$BASE/v1/sabre_tools/search_log"
 InstaFlights is a per-pair cache with a per-pair advance-purchase window. Empty is a documented 404, not a bug. Re-probe within the hour before a demo:
 
 ```bash
-BASE="https://vocal-bridge-be-dev-24105435206.us-west1.run.app"
+BASE="https://talktomytrip.com"
 CODE="cascade2026"
 DEMO_DATE="July 18 2026"
 RUN="$(date +%s)"; i=0
@@ -266,7 +266,7 @@ Use a unique `session_name` per probe or the agent replays prior options.
 
 Cloud Run, `us-west1`:
 
-- Dev: https://vocal-bridge-be-dev-24105435206.us-west1.run.app/
+- Live: https://talktomytrip.com/?code=cascade2026
 - Health: `GET /v1/hello/gcp_check`
 
 CI (Cloud Build): validate config → BigQuery dataset → image → pytest in the image → deploy. See `backend/devops/README.md`.

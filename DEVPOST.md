@@ -28,7 +28,7 @@ Do **not** stretch into Health, Education, or Sustainability.
 
 ## Built with
 
-Python, FastAPI, scikit-learn, pandas, OpenAI Agents SDK, Featherless.ai, Saily, Vocal Bridge, Sabre InstaFlights, Docker, Google Cloud Run
+Python, FastAPI, scikit-learn, pandas, OpenAI Agents SDK, Featherless.ai, Saily, Sabre InstaFlights, Docker, Google Cloud Run
 
 ---
 
@@ -67,7 +67,7 @@ The LLM is the interface. The model is the intelligence.
 
 - **ML:** scikit-learn `LogisticRegression` pipeline (impute, scale, one-hot airline), hold-out ROC-AUC **0.76**, accuracy 0.69, recall 0.69. Training data is a BTS-calibrated On-Time set encoding published delay patterns (evening banks, connections, congested hubs, carrier differences). The trained artifact is loaded at inference time.
 - **Agent:** OpenAI Agents SDK Concierge with tools (`search_flights`, `set_recovery_preferences`, `book_flight`, `esim_plan`, …). Spoken text LLM is **Featherless.ai** (OpenAI-compatible chat) when `FEATHERLESS_API_KEY` is set; Whisper STT and TTS stay on OpenAI.
-- **Voice:** Vocal Bridge WebRTC (mouth/ears only — it does not pick the flight)
+- **Voice:** WebRTC orb (mouth/ears only — it does not pick the flight)
 - **Inventory:** Sabre Flight Search / InstaFlights
 - **eSIM:** Saily country catalog + checkout link on the itinerary (no live quote API)
 - **App:** FastAPI, vanilla HTML dashboard, Docker, Cloud Run
