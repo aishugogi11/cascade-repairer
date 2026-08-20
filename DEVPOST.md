@@ -13,19 +13,6 @@ Deadline: **August 14, 2026, 11:45pm PDT**.
 
 When your flight cancels, a trained delay-risk model — not a chatbot — ranks which alternative is least likely to strand you again.
 
-## Prize categories to enter
-
-Enter all of these (Devpost usually allows multiple):
-
-1. **Best Use of Machine Learning** (primary — this is the fit)
-2. **Conversational** (voice orb + preference rerank)
-3. **Best Web App** (live dashboard)
-4. **Data-Driven Insights** (per-flight risk + why)
-5. **Most Impactful Project** (travelers without a corporate desk)
-6. **Best Overall** (only if the video is tight)
-
-Do **not** stretch into Health, Education, or Sustainability.
-
 ## Built with
 
 Python, FastAPI, scikit-learn, pandas, OpenAI Agents SDK, Featherless.ai, Saily, Sabre InstaFlights, Docker, Google Cloud Run
