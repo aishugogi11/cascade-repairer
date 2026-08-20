@@ -18,8 +18,8 @@ When your flight cancels, a trained delay-risk model — not a chatbot — ranks
 Enter all of these (Devpost usually allows multiple):
 
 1. **Best Use of Machine Learning** (primary — this is the fit)
-2. **Conversational AI** (voice orb + preference rerank)
-3. **Best Web AI App** (live dashboard)
+2. **Conversational** (voice orb + preference rerank)
+3. **Best Web App** (live dashboard)
 4. **Data-Driven Insights** (per-flight risk + why)
 5. **Most Impactful Project** (travelers without a corporate desk)
 6. **Best Overall** (only if the video is tight)
@@ -48,12 +48,12 @@ Large language models can *talk* about flights. They cannot estimate delay risk 
 
 1. The conversational agent extracts destination, date, and constraints.
 2. Sabre InstaFlights retrieves real priced alternatives.
-3. A **trained logistic regression model** (not an LLM) predicts P(arrival delay ≥ 15 minutes) — the Bureau of Transportation Statistics On-Time definition.
+3. A **trained logistic regression model** predicts P(arrival delay ≥ 15 minutes) — the Bureau of Transportation Statistics On-Time definition.
 4. A preference ranker mixes that risk with price, arrival time, stops, and duration.
 5. You see and hear *why*: “24% disruption risk, nonstop, lands at 8:50 AM.”
 6. Say “price matters more” or “I must arrive before 9” — the **same** options rerank. No second hallucination.
 
-The LLM is the interface. The model is the intelligence.
+The concierge is the interface. The model is the intelligence.
 
 ### Key features
 
@@ -66,7 +66,7 @@ The LLM is the interface. The model is the intelligence.
 ### Technologies used
 
 - **ML:** scikit-learn `LogisticRegression` pipeline (impute, scale, one-hot airline), hold-out ROC-AUC **0.76**, accuracy 0.69, recall 0.69. Training data is a BTS-calibrated On-Time set encoding published delay patterns (evening banks, connections, congested hubs, carrier differences). The trained artifact is loaded at inference time.
-- **Agent:** OpenAI Agents SDK Concierge with tools (`search_flights`, `set_recovery_preferences`, `book_flight`, `esim_plan`, …). Spoken text LLM is **Featherless.ai** (OpenAI-compatible chat) when `FEATHERLESS_API_KEY` is set; Whisper STT and TTS stay on OpenAI.
+- **Concierge:** OpenAI Agents SDK with tools (`search_flights`, `set_recovery_preferences`, `book_flight`, `esim_plan`, …). Spoken text is **Featherless** when `FEATHERLESS_API_KEY` is set; Whisper STT and TTS stay on OpenAI.
 - **Voice:** WebRTC orb (mouth/ears only — it does not pick the flight)
 - **Inventory:** Sabre Flight Search / InstaFlights
 - **eSIM:** Saily country catalog + checkout link on the itinerary (no live quote API)
@@ -109,7 +109,7 @@ File names: `01-ml-ranked.png`, `02-price-rerank.png`, `03-arrive-before-9.png`,
 **0:00–0:08 (problem)**  
 “When your flight cancels, Google shows you times and prices. It cannot tell you which replacement will delay again.”
 
-**0:08–0:20 (ML, not LLM)**  
+**0:08–0:20 (the model)**  
 Screen: `backend/ml/train.py` + metrics table.  
 “This is a trained logistic regression on On-Time delay labels. ROC-AUC 0.76. The chatbot does not invent this number.”
 
@@ -119,7 +119,7 @@ You: “My flight was canceled. JFK to LAX tomorrow morning.”
 Show cards. Point at **24% vs 55%**.  
 “The model scored the cheap United connection at 55% delay risk. It recommends the morning nonstop.”
 
-**0:45–1:05 (demo 2 — this wins Conversational AI)**  
+**0:45–1:05 (demo 2 — spoken preference rerank)**  
 You: “Actually, price matters more.”  
 Cards reorder.  
 You: “Never mind — I have to arrive before 9 AM.”  

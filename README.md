@@ -21,7 +21,7 @@ Cascade is a conversational recovery agent on a live itinerary.
 5. You hear and see *why* — “24% disruption risk, nonstop, lands at 8:50 AM.”
 6. “Price matters more” or “arrive before 9” reranks the **same** options. No second search.
 
-The LLM explains. The models decide.
+The concierge explains. The models decide.
 
 ## Build & run locally
 
@@ -40,7 +40,7 @@ Placeholder values boot the stack. Add keys only for the surfaces you exercise:
 | Variable | Needed for |
 |----------|------------|
 | `OPENAI_API_KEY` | Concierge / agent endpoints, Whisper STT / TTS |
-| `FEATHERLESS_API_KEY` | Spoken-text LLM. Unset → OpenAI `gpt-5.4-mini`. STT/TTS stay on OpenAI. |
+| `FEATHERLESS_API_KEY` | Spoken-text model. Unset → OpenAI `gpt-5.4-mini`. Speech stays on OpenAI. |
 | Voice API key + web agent ID | Voice orb on Cascade / Optimize (`/v1/web_call/token`) |
 | Caller agent ID + callee phone | Outbound consent / results callbacks |
 | `SABRE_*` + `SABRE_MODE` | Flight shopping (`mock` or `real`) |
@@ -60,7 +60,7 @@ make up
 
 `make logs`, `make down`, `make clean`, `make backend` — see `make help`.
 
-Tests (hermetic — no GCP or LLM keys):
+Tests (hermetic — no GCP or OpenAI keys):
 
 ```bash
 docker compose build backend
@@ -82,7 +82,7 @@ docker compose run --rm backend python -m pytest tests/ -v
 ## Stack
 
 - **Backend:** Python / FastAPI, Docker Compose + Makefile
-- **Agent:** OpenAI Agents SDK (function tools). Spoken text via Featherless when configured
+- **Concierge:** OpenAI Agents SDK (function tools). Spoken text via Featherless when configured
 - **Voice:** WebRTC orb on the dashboard; every substantive turn POSTs to `/v1/web_call/query` (or `/v1/trip_builder/query` on Optimize). The voice layer does not pick flights
 - **Inventory:** Sabre InstaFlights
 - **ML:** scikit-learn logistic regression (delay risk) + random-forest action policy (hops)
@@ -139,7 +139,7 @@ docker compose exec backend python -m ml.transport.policy_train
 
 **Action model (hold-out):** action accuracy **0.69** vs rules baseline **0.19** and linear **0.59**; R² **0.94**. See `GET /v1/ml/transport/policy` — UI reads the artifact, never hardcodes the numbers.
 
-## AI agent
+## Concierge
 
 The Concierge at `/v1/web_call/query`:
 
